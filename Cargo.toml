@@ -4,3 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+memchr = { version = "2.7.4", default-features = false }
+
+[workspace]
+members = ["debate-demo", "debate-derive"]
