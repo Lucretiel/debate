@@ -1,6 +1,9 @@
 //#![no_std]
 
-use core::fmt::Display;
+use core::{
+    fmt::Display,
+    str::{self, FromStr},
+};
 
 use primitives::{Arg, ArgAccess};
 
@@ -9,7 +12,7 @@ pub mod primitives;
 #[doc(hidden)]
 pub mod util;
 
-pub trait ValueError {
+pub trait ParameterError {
     /// The argument is required, and was absent on the command line
     fn required() -> Self;
 
@@ -27,23 +30,93 @@ pub trait ValueError {
 
     /// The argument was valid UTF-8, but it failed to parse into an instance
     /// of the type
-    fn parse_error(msg: impl Display) -> Self;
+    fn parse_error(arg: &str, msg: impl Display) -> Self;
 
     /// Something else went wrong
     fn custom(msg: impl Display) -> Self;
 }
 
-pub trait Value<'arg>: Sized {
-    fn absent<E: ValueError>() -> Result<Self, E>;
-    fn arg<E: ValueError>(arg: Arg<'arg>) -> Result<Self, E>;
-    fn present<E: ValueError>(arg: impl ArgAccess<'arg>) -> Result<Self, E>;
+pub trait Parameter<'arg>: Sized {
+    fn absent<E: ParameterError>() -> Result<Self, E>;
+    fn arg<E: ParameterError>(arg: Arg<'arg>) -> Result<Self, E>;
+    fn present<E: ParameterError>(arg: impl ArgAccess<'arg>) -> Result<Self, E>;
 
-    fn add_arg<E: ValueError>(self, arg: Arg<'arg>) -> Result<Self, E>;
-    fn add_present<E: ValueError>(self, arg: impl ArgAccess<'arg>) -> Result<Self, E>;
+    fn add_arg<E: ParameterError>(self, arg: Arg<'arg>) -> Result<Self, E>;
+    fn add_present<E: ParameterError>(self, arg: impl ArgAccess<'arg>) -> Result<Self, E>;
+}
+
+pub trait Value<'arg>: Sized {
+    fn from_arg<E: ParameterError>(arg: Arg<'arg>) -> Result<Self, E>;
+}
+
+impl<'arg, T> Parameter<'arg> for T
+where
+    T: Value<'arg>,
+{
+    fn absent<E: ParameterError>() -> Result<Self, E> {
+        Err(E::required())
+    }
+
+    fn arg<E: ParameterError>(arg: Arg<'arg>) -> Result<Self, E> {
+        T::from_arg(arg)
+    }
+
+    fn present<E: ParameterError>(arg: impl ArgAccess<'arg>) -> Result<Self, E> {
+        T::from_arg(arg.take_argument().ok_or_else(|| E::needs_arg())?)
+    }
+
+    fn add_arg<E: ParameterError>(self, _arg: Arg<'arg>) -> Result<Self, E> {
+        Err(E::got_additional_instance())
+    }
+
+    fn add_present<E: ParameterError>(self, _arg: impl ArgAccess<'arg>) -> Result<Self, E> {
+        Err(E::got_additional_instance())
+    }
+}
+
+pub struct Count {
+    count: u16,
+}
+
+impl<'arg> Parameter<'arg> for Count {
+    fn absent<E: ParameterError>() -> Result<Self, E> {
+        Ok(Self { count: 0 })
+    }
+
+    fn arg<E: ParameterError>(arg: Arg<'arg>) -> Result<Self, E> {
+        Err(E::got_arg(arg))
+    }
+
+    fn present<E: ParameterError>(_arg: impl ArgAccess<'arg>) -> Result<Self, E> {
+        Ok(Self { count: 1 })
+    }
+
+    fn add_arg<E: ParameterError>(self, arg: Arg<'arg>) -> Result<Self, E> {
+        Err(E::got_arg(arg))
+    }
+
+    fn add_present<E: ParameterError>(self, _arg: impl ArgAccess<'arg>) -> Result<Self, E> {
+        Ok(Self {
+            count: self.count + 1,
+        })
+    }
+}
+
+pub trait FromStrValue: FromStr {}
+
+impl<'arg, T> Value<'arg> for T
+where
+    T: FromStrValue,
+    T::Err: Display,
+{
+    fn from_arg<E: ParameterError>(arg: Arg<'arg>) -> Result<Self, E> {
+        let arg = str::from_utf8(arg.bytes()).map_err(|_| E::invalid_utf8(arg))?;
+        arg.parse().map_err(|err| E::parse_error(arg, err))
+    }
 }
 
 pub trait FlagError {
-    type ValueError: ValueError;
+    type ValueError: ParameterError;
 
     /// A positional parameter had an error
     fn positional(error: Self::ValueError) -> Self;
@@ -62,31 +135,8 @@ pub trait FlagError {
 
     /// Got a positional argument that we didn't recognize
     fn unrecognized_positional(arg: Arg<'_>) -> Self;
-}
 
-/// Mutating version of the visitor
-pub trait ApplyArg<'arg> {
-    /// A positional parameter.
-    fn positional<E: FlagError>(&mut self, argument: Arg<'arg>) -> Result<(), E>;
-
-    /// A long option that definitely has an argument, because it was given
-    /// as `--option=argument`
-    fn long_option<E: FlagError>(
-        &mut self,
-        option: Arg<'arg>,
-        argument: Arg<'arg>,
-    ) -> Result<(), E>;
-
-    /// A long option or flag, such as `--option`
-    fn visit_long<E: FlagError>(
-        &mut self,
-        option: Arg<'arg>,
-        arg: impl ArgAccess<'arg>,
-    ) -> Result<(), E>;
-
-    /// A long option or flag, such as `-o`
-    fn visit_short<E: FlagError>(&mut self, option: u8, arg: impl ArgAccess<'arg>)
-    -> Result<(), E>;
+    // TODO: rejected forms. Used for composability.
 }
 
 pub trait FromArgs<'arg>: Sized {

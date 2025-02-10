@@ -1,9 +1,25 @@
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
-use syn::{Attribute, DataEnum, DataStruct, DeriveInput, Generics, Ident, spanned::Spanned};
+use syn::{
+    Attribute, DataEnum, DataStruct, DeriveInput, Expr, Field, Generics, Ident, Type,
+    spanned::Spanned,
+};
 
-struct ParsedFieldInfo<'a> {}
+struct ParsedFieldInfo<'a> {
+    name: &'a Ident,
+    ty: &'a Type,
+
+    long: Option<String>,
+    short: Option<String>,
+
+    default: Option<TokenStream2>,
+    docs: String,
+}
+
+impl<'a> ParsedFieldInfo<'a> {
+    pub fn from_field(field: &'a Field) {}
+}
 
 fn derive_args_struct(
     name: &Ident,

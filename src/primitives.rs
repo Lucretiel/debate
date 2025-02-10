@@ -40,7 +40,7 @@ pub trait Visitor<'arg> {
 }
 
 pub trait ArgAccess<'arg>: Sized {
-    fn arg(self) -> Option<Arg<'arg>>;
+    fn take_argument(self) -> Option<Arg<'arg>>;
 }
 
 enum State<'arg> {
@@ -140,7 +140,7 @@ impl<'arg, I> ArgAccess<'arg> for StandardArgAccess<'_, 'arg, I>
 where
     I: Iterator<Item = &'arg [u8]>,
 {
-    fn arg(self) -> Option<Arg<'arg>> {
+    fn take_argument(self) -> Option<Arg<'arg>> {
         match self.parent.args.next()? {
             b"--" => {
                 self.parent.state = State::PositionalOnly;
@@ -157,7 +157,7 @@ struct ShortArgAccess<'a, 'arg> {
 }
 
 impl<'arg> ArgAccess<'arg> for ShortArgAccess<'_, 'arg> {
-    fn arg(self) -> Option<Arg<'arg>> {
+    fn take_argument(self) -> Option<Arg<'arg>> {
         *self.state = State::Ready;
         Some(Arg(self.short))
     }
