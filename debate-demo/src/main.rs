@@ -1,20 +1,20 @@
 use std::path::PathBuf;
 
-use debate_derive::Args;
+use debate_derive::FromArgs;
 
-#[derive(Args)]
-#[args(help, author)]
+#[derive(FromArgs)]
+#[debate(help, author)]
 pub struct Arguments {
-    #[arg(short, long)]
+    #[debate(short, long)]
     path: PathBuf,
 
-    #[arg(short, long)]
+    #[debate(short, long)]
     verbose: bool,
 
-    #[arg(short, long)]
+    #[debate(short, long)]
     second_path: Option<PathBuf>,
 
-    #[arg(long, default)]
+    #[debate(long, default)]
     value: i32,
 
     input: String,
@@ -44,13 +44,13 @@ fn main() {}
 //         struct State {
 //             path: Option<PathBuf>,
 
-//             // long, short
+//             #[debate(short, long)]
 //             verbose: Option<bool>,
 
-//             // long, short
+//            #[debat(short, long)]
 //             second_path: Option<Option<PathBuf>>,
 
-//             // long, short, default
+//             #[arg(short, long, default = Some(12))]
 //             value: Option<i32>,
 
 //             input: Option<String>,
