@@ -435,11 +435,16 @@ fn derive_args_struct(
         });
 
     Ok(quote! {
+        // TODO: instead of polluting the namespace with this pair of types,
+        // consider using a tuple? Need to find a good way to map field
+        // identifiers to it.
         #[derive(::core::default::Default)]
+        #[doc(hidden)]
         struct __FieldState {
             #(#field_state_contents)*
         }
 
+        #[doc(hidden)]
         #[derive(::core::default::Default)]
         struct __State {
             fields: __FieldState,
@@ -470,7 +475,7 @@ fn derive_args_struct(
             {
                 match option.bytes() {
                     #(#visit_long_option_arms)*
-                    unrecognized => ::core::result::Result::Err(
+                    _ => ::core::result::Result::Err(
                         ::debate::from_args::StateError::unrecognized(())
                     ),
                 }
@@ -487,7 +492,7 @@ fn derive_args_struct(
             {
                 match option.bytes() {
                     #(#visit_long_arms)*
-                    unrecognized => ::core::result::Result::Err(
+                    _ => ::core::result::Result::Err(
                         ::debate::from_args::StateError::unrecognized(
                             argument
                         )
@@ -506,7 +511,7 @@ fn derive_args_struct(
             {
                 match option {
                     #(#visit_short_arms)*
-                    unrecognized => ::core::result::Result::Err(
+                    _ => ::core::result::Result::Err(
                         ::debate::from_args::StateError::unrecognized(
                             argument
                         )
