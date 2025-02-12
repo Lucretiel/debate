@@ -248,7 +248,7 @@ fn derive_args_struct(
     let visit_positional_arms = match positionals.as_slice().split_last() {
         None => quote! {
             _ => ::core::result::Result::Err(
-                ::debate::error::FlagError::unrecognized_positional(argument)
+                ::debate::from_args::StateError::unrecognized(argument)
             ),
         },
         Some((last, positionals)) => {
@@ -257,17 +257,14 @@ fn derive_args_struct(
                 // great, but in this case we'd rather not.
                 let idx = Literal::usize_unsuffixed(idx);
                 let field_ident = info.ident;
+                let field_ident_str = field_ident.to_string();
 
                 quote! {
-                    // TODO: there's a theoretical bug here where if we retry
-                    // the same positional, it'll just be overwritten. We need
-                    // to revisit this to allow more flexible variadic positionals
-                    // anyway.
                     #idx => {
-                        self.fields.#field_ident = match ::debate::Parameter::arg(argument) {
+                        self.fields.#field_ident = match ::debate::parameter::Parameter::arg(argument) {
                             ::core::result::Result::Ok(value) => Some(value),
                             ::core::result::Result::Err(err) => return ::core::result::Result::Err(
-                                ::debate::error::FlagError::positional(err)
+                                ::debate::from_args::StateError::parameter(#field_ident_str, err)
                             ),
                         };
                         self.position += 1;
@@ -277,18 +274,19 @@ fn derive_args_struct(
             });
 
             let last_field_ident = last.ident;
+            let last_field_ident_str = last_field_ident.to_string();
 
             quote! {
                 #(#arms)*
                 _ => {
                     self.fields.#last_field_ident = ::core::option::Option::Some(
                         match match self.fields.#last_field_ident.take() {
-                            ::core::option::Option::None => ::debate::Parameter::arg(argument),
-                            ::core::option::Option::Some(old) => ::debate::Parameter::add_arg(old, argument),
+                            ::core::option::Option::None => ::debate::parameter::Parameter::arg(argument),
+                            ::core::option::Option::Some(old) => ::debate::parameter::Parameter::add_arg(old, argument),
                         } {
                             ::core::result::Result::Ok(value) => value,
                             ::core::result::Result::Err(err) => return ::core::result::Result::Err(
-                                ::debate::error::FlagError::positional(err)
+                                ::debate::from_args::StateError::parameter(#last_field_ident_str, err)
                             ),
                         }
                     );
@@ -304,6 +302,7 @@ fn derive_args_struct(
         .map(|(long, info)| {
             let long_bytes = Literal::byte_string(long.as_bytes());
             let field_ident = info.ident;
+            let field_ident_str = field_ident.to_string();
 
             // TODO: We're gonna need to switch away from a match when we do
             // subcommands and flattened args.
@@ -314,12 +313,12 @@ fn derive_args_struct(
                 #long_bytes => {
                     self.fields.#field_ident = ::core::option::Option::Some(
                         match match self.fields.#field_ident.take() {
-                            ::core::option::Option::None => ::debate::Parameter::arg(argument),
-                            ::core::option::Option::Some(old) => ::debate::Parameter::add_arg(old, argument),
+                            ::core::option::Option::None => ::debate::parameter::Parameter::arg(argument),
+                            ::core::option::Option::Some(old) => ::debate::parameter::Parameter::add_arg(old, argument),
                         } {
                             ::core::result::Result::Ok(value) => value,
                             ::core::result::Result::Err(err) => return ::core::result::Result::Err(
-                                ::debate::error::FlagError::long(option, err)
+                                ::debate::from_args::StateError::parameter(#field_ident_str, err)
                             ),
                         }
                     );
@@ -334,17 +333,18 @@ fn derive_args_struct(
             .map(|(long, info)| {
                 let long_bytes = Literal::byte_string(long.as_bytes());
                 let field_ident = info.ident;
+                let field_ident_str = field_ident.to_string();
 
                 quote! {
                     #long_bytes => {
                         self.fields.#field_ident = ::core::option::Option::Some(
                             match match self.fields.#field_ident.take() {
-                                ::core::option::Option::None => ::debate::Parameter::present(argument),
-                                ::core::option::Option::Some(old) => ::debate::Parameter::add_present(old, argument),
+                                ::core::option::Option::None => ::debate::parameter::Parameter::present(argument),
+                                ::core::option::Option::Some(old) => ::debate::parameter::Parameter::add_present(old, argument),
                             } {
                                 ::core::result::Result::Ok(value) => value,
                                 ::core::result::Result::Err(err) => return ::core::result::Result::Err(
-                                    ::debate::error::FlagError::long(option, err)
+                                    ::debate::from_args::StateError::parameter(#field_ident_str, err)
                                 ),
                             }
                         );
@@ -360,6 +360,7 @@ fn derive_args_struct(
             // TODO: move this conversion to elsewhere
             let short_byte = Literal::byte_character(short as u8);
             let field_ident = info.ident;
+            let field_ident_str = field_ident.to_string();
 
             // TODO: We're gonna need to switch away from a match when we do
             // subcommands and flattened args.
@@ -370,12 +371,12 @@ fn derive_args_struct(
                 #short_byte => {
                     self.fields.#field_ident = ::core::option::Option::Some(
                         match match self.fields.#field_ident.take() {
-                            ::core::option::Option::None => ::debate::Parameter::present(argument),
-                            ::core::option::Option::Some(old) => ::debate::Parameter::add_present(old, argument),
+                            ::core::option::Option::None => ::debate::parameter::Parameter::present(argument),
+                            ::core::option::Option::Some(old) => ::debate::parameter::Parameter::add_present(old, argument),
                         } {
                             ::core::result::Result::Ok(value) => value,
                             ::core::result::Result::Err(err) => return ::core::result::Result::Err(
-                                ::debate::error::FlagError::short(option, err)
+                                ::debate::from_args::StateError::parameter(#field_ident_str, err)
                             ),
                         }
                     );
@@ -389,16 +390,39 @@ fn derive_args_struct(
         .map(|(tags, info)| (Some(tags), info))
         .chain(positionals.iter().map(|info| (None, info)))
         .map(|(tags, info)| {
-            let field_ident = &info.ident;
+            let field_ident = info.ident;
+            let field_ident_str = field_ident.to_string();
+
+            let (long, short) = match tags {
+                None => (None, None),
+                Some(tags) => match tags {
+                    OptionTag::Long(long) => (Some(long.as_str()), None),
+                    OptionTag::Short(short) => (None, Some(short)),
+                    OptionTag::LongShort(long, short) => (Some(long.as_str()), Some(short)),
+                },
+            };
+
+            let long = match long {
+                Some(long) => quote! {::core::option::Option::Some(#long)},
+                None => quote! {::core::option::Option::None},
+            };
+
+            let short = match short {
+                Some(short) => quote! {::core::option::Option::Some(#short)},
+                None => quote! {::core::option::Option::None},
+            };
 
             let default = match info.default {
                 Some(Some(ref expr)) => quote! { #expr },
                 Some(None) => quote! { ::core::default::Default::default() },
-                None => quote! { match ::debate::Parameter::absent() {
+                None => quote! { match ::debate::parameter::Parameter::absent() {
                     ::core::result::Result::Ok(value) => value,
-                    ::core::result::Result::Err(err) => return ::core::result::Result::Err(
-                        ::debate::error::FlagError::absent_parameter(err)
-                    ),
+                    ::core::result::Result::Err(::debate::parameter::RequiredError) =>
+                        return ::core::result::Result::Err(
+                            ::debate::from_args::Error::required(
+                                #field_ident_str, #long, #short
+                            )
+                        ),
                 }},
             };
 
@@ -411,103 +435,102 @@ fn derive_args_struct(
         });
 
     Ok(quote! {
-        impl<'arg> ::debate::FromArgs<'arg> for #name {
-            fn from_args<I, E>(mut args: ::debate_parser::ArgumentsParser<'arg, I>) -> Result<Self, E>
+        #[derive(::core::default::Default)]
+        struct __FieldState {
+            #(#field_state_contents)*
+        }
+
+        struct __State {
+            fields: __FieldState,
+            position: u16,
+            help: bool,
+        }
+
+        impl<'arg> ::debate::from_args::State<'arg> for __State {
+            fn start() -> Self {
+                Self {
+                    fields: ::core::default::Default::default(),
+                    position: 0,
+                    help: false,
+                }
+            }
+
+            fn add_positional<E>(
+                &mut self,
+                argument: ::debate_parser::Arg<'arg>
+            ) -> ::core::result::Result<(), E>
             where
-                I: ::core::iter::Iterator<Item=&'arg [u8]>,
-                E: ::debate::error::FlagError,
+                E: ::debate::from_args::StateError<'arg, ::debate_parser::Arg<'arg>>
             {
-                #[derive(::core::default::Default)]
-                struct FieldState<'arg> {
-                    #(#field_state_contents)*
-
-                    // TODO: better name for this field
-                    __phantom: ::core::marker::PhantomData<&'arg ()>,
+                match self.position {
+                    #visit_positional_arms
                 }
+            }
 
-                struct State<'arg, E> {
-                    fields: FieldState<'arg>,
-                    position: u16,
-                    help: bool,
-                    error: ::core::marker::PhantomData<E>,
+            fn add_long_option<E>(
+                &mut self,
+                option: ::debate_parser::Arg<'arg>,
+                argument: ::debate_parser::Arg<'arg>
+            ) -> ::core::result::Result<(), E>
+            where
+                E: ::debate::from_args::StateError<'arg, ::debate_parser::Arg<'arg>>
+            {
+                match option.bytes() {
+                    #(#visit_long_option_arms)*
+                    unrecognized => ::core::result::Result::Err(
+                        ::debate::from_args::StateError::unrecognized(
+                            argument
+                        )
+                    ),
                 }
+            }
 
-                impl<E> State<'_, E> {
-                    fn new() -> Self {
-                        Self {
-                            fields: ::core::default::Default::default(),
-                            position: 0,
-                            help: false,
-                            error: ::core::marker::PhantomData,
-                        }
-                    }
+            fn add_long<A, E>(
+                &mut self,
+                option: ::debate_parser::Arg<'arg>,
+                argument: A
+            ) -> ::core::result::Result<(), E>
+            where
+                A: ::debate_parser::ArgAccess<'arg>,
+                E: ::debate::from_args::StateError<'arg, A>
+            {
+                match option.bytes() {
+                    #(#visit_long_arms)*
+                    unrecognized => ::core::result::Result::Err(
+                        ::debate::from_args::StateError::unrecognized(
+                            argument
+                        )
+                    ),
                 }
+            }
 
-                impl<'arg, E> ::debate_parser::Visitor<'arg> for &mut State<'arg, E>
-                where
-                    E: ::debate::error::FlagError
-                {
-                    type Value = Result<(), E>;
-
-                    fn visit_positional(
-                        self,
-                        argument: ::debate_parser::Arg<'arg>
-                    ) -> Self::Value {
-                        match self.position {
-                            #visit_positional_arms
-                        }
-                    }
-
-                    fn visit_long_option(
-                        self,
-                        option: ::debate_parser::Arg<'arg>,
-                        argument: ::debate_parser::Arg<'arg>
-                    ) -> Self::Value {
-                        match option.bytes() {
-                            #(#visit_long_option_arms)*
-                            unrecognized => ::core::result::Result::Err(
-                                ::debate::error::FlagError::unrecognized_long(
-                                    option,
-                                    ::core::option::Option::Some(argument)
-                                )
-                            ),
-                        }
-                    }
-
-                    fn visit_long(
-                        self,
-                        option: ::debate_parser::Arg<'arg>,
-                        argument: impl ::debate_parser::ArgAccess<'arg>,
-                    ) -> Self::Value{
-                        match option.bytes() {
-                            #(#visit_long_arms)*
-                            unrecognized => ::core::result::Result::Err(
-                                ::debate::error::FlagError::unrecognized_long(
-                                    option,
-                                    ::core::option::Option::None,
-                                )
-                            ),
-                        }
-                    }
-
-                    fn visit_short(
-                        self,
-                        option: u8,
-                        argument: impl ::debate_parser::ArgAccess<'arg>,
-                    ) -> Self::Value {
-                        match option {
-                            #(#visit_short_arms)*
-                            unrecognized => ::core::result::Result::Err(
-                                ::debate::error::FlagError::unrecognized_short(option)
-                            ),
-                        }
-                    }
+            fn add_short<A, E>(
+                &mut self,
+                option: u8,
+                argument: A
+            ) -> ::core::result::Result<(), E>
+            where
+                A: ::debate_parser::ArgAccess<'arg>,
+                E: ::debate::from_args::StateError<'arg, A>
+            {
+                match option {
+                    #(#visit_short_arms)*
+                    unrecognized => ::core::result::Result::Err(
+                        ::debate::from_args::StateError::unrecognized(
+                            argument
+                        )
+                    ),
                 }
+            }
+        }
 
-                let mut state: State<'_, E> = State::new();
+        impl<'arg> ::debate::from_args::BuildFromArgs<'arg> for #name {
+            type State = __State;
 
-                while let ::core::option::Option::Some(()) = args.next_arg(&mut state).transpose()? {}
-
+            fn build<E>(state: Self::State) -> ::core::result::Result<Self, E>
+            where
+                E: ::debate::from_args::Error<'arg>
+            {
                 ::core::result::Result::Ok(Self {
                     #(#final_field_initializers)*
                 })

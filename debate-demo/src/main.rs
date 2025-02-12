@@ -1,16 +1,13 @@
 use std::path::PathBuf;
 use std::str;
 
-use debate::{
-    FromArgs,
-    error::{FlagError, ParameterError},
-};
+use debate::from_args::FromArgs;
 use debate_derive::FromArgs;
 use debate_parser::{Arg, ArgumentsParser};
 
 #[derive(FromArgs, Debug)]
 #[debate(help, author)]
-pub struct Arguments {
+struct Arguments {
     #[debate(short, long)]
     path: PathBuf,
 
@@ -43,84 +40,69 @@ enum FlagChoice {
 #[derive(Debug)]
 struct Error(String);
 
-impl FlagError for Error {
-    type ParameterError = Self;
+impl<'arg> debate::from_args::Error<'arg> for Error {
+    type StateError<A> = Self;
 
-    fn positional(error: Self::ParameterError) -> Self {
-        Self(format!("Positional argument error: {}", error.0))
+    fn from_state_error<A>(
+        error: Self::StateError<A>,
+        kind: debate::from_args::ParameterKind<'arg>,
+        argument: Option<Arg<'arg>>,
+    ) -> Self {
+        Self(format!("{} for {kind:?} ({argument:?})", error.0))
     }
 
-    fn long(option: Arg<'_>, error: Self::ParameterError) -> Self {
-        Self(format!(
-            "Long option error for '--{}': {}",
-            String::from_utf8_lossy(option.bytes()),
-            error.0
-        ))
+    fn required(field: &'static str, long: Option<&'static str>, short: Option<char>) -> Self {
+        Self(format!("required field '{field}' was absent"))
     }
 
-    fn short(option: u8, error: Self::ParameterError) -> Self {
-        Self(format!(
-            "Short option error for '-{}': {}",
-            option as char, error.0
-        ))
-    }
-
-    fn unrecognized_long(option: Arg<'_>, argument: Option<Arg<'_>>) -> Self {
-        let arg_str = argument.map_or("".to_string(), |arg| {
-            format!(
-                " with argument '{}'",
-                String::from_utf8_lossy(option.bytes()),
-            )
-        });
-        Self(format!(
-            "Unrecognized long option '--{}'{arg_str}",
-            String::from_utf8_lossy(option.bytes()),
-        ))
-    }
-
-    fn unrecognized_short(option: u8) -> Self {
-        Self(format!("Unrecognized short option '{}'", option as char))
-    }
-
-    fn unrecognized_positional(arg: Arg<'_>) -> Self {
-        Self(format!(
-            "Unrecognized positional argument '{}'",
-            String::from_utf8_lossy(arg.bytes()),
-        ))
-    }
-
-    fn absent_parameter(error: Self::ParameterError) -> Self {
-        Self(format!("Absent parameter error: {}", error.0))
+    fn custom(msg: impl std::fmt::Display) -> Self {
+        Self(msg.to_string())
     }
 }
 
-impl ParameterError for Error {
-    fn required() -> Self {
-        Self("Required parameter missing".to_string())
+impl<'arg, A> debate::from_args::StateError<'arg, A> for Error {
+    type ParameterError = Self;
+
+    fn parameter(field: &'static str, error: Self::ParameterError) -> Self {
+        Self(format!("field '{field}' {}", error.0))
     }
 
+    fn unrecognized(_: A) -> Self {
+        Self(format!("unrecognized argument"))
+    }
+
+    fn rejected() -> Self {
+        Self(format!("rejected argument"))
+    }
+}
+
+impl<'arg> debate::parameter::Error<'arg> for Error {
     fn needs_arg() -> Self {
-        Self("Parameter needs an argument".to_string())
+        Self(format!("requires an argument"))
     }
 
-    fn got_arg(_arg: Arg<'_>) -> Self {
-        Self("Unexpected argument provided".to_string())
+    fn got_arg(arg: Arg<'arg>) -> Self {
+        Self(format!("got an unexpected argument: {:?}", arg))
     }
 
     fn got_additional_instance() -> Self {
-        Self("Got additional instance of parameter".to_string())
+        Self("appeared more than once on the command line".to_string())
     }
 
-    fn invalid_utf8(_arg: Arg<'_>) -> Self {
-        Self("Invalid UTF-8 sequence".to_string())
+    fn invalid_utf8(arg: Arg<'arg>) -> Self {
+        Self(format!("invalid UTF-8 in argument: {:?}", arg))
     }
 
-    fn parse_error(_arg: &str, _msg: impl std::fmt::Display) -> Self {
-        Self(format!("Parse error: {}", _msg))
+    fn parse_error(arg: &str, msg: impl std::fmt::Display) -> Self {
+        Self(format!("parse error in argument '{}': {}", arg, msg))
     }
 
-    fn custom(_msg: impl std::fmt::Display) -> Self {
-        Self(format!("Custom error: {}", _msg))
+    fn byte_parse_error(arg: Arg<'arg>, msg: impl std::fmt::Display) -> Self {
+        Self(format!("byte parse error in argument '{:?}': {}", arg, msg))
+    }
+
+    fn custom(msg: impl std::fmt::Display) -> Self {
+        Self(msg.to_string())
     }
 }
 
