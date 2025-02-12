@@ -69,6 +69,9 @@ pub trait ParameterError {
     /// of the type
     fn parse_error(arg: &str, msg: impl Display) -> Self;
 
+    /// The argument failed to parse into an instance of the type.
+    fn byte_parse_error(arg: Arg<'_>, msg: impl Display) -> Self;
+
     /// Something else went wrong
     fn custom(msg: impl Display) -> Self;
 }
