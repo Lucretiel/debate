@@ -14,16 +14,14 @@ pub trait FromArgs<'arg>: Sized {
 
 /// The state associated with a [`BuildFromArgs`] type that is in the middle
 /// of being parsed
-pub trait State<'arg>: Sized {
-    fn start() -> Self;
-
+pub trait State<'arg>: Default {
     fn add_positional<E>(&mut self, argument: Arg<'arg>) -> Result<(), E>
     where
-        E: StateError<'arg, Arg<'arg>>;
+        E: StateError<'arg, ()>;
 
     fn add_long_option<E>(&mut self, option: Arg<'arg>, argument: Arg<'arg>) -> Result<(), E>
     where
-        E: StateError<'arg, Arg<'arg>>;
+        E: StateError<'arg, ()>;
 
     fn add_long<A, E>(&mut self, option: Arg<'arg>, argument: A) -> Result<(), E>
     where
@@ -39,11 +37,13 @@ pub trait State<'arg>: Sized {
 /**
 A type that can be parsed from command line arguments by repeatedly feeding
 those argument into a `State`, and then then turning that state into this
-final type.
+final type. Types that implement `BuildFromArgs` automatically implement
+`FromArgs`.
 
-The main advantage of `BuildFromArgs` is that it allows command-line argument
-parsing to compose. The top-level `Args` struct can delegate parts of its
-parsing to a selected subcommand type, for example.
+If you are manually implementing [`FromArgs`], it usually makes sense to
+instead implement [`BuildFromArgs`]. It will take care of the looping logic
+and allow you to focus on individual argument handling, and this will also
+grant compatibility with delegating argument parsing with `#[debate(flatten)]`.
 */
 pub trait BuildFromArgs<'arg>: Sized {
     type State: State<'arg>;
@@ -62,7 +62,7 @@ where
         I: Iterator<Item = &'arg [u8]>,
         E: Error<'arg>,
     {
-        let mut builder = T::State::start();
+        let mut builder = T::State::default();
 
         struct Visitor<B, E> {
             builder: B,
@@ -153,10 +153,10 @@ pub enum ParameterKind<'arg> {
 pub trait Error<'arg> {
     type StateError<A>: StateError<'arg, A>;
 
-    /// There was an error handling one of the command line arguments: it
-    /// wasn't recognized, or there was a parse error, or something like that.
-    /// If there was a known argument (for instance, because of a positional
-    /// parameter or --arg=value), it is provided.
+    /// There was an error handling one of the arguments provided on the
+    /// command line: it wasn't recognized, or there was a parse error, or
+    /// something like that. If there was a known argument value (for instance,
+    /// because of a `--arg=value` or positional `value`), it is included.
     fn argument<A>(
         error: Self::StateError<A>,
         kind: ParameterKind<'arg>,

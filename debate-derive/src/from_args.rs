@@ -440,6 +440,7 @@ fn derive_args_struct(
             #(#field_state_contents)*
         }
 
+        #[derive(::core::default::Default)]
         struct __State {
             fields: __FieldState,
             position: u16,
@@ -447,20 +448,12 @@ fn derive_args_struct(
         }
 
         impl<'arg> ::debate::from_args::State<'arg> for __State {
-            fn start() -> Self {
-                Self {
-                    fields: ::core::default::Default::default(),
-                    position: 0,
-                    help: false,
-                }
-            }
-
             fn add_positional<E>(
                 &mut self,
                 argument: ::debate_parser::Arg<'arg>
             ) -> ::core::result::Result<(), E>
             where
-                E: ::debate::from_args::StateError<'arg, ::debate_parser::Arg<'arg>>
+                E: ::debate::from_args::StateError<'arg, ()>
             {
                 match self.position {
                     #visit_positional_arms
@@ -473,14 +466,12 @@ fn derive_args_struct(
                 argument: ::debate_parser::Arg<'arg>
             ) -> ::core::result::Result<(), E>
             where
-                E: ::debate::from_args::StateError<'arg, ::debate_parser::Arg<'arg>>
+                E: ::debate::from_args::StateError<'arg, ()>
             {
                 match option.bytes() {
                     #(#visit_long_option_arms)*
                     unrecognized => ::core::result::Result::Err(
-                        ::debate::from_args::StateError::unrecognized(
-                            argument
-                        )
+                        ::debate::from_args::StateError::unrecognized(())
                     ),
                 }
             }
