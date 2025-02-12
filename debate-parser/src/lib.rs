@@ -1,26 +1,38 @@
+#![no_std]
+
 /*!
 Low-level implementation of argument handling. Takes care of distinctions
 between flags, options, and positionals, that sort of thing. No type handling
 happens here. Usually this is too low level to use directly.
 */
 
-use core::fmt::Debug;
-use std::fmt::{self, Write};
+use core::fmt::{self, Debug, Write};
 
 /**
-The primitive type of arguments in `debate` is `&[u8]`, since that's what the
-OS provides. Conversion to &str, and from there to parsed types, is handled
-separately.
- */
-#[derive(Clone, Copy)]
-pub struct Arg<'a>(&'a [u8]);
+A single, raw argument passed in from the command line.
 
-impl<'a> Arg<'a> {
-    pub fn bytes(&self) -> &'a [u8] {
+This type is used in two ways: to indicate long command line options, and to
+indicate arguments themselves. For instance, given
+`--target foo --path=bar input.txt`, `target`, `foo`, `path`, `bar`, and
+`input.txt` would all be passed as [`Arg`] values to the relevant functions.
+
+An [`Arg`] internally is just a byte slice, since that's what the OS gives us.
+Callers can manually turn it into a [`str`] with [`from_utf8`][core::str::from_utf8],
+and from there parse it however they need.
+*/
+#[derive(Clone, Copy)]
+pub struct Arg<'arg>(&'arg [u8]);
+
+impl<'arg> Arg<'arg> {
+    pub fn bytes(&self) -> &'arg [u8] {
         self.0
     }
 }
 
+/**
+Debug-print an arg. This implementation does its best to treat the arg as a
+string, but includes non-utf-8 bytes in their hex representation as needed.
+ */
 impl Debug for Arg<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fn write_bytes(f: &mut fmt::Formatter<'_>, bytes: &[u8]) -> fmt::Result {
@@ -56,6 +68,10 @@ impl Debug for Arg<'_> {
     }
 }
 
+/**
+The [`ArgumentsParser`] type operates by passing arguments it finds into a
+[`Visitor`], to be handled.
+ */
 pub trait Visitor<'arg> {
     type Value;
 
@@ -73,7 +89,28 @@ pub trait Visitor<'arg> {
     fn visit_short(self, option: u8, arg: impl ArgAccess<'arg>) -> Self::Value;
 }
 
+/**
+[`ArgAccess`] allows a visitor to decide if a given parameter needs an argument,
+based on the identity of the flag or option.
+
+Consider `--foo bar`. Is this a pair of parameters (the flag `--foo` and the
+positional parameter `bar`) or a single option `--foo bar` that takes an
+argument? Similarly, `-ab foo` could be `-a b`, `foo`; or `-a`, `-b foo`; or
+`-a`, `-b`, `foo`. The [`ArgumentsParser`] can't independently classify a given
+argument, so instead, a visitor can request an argument via this trait only for
+options that need them and the `ArgumentParser` takes care of the parsing logic
+of actually determining where that argument comes from.
+*/
 pub trait ArgAccess<'arg>: Sized {
+    /**
+    Get an argument from the parser. This should only be called by options that
+    need it; flags should simply ignore it, to ensure that the next command
+    line argument can correctly be parsed independently.
+
+    This returns [`None`] if all of the CLI arguments have been exhausted, or
+    if there are known to only be positional parameters remaining (because
+    a raw `--` was parsed at some point).
+    */
     fn take(self) -> Option<Arg<'arg>>;
 }
 
@@ -84,6 +121,17 @@ enum State<'arg> {
     ShortInProgress(&'arg [u8]),
 }
 
+/**
+An `ArgumentsParser` is the main entry point into `debate_parser`. It parses
+arguments in each call to `next_arg`, sending those arguments to the given
+[`Visitor`]. It handles distinguishing flags, options, and positionals; logic
+related to how flags get their argument values, and the `--`
+
+[debate-parser][crate] operates entirely on borrowed data, because we assume
+that command-line arguments can be loaded early on in `main` and then handled
+in a borrowed form for the rest of the program. The ubiquitous  `'arg` lifetime
+refers to this borrowed command line data.
+*/
 #[derive(Debug, Clone)]
 pub struct ArgumentsParser<'arg, I> {
     state: State<'arg>,
@@ -94,9 +142,15 @@ impl<'arg, I> ArgumentsParser<'arg, I>
 where
     I: Iterator<Item = &'arg [u8]>,
 {
+    /**
+    Create a new [`ArgumentsParser`] from an iterator of byte slices, where
+    each byte slice is a single argument received from the command line. This
+    list should *exclude* the name of the program, which is commonly passed as
+    the first argument in the list.
+     */
     #[inline]
     #[must_use]
-    pub fn new(args: I) -> Self {
+    pub fn new(args: impl IntoIterator<IntoIter = I>) -> Self {
         Self {
             state: State::Ready,
             args: args.into_iter(),

@@ -4,6 +4,7 @@ use debate_parser::{Arg, ArgAccess, ArgumentsParser};
 
 use crate::parameter;
 
+/// A type that can be parsed from command line arguments
 pub trait FromArgs<'arg>: Sized {
     fn from_args<I, E>(args: ArgumentsParser<'arg, I>) -> Result<Self, E>
     where
@@ -11,6 +12,8 @@ pub trait FromArgs<'arg>: Sized {
         E: Error<'arg>;
 }
 
+/// The state associated with a [`BuildFromArgs`] type that is in the middle
+/// of being parsed
 pub trait State<'arg>: Sized {
     fn start() -> Self;
 
@@ -33,6 +36,15 @@ pub trait State<'arg>: Sized {
         E: StateError<'arg, A>;
 }
 
+/**
+A type that can be parsed from command line arguments by repeatedly feeding
+those argument into a `State`, and then then turning that state into this
+final type.
+
+The main advantage of `BuildFromArgs` is that it allows command-line argument
+parsing to compose. The top-level `Args` struct can delegate parts of its
+parsing to a selected subcommand type, for example.
+*/
 pub trait BuildFromArgs<'arg>: Sized {
     type State: State<'arg>;
 
@@ -65,29 +77,27 @@ where
             type Value = Result<(), E>;
 
             fn visit_positional(self, argument: Arg<'arg>) -> Self::Value {
-                self.builder.add_positional(argument).map_err(|err| {
-                    E::from_state_error(err, ParameterKind::Positional, Some(argument))
-                })
+                self.builder
+                    .add_positional(argument)
+                    .map_err(|err| E::argument(err, ParameterKind::Positional, Some(argument)))
             }
 
             fn visit_long_option(self, option: Arg<'arg>, argument: Arg<'arg>) -> Self::Value {
                 self.builder
                     .add_long_option(option, argument)
-                    .map_err(|err| {
-                        E::from_state_error(err, ParameterKind::Long(option), Some(argument))
-                    })
+                    .map_err(|err| E::argument(err, ParameterKind::Long(option), Some(argument)))
             }
 
             fn visit_long(self, option: Arg<'arg>, arg: impl ArgAccess<'arg>) -> Self::Value {
                 self.builder
                     .add_long(option, arg)
-                    .map_err(|err| E::from_state_error(err, ParameterKind::Long(option), None))
+                    .map_err(|err| E::argument(err, ParameterKind::Long(option), None))
             }
 
             fn visit_short(self, option: u8, arg: impl ArgAccess<'arg>) -> Self::Value {
                 self.builder
                     .add_short(option, arg)
-                    .map_err(|err| E::from_state_error(err, ParameterKind::Short(option), None))
+                    .map_err(|err| E::argument(err, ParameterKind::Short(option), None))
             }
         }
 
@@ -106,28 +116,37 @@ where
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-pub enum ParameterKind<'arg> {
-    Positional,
-    Long(Arg<'arg>),
-    Short(u8),
-}
-
 /// Errors that can occur when adding an argument to the state during parsing
 pub trait StateError<'arg, Arg> {
     type ParameterError: parameter::Error<'arg>;
 
-    /// A parameter returned an error
+    /// A parameter type returned an error
     fn parameter(field: &'static str, error: Self::ParameterError) -> Self;
 
     /// An argument was unrecognized. In this case, the Argument can be
-    /// returned unused, so that it can be retried if desired
+    /// returned unused inside of `Self`, so that it can be retried by a
+    /// different parser. For instance, a subcommand parser could indicate that
+    /// an argument is unrecognized, and that argument can later be handled as
+    /// a global argument.
     fn unrecognized(argument: Arg) -> Self;
 
     /// An argument was recognized, but rejected (for instance, because of a
     /// mutual exclusion rule). This variant should gain a field for rationale
     /// to be attached.
     fn rejected() -> Self;
+}
+
+/// Simple enum used to indicate what kind of argument encountered an error
+#[derive(Debug, Clone, Copy)]
+pub enum ParameterKind<'arg> {
+    /// A positional parameter
+    Positional,
+
+    /// A `--long` flag or option
+    Long(Arg<'arg>),
+
+    /// A `-s` short flag or option
+    Short(u8),
 }
 
 /// Errors that can occur while parsing arguments into some kind of structure
@@ -138,7 +157,7 @@ pub trait Error<'arg> {
     /// wasn't recognized, or there was a parse error, or something like that.
     /// If there was a known argument (for instance, because of a positional
     /// parameter or --arg=value), it is provided.
-    fn from_state_error<A>(
+    fn argument<A>(
         error: Self::StateError<A>,
         kind: ParameterKind<'arg>,
         argument: Option<Arg<'arg>>,

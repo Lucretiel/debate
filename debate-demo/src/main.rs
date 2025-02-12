@@ -43,7 +43,7 @@ struct Error(String);
 impl<'arg> debate::from_args::Error<'arg> for Error {
     type StateError<A> = Self;
 
-    fn from_state_error<A>(
+    fn argument<A>(
         error: Self::StateError<A>,
         kind: debate::from_args::ParameterKind<'arg>,
         argument: Option<Arg<'arg>>,

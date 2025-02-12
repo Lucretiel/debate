@@ -1,7 +1,7 @@
 use debate_parser::{Arg, ArgAccess};
 
 use crate::parameter::{
-    Error as ParameterError, FromStrValue, Parameter, RequiredError, StrValue, Value,
+    Error as ParameterError, Parameter, ParsedValue, RawValue, RequiredError, Value,
 };
 
 macro_rules! from_str {
@@ -11,7 +11,7 @@ macro_rules! from_str {
     )*) => {
         $(
             $(#[cfg($($cfg)*)])*
-            impl FromStrValue for $type $($(:: $path)*)? {}
+            impl ParsedValue for $type $($(:: $path)*)? {}
         )*
     };
 }
@@ -28,36 +28,43 @@ from_str! {
     std::path::PathBuf,
 }
 
-impl<'arg> StrValue<'arg> for &'arg str {
+impl<'arg> Value<'arg> for &'arg str {
+    #[inline]
     fn from_arg<E: ParameterError<'arg>>(arg: &'arg str) -> Result<Self, E> {
         Ok(arg)
     }
 }
 
 #[cfg(feature = "std")]
-impl<'arg> StrValue<'arg> for &'arg std::path::Path {
+impl<'arg> Value<'arg> for &'arg std::path::Path {
+    #[inline]
     fn from_arg<E: ParameterError<'arg>>(arg: &'arg str) -> Result<Self, E> {
         Ok(std::path::Path::new(arg))
     }
 }
 
 impl<'arg> Parameter<'arg> for bool {
+    #[inline]
     fn absent() -> Result<Self, RequiredError> {
         Ok(false)
     }
 
+    #[inline]
     fn arg<E: ParameterError<'arg>>(arg: Arg<'arg>) -> Result<Self, E> {
         Err(E::got_arg(arg))
     }
 
+    #[inline]
     fn present<E: ParameterError<'arg>>(_arg: impl ArgAccess<'arg>) -> Result<Self, E> {
         Ok(true)
     }
 
+    #[inline]
     fn add_arg<E: ParameterError<'arg>>(self, _arg: Arg<'arg>) -> Result<Self, E> {
         Err(E::got_additional_instance())
     }
 
+    #[inline]
     fn add_present<E: ParameterError<'arg>>(self, _arg: impl ArgAccess<'arg>) -> Result<Self, E> {
         Err(E::got_additional_instance())
     }
@@ -65,46 +72,58 @@ impl<'arg> Parameter<'arg> for bool {
 
 impl<'arg, T> Parameter<'arg> for Option<T>
 where
-    T: Value<'arg>,
+    T: RawValue<'arg>,
 {
+    #[inline]
     fn absent() -> Result<Self, RequiredError> {
         Ok(None)
     }
 
+    #[inline]
     fn arg<E: ParameterError<'arg>>(arg: Arg<'arg>) -> Result<Self, E> {
         T::from_arg(arg).map(Some)
     }
 
+    #[inline]
     fn present<E: ParameterError<'arg>>(arg: impl ArgAccess<'arg>) -> Result<Self, E> {
         Self::arg(arg.take().ok_or_else(|| E::needs_arg())?)
     }
 
+    #[inline]
     fn add_arg<E: ParameterError<'arg>>(self, _arg: Arg<'arg>) -> Result<Self, E> {
         Err(E::got_additional_instance())
     }
 
+    #[inline]
     fn add_present<E: ParameterError<'arg>>(self, _arg: impl ArgAccess<'arg>) -> Result<Self, E> {
         Err(E::got_additional_instance())
     }
 }
 
+// We assume that collections all need the std feature. We can always relax
+// this requirement later.
+
 #[cfg(feature = "std")]
 impl<'arg, T> Parameter<'arg> for std::vec::Vec<T>
 where
-    T: Value<'arg>,
+    T: RawValue<'arg>,
 {
+    #[inline]
     fn absent() -> Result<Self, RequiredError> {
         Ok(std::vec::Vec::new())
     }
 
+    #[inline]
     fn arg<E: ParameterError<'arg>>(arg: Arg<'arg>) -> Result<Self, E> {
         T::from_arg(arg).map(|value| std::vec::Vec::from([value]))
     }
 
+    #[inline]
     fn present<E: ParameterError<'arg>>(arg: impl ArgAccess<'arg>) -> Result<Self, E> {
         Self::arg(arg.take().ok_or_else(|| E::needs_arg())?)
     }
 
+    #[inline]
     fn add_arg<E: ParameterError<'arg>>(mut self, arg: Arg<'arg>) -> Result<Self, E> {
         T::from_arg(arg).map(|value| {
             self.push(value);
@@ -112,6 +131,7 @@ where
         })
     }
 
+    #[inline]
     fn add_present<E: ParameterError<'arg>>(self, arg: impl ArgAccess<'arg>) -> Result<Self, E> {
         Self::add_arg(self, arg.take().ok_or_else(|| E::needs_arg())?)
     }
