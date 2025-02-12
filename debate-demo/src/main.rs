@@ -1,8 +1,14 @@
 use std::path::PathBuf;
+use std::str;
 
+use debate::{
+    FromArgs,
+    error::{FlagError, ParameterError},
+};
 use debate_derive::FromArgs;
+use debate_parser::{Arg, ArgumentsParser};
 
-#[derive(FromArgs)]
+#[derive(FromArgs, Debug)]
 #[debate(help, author)]
 pub struct Arguments {
     #[debate(short, long)]
@@ -34,94 +40,100 @@ enum FlagChoice {
     OutFile(PathBuf),
 }
 
-fn main() {}
+#[derive(Debug)]
+struct Error(String);
 
-// impl Arguments {
-//     pub fn from_args<E: ValueError>(args: &[&[u8]]) -> Result<Self, E> {
-//         let mut args = primitives::Arguments::new(args.iter().copied());
+impl FlagError for Error {
+    type ParameterError = Self;
 
-//         #[derive(Default)]
-//         struct State {
-//             path: Option<PathBuf>,
+    fn positional(error: Self::ParameterError) -> Self {
+        Self(format!("Positional argument error: {}", error.0))
+    }
 
-//             #[debate(short, long)]
-//             verbose: Option<bool>,
+    fn long(option: Arg<'_>, error: Self::ParameterError) -> Self {
+        Self(format!(
+            "Long option error for '--{}': {}",
+            String::from_utf8_lossy(option.bytes()),
+            error.0
+        ))
+    }
 
-//            #[debat(short, long)]
-//             second_path: Option<Option<PathBuf>>,
+    fn short(option: u8, error: Self::ParameterError) -> Self {
+        Self(format!(
+            "Short option error for '-{}': {}",
+            option as char, error.0
+        ))
+    }
 
-//             #[arg(short, long, default = Some(12))]
-//             value: Option<i32>,
+    fn unrecognized_long(option: Arg<'_>, argument: Option<Arg<'_>>) -> Self {
+        let arg_str = argument.map_or("".to_string(), |arg| {
+            format!(
+                " with argument '{}'",
+                String::from_utf8_lossy(option.bytes()),
+            )
+        });
+        Self(format!(
+            "Unrecognized long option '--{}'{arg_str}",
+            String::from_utf8_lossy(option.bytes()),
+        ))
+    }
 
-//             input: Option<String>,
-//             other_inputs: Option<Vec<String>>,
+    fn unrecognized_short(option: u8) -> Self {
+        Self(format!("Unrecognized short option '{}'", option as char))
+    }
 
-//             // Tracking for positional arguments
-//             position: u32,
-//         }
+    fn unrecognized_positional(arg: Arg<'_>) -> Self {
+        Self(format!(
+            "Unrecognized positional argument '{}'",
+            String::from_utf8_lossy(arg.bytes()),
+        ))
+    }
 
-//         impl<'arg> primitives::Visitor<'arg> for &mut State {
-//             // This should be a result
-//             type Value = Result<(), E>;
+    fn absent_parameter(error: Self::ParameterError) -> Self {
+        Self(format!("Absent parameter error: {}", error.0))
+    }
+}
 
-//             fn visit_positional(self, argument: Arg<'arg>) -> Self::Value {
-//                 todo!()
-//             }
+impl ParameterError for Error {
+    fn required() -> Self {
+        Self("Required parameter missing".to_string())
+    }
 
-//             fn visit_long_option(self, option: Arg<'arg>, argument: Arg<'arg>) -> Self::Value {
-//                 todo!()
-//             }
+    fn needs_arg() -> Self {
+        Self("Parameter needs an argument".to_string())
+    }
 
-//             fn visit_long(
-//                 self,
-//                 option: Arg<'arg>,
-//                 arg: impl primitives::ArgAccess<'arg>,
-//             ) -> Self::Value {
-//                 todo!()
-//             }
+    fn got_arg(_arg: Arg<'_>) -> Self {
+        Self("Unexpected argument provided".to_string())
+    }
 
-//             fn visit_short(self, option: u8, arg: impl primitives::ArgAccess<'arg>) -> Self::Value {
-//                 match option {
-//                     b'p' => {
-//                         self.path = Some(match self.path.take() {
-//                             None => Value::present(arg)?,
-//                             Some(old) => Value::add_present(old, arg)?,
-//                         });
-//                         Ok(())
-//                     }
-//                 }
-//             }
-//         }
+    fn got_additional_instance() -> Self {
+        Self("Got additional instance of parameter".to_string())
+    }
 
-//         let mut state = State::default();
+    fn invalid_utf8(_arg: Arg<'_>) -> Self {
+        Self("Invalid UTF-8 sequence".to_string())
+    }
 
-//         while let () = args.next_arg(&mut state)? {}
+    fn parse_error(_arg: &str, _msg: impl std::fmt::Display) -> Self {
+        Self(format!("Parse error: {}", _msg))
+    }
 
-//         Ok(Self {
-//             path: match state.path.take() {
-//                 Some(value) => value,
-//                 None => Value::absent()?,
-//             },
-//             verbose: match state.verbose.take() {
-//                 Some(value) => value,
-//                 None => Value::absent()?,
-//             },
-//             second_path: match state.second_path.take() {
-//                 Some(value) => value,
-//                 None => Value::absent()?,
-//             },
-//             value: match state.value.take() {
-//                 Some(value) => value,
-//                 None => Value::absent()?,
-//             },
-//             input: match state.input.take() {
-//                 Some(value) => value,
-//                 None => Value::absent()?,
-//             },
-//             other_inputs: match state.other_inputs.take() {
-//                 Some(value) => value,
-//                 None => Value::absent()?,
-//             },
-//         })
-//     }
-// }
+    fn custom(_msg: impl std::fmt::Display) -> Self {
+        Self(format!("Custom error: {}", _msg))
+    }
+}
+
+fn main() {
+    let args: Vec<Vec<u8>> = std::env::args_os()
+        .map(|arg| arg.into_encoded_bytes())
+        .collect();
+
+    let args: Result<Arguments, Error> = Arguments::from_args(ArgumentsParser::new(
+        args.iter().skip(1).map(|arg| arg.as_slice()),
+    ));
+
+    let args = args.unwrap();
+
+    println!("{args:#?}")
+}

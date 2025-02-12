@@ -1,0 +1,13 @@
+[package]
+name = "debate-parser"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+memchr = { version = "2.7.4", default-features = false }
+
+[features]
+std = ["memchr/std"]
+
+[dev-dependencies]
+lazy_format = "2.0.3"

@@ -1,0 +1,11 @@
+[package]
+name = "debate"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+debate-parser = { path = "../debate-parser", version = "0.1.0" }
+
+[features]
+default = ["std"]
+std = ["debate-parser/std"]

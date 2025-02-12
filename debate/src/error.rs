@@ -1,8 +1,28 @@
 use core::fmt::Display;
 
-use crate::primitives::Arg;
+use debate_parser::Arg;
 
-/// An error occurred while parsing a specific flag.
+/*
+Note to my Future self: you're generally pretty happy with `ParameterError`,
+as the error type for the `Parameter` trait, but `FlagError` is way more up
+in the air.
+
+In general, you need to worry about these things for the error system you're
+trying to design
+
+Errors involving parameters, which might be absent, have invalid states. These
+always involve a specific field and parameter type, and sometimes involve
+a flag on the command line (notably, they DON'T when the error is absence)
+
+Errors involving flags, which might be parameter errors, or might be
+unrecognized flag errors. We're targeting composability, which
+
+The main problem with the FlagError trait is that it's trying to do everything
+and it shouldn't; in particular it's taking care of implementation details
+related to how context is accumulated in an error that it shouldn't be.
+*/
+
+/// An error occurred while parsing a specific flag. This error will likel
 pub trait FlagError {
     type ParameterError: ParameterError;
 
@@ -24,7 +44,9 @@ pub trait FlagError {
     /// Got a positional argument that we didn't recognize
     fn unrecognized_positional(arg: Arg<'_>) -> Self;
 
-    // TODO: rejected forms. Used for composability.
+    /// A parameter wasn't present. This method is the goofiness that makes
+    /// the whole `FlagError` trait sort of senseless.
+    fn absent_parameter(error: Self::ParameterError) -> Self;
 }
 
 pub trait ParameterError {

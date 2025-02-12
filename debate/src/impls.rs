@@ -1,15 +1,15 @@
-use std::path::{Path, PathBuf};
+use debate_parser::{Arg, ArgAccess};
 
-use crate::{
-    FromStrValue, Parameter, StrValue, Value,
-    error::ParameterError,
-    primitives::{Arg, ArgAccess},
-};
+use crate::{FromStrValue, Parameter, StrValue, Value, error::ParameterError};
 
 macro_rules! from_str {
-    ($($type:ident)*) => {
+    ($(
+        $(#[cfg($($cfg:tt)*)])*
+        $type:ident $($(::$path:ident)*,)?
+    )*) => {
         $(
-            impl FromStrValue for $type {}
+            $(#[cfg($($cfg)*)])*
+            impl FromStrValue for $type $($(:: $path)*)? {}
         )*
     };
 }
@@ -19,8 +19,11 @@ from_str! {
     i8 i16 i32 i64 i128
     f32 f64
 
-    String
-    PathBuf
+    #[cfg(feature="std")]
+    std::string::String,
+
+    #[cfg(feature="std")]
+    std::path::PathBuf,
 }
 
 impl<'arg> StrValue<'arg> for &'arg str {
@@ -29,9 +32,10 @@ impl<'arg> StrValue<'arg> for &'arg str {
     }
 }
 
-impl<'arg> StrValue<'arg> for &'arg Path {
+#[cfg(feature = "std")]
+impl<'arg> StrValue<'arg> for &'arg std::path::Path {
     fn from_arg<E: ParameterError>(arg: &'arg str) -> Result<Self, E> {
-        Ok(Path::new(arg))
+        Ok(std::path::Path::new(arg))
     }
 }
 
@@ -70,7 +74,7 @@ where
     }
 
     fn present<E: ParameterError>(arg: impl ArgAccess<'arg>) -> Result<Self, E> {
-        Self::arg(arg.take_argument().ok_or_else(|| E::needs_arg())?)
+        Self::arg(arg.take().ok_or_else(|| E::needs_arg())?)
     }
 
     fn add_arg<E: ParameterError>(self, _arg: Arg<'arg>) -> Result<Self, E> {
@@ -82,20 +86,21 @@ where
     }
 }
 
-impl<'arg, T> Parameter<'arg> for Vec<T>
+#[cfg(feature = "std")]
+impl<'arg, T> Parameter<'arg> for std::vec::Vec<T>
 where
     T: Value<'arg>,
 {
     fn absent<E: ParameterError>() -> Result<Self, E> {
-        Ok(Vec::new())
+        Ok(std::vec::Vec::new())
     }
 
     fn arg<E: ParameterError>(arg: Arg<'arg>) -> Result<Self, E> {
-        T::from_arg(arg).map(|value| Vec::from([value]))
+        T::from_arg(arg).map(|value| std::vec::Vec::from([value]))
     }
 
     fn present<E: ParameterError>(arg: impl ArgAccess<'arg>) -> Result<Self, E> {
-        Self::arg(arg.take_argument().ok_or_else(|| E::needs_arg())?)
+        Self::arg(arg.take().ok_or_else(|| E::needs_arg())?)
     }
 
     fn add_arg<E: ParameterError>(mut self, arg: Arg<'arg>) -> Result<Self, E> {
@@ -106,6 +111,6 @@ where
     }
 
     fn add_present<E: ParameterError>(self, arg: impl ArgAccess<'arg>) -> Result<Self, E> {
-        Self::add_arg(self, arg.take_argument().ok_or_else(|| E::needs_arg())?)
+        Self::add_arg(self, arg.take().ok_or_else(|| E::needs_arg())?)
     }
 }

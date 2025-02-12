@@ -4,5 +4,6 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-debate = { version = "0.1.0", path = ".." }
+debate = { version = "0.1.0", path = "../debate" }
 debate-derive = { version = "0.1.0", path = "../debate-derive" }
+debate-parser = { version = "0.1.0", path = "../debate-parser" }
