@@ -1,6 +1,9 @@
 use std::default;
 
-use darling::{FromMeta, util::Override};
+use darling::{
+    FromMeta,
+    util::{Override, SpannedValue},
+};
 use heck::ToKebabCase;
 use itertools::Itertools as _;
 use proc_macro::TokenStream;
@@ -28,68 +31,17 @@ impl<T: Parse> Parse for MaybeValue<T> {
 }
 
 #[derive(darling::FromMeta)]
-struct ParsedAttr {
+struct RawParsedAttr {
     long: Option<Override<String>>,
     short: Option<Override<char>>,
     default: Option<Override<Expr>>,
     // clear = "no-verbose"
     // placeholder = "VALUE"
+    // TODO: add a parse step where `flatten` must not coexist with the other
+    // variants. Consider switching from `darling` to `deluxe`, which apparently
+    // handles this.
+    flatten: Option<()>,
 }
-
-// impl Parse for ParsedAttr {
-//     fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
-//         let mut long = None;
-//         let mut short = None;
-//         let mut default = None;
-
-//         loop {
-//             let ident: Ident = input.parse()?;
-
-//             // TODO: for the love of god find a way to deduplicate this.
-//             // It seems like maybe `darling` is good for generating code like
-//             // this? Probably we should just write a macro.
-//             if ident == "long" {
-//                 if long.is_some() {
-//                     return Err(syn::Error::new(ident.span(), "duplicate field 'long'"));
-//                 }
-//                 let MaybeValue { value }: MaybeValue<LitStr> = input.parse()?;
-//                 long = Some(value.map(|lit| lit.value()))
-//             } else if ident == "short" {
-//                 if short.is_some() {
-//                     return Err(syn::Error::new(ident.span(), "duplicate field 'short'"));
-//                 }
-//                 let MaybeValue { value }: MaybeValue<LitChar> = input.parse()?;
-//                 short = Some(value.map(|lit| lit.value()))
-//             } else if ident == "default" {
-//                 if default.is_some() {
-//                     return Err(syn::Error::new(ident.span(), "duplicate field 'default'"));
-//                 }
-//                 let MaybeValue { value } = input.parse()?;
-//                 default = Some(value);
-//             } else {
-//                 return Err(syn::Error::new(ident.span(), "unrecognized attribute"));
-//             }
-
-//             if input.is_empty() {
-//                 return Ok(Self::Arg {
-//                     long,
-//                     short,
-//                     default,
-//                 });
-//             }
-
-//             let _comma: Token![,] = input.parse()?;
-
-//             if input.is_empty() {
-//                 return Ok(Self::Arg {
-//                     long,
-//                     short,
-//                     default,
-//                 });
-//             }
-//         }
-//     }
-// }
 
 struct ParsedFieldInfo<'a> {
     ident: &'a Ident,
@@ -98,6 +50,45 @@ struct ParsedFieldInfo<'a> {
 
     default: Option<Option<Expr>>,
     docs: String,
+}
+
+enum FieldDefault {
+    None,
+    Trait,
+    Expr(Expr),
+}
+
+struct PositionalFieldInfo<'a> {
+    ident: &'a Ident,
+    ty: &'a Type,
+    default: FieldDefault,
+    docs: String,
+}
+
+struct OptionFieldInfo<'a>
+
+enum FieldInfoVariants<'a> {
+    Positional {
+        ident: &'a Ident,
+        ty: &'a Type,
+        default: FieldDefault,
+        docs: String,
+    },
+    Option {
+        ident: &'a Ident,
+        ty: &'a Type,
+        default: FieldDefault,
+        docs: String,
+        tags: OptionTag,
+    },
+    Flatten {
+        ident: &'a Ident,
+        ty: &'a Type,
+    },
+}
+
+impl<'a> FieldInfoVariants<'a> {
+
 }
 
 fn compute_long(user_long: Option<String>, field_name: &Ident, _span: Span) -> syn::Result<String> {
@@ -184,7 +175,7 @@ impl<'a> ParsedFieldInfo<'a> {
 
         let (long, short, default) = match debate_attr {
             Some(debate_attr) => {
-                let parsed = ParsedAttr::from_meta(&debate_attr.meta)?;
+                let parsed = RawParsedAttr::from_meta(&debate_attr.meta)?;
                 let long = parsed
                     .long
                     .map(|long| compute_long(long.explicit(), ident, field.span()))
@@ -434,25 +425,28 @@ fn derive_args_struct(
             }
         });
 
+    let state_ident = format_ident!("__{name}State");
+    let field_state_ident = format_ident!("__{name}FieldState");
+
     Ok(quote! {
         // TODO: instead of polluting the namespace with this pair of types,
         // consider using a tuple? Need to find a good way to map field
         // identifiers to it.
         #[derive(::core::default::Default)]
         #[doc(hidden)]
-        struct __FieldState {
+        struct #field_state_ident {
             #(#field_state_contents)*
         }
 
         #[doc(hidden)]
         #[derive(::core::default::Default)]
-        struct __State {
-            fields: __FieldState,
+        struct #state_ident {
+            fields: #field_state_ident,
             position: u16,
             help: bool,
         }
 
-        impl<'arg> ::debate::from_args::State<'arg> for __State {
+        impl<'arg> ::debate::from_args::State<'arg> for #state_ident {
             fn add_positional<E>(
                 &mut self,
                 argument: ::debate_parser::Arg<'arg>
@@ -521,7 +515,7 @@ fn derive_args_struct(
         }
 
         impl<'arg> ::debate::from_args::BuildFromArgs<'arg> for #name {
-            type State = __State;
+            type State = #state_ident;
 
             fn build<E>(state: Self::State) -> ::core::result::Result<Self, E>
             where
