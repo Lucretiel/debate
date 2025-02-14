@@ -43,52 +43,48 @@ struct RawParsedAttr {
     flatten: Option<()>,
 }
 
-struct ParsedFieldInfo<'a> {
-    ident: &'a Ident,
-    ty: &'a Type,
-    span: Span,
-
-    default: Option<Option<Expr>>,
-    docs: String,
-}
-
 enum FieldDefault {
     None,
     Trait,
     Expr(Expr),
 }
 
-struct PositionalFieldInfo<'a> {
+impl FieldDefault {
+    pub fn new(default: Option<Override<Expr>>) -> Self {
+        match default {
+            Some(Override::Explicit(default)) => Self::Expr(default),
+            Some(Override::Inherit) => Self::Trait,
+            None => Self::None,
+        }
+    }
+}
+
+struct BasicFieldInfo<'a> {
     ident: &'a Ident,
     ty: &'a Type,
+}
+
+struct PositionalFieldInfo<'a> {
+    basics: BasicFieldInfo<'a>,
     default: FieldDefault,
     docs: String,
 }
 
-struct OptionFieldInfo<'a>
-
-enum FieldInfoVariants<'a> {
-    Positional {
-        ident: &'a Ident,
-        ty: &'a Type,
-        default: FieldDefault,
-        docs: String,
-    },
-    Option {
-        ident: &'a Ident,
-        ty: &'a Type,
-        default: FieldDefault,
-        docs: String,
-        tags: OptionTag,
-    },
-    Flatten {
-        ident: &'a Ident,
-        ty: &'a Type,
-    },
+struct OptionFieldInfo<'a> {
+    basics: BasicFieldInfo<'a>,
+    default: FieldDefault,
+    docs: String,
+    tags: OptionTag,
 }
 
-impl<'a> FieldInfoVariants<'a> {
+struct FlattenFieldInfo<'a> {
+    basics: BasicFieldInfo<'a>,
+}
 
+enum ParsedFieldInfo<'a> {
+    Positional(PositionalFieldInfo<'a>),
+    Option(OptionFieldInfo<'a>),
+    Flatten(FlattenFieldInfo<'a>),
 }
 
 fn compute_long(user_long: Option<String>, field_name: &Ident, _span: Span) -> syn::Result<String> {
@@ -138,26 +134,16 @@ impl OptionTag {
     }
 }
 
-enum ParamClassification {
-    Positional,
-    Option(OptionTag),
-}
-
-impl ParamClassification {
-    pub fn new(long: Option<String>, short: Option<char>) -> Self {
-        match (long, short) {
-            (Some(long), Some(short)) => {
-                ParamClassification::Option(OptionTag::LongShort(long, short))
-            }
-            (Some(long), None) => ParamClassification::Option(OptionTag::Long(long)),
-            (None, Some(short)) => ParamClassification::Option(OptionTag::Short(short)),
-            (None, None) => ParamClassification::Positional,
+impl<'a> ParsedFieldInfo<'a> {
+    pub fn basics(&self) -> &BasicFieldInfo<'a> {
+        match *self {
+            Self::Positional(ref info) => &info.basics,
+            Self::Option(ref info) => &info.basics,
+            Self::Flatten(ref info) => &info.basics,
         }
     }
-}
 
-impl<'a> ParsedFieldInfo<'a> {
-    pub fn from_field(field: &'a Field) -> syn::Result<(Self, ParamClassification)> {
+    pub fn from_field(field: &'a Field) -> syn::Result<Self> {
         let debate_attr = field
             .attrs
             .iter()
@@ -173,37 +159,56 @@ impl<'a> ParsedFieldInfo<'a> {
             .as_ref()
             .expect("already checked that this isn't a tuple struct");
 
-        let (long, short, default) = match debate_attr {
-            Some(debate_attr) => {
-                let parsed = RawParsedAttr::from_meta(&debate_attr.meta)?;
-                let long = parsed
-                    .long
-                    .map(|long| compute_long(long.explicit(), ident, field.span()))
-                    .transpose()?;
-                let short = parsed
-                    .short
-                    .map(|short| compute_short(short.explicit(), ident, field.span()))
-                    .transpose()?;
-
-                (
-                    long,
-                    short,
-                    parsed.default.map(|default| default.explicit()),
-                )
-            }
-            None => (None, None, None),
+        let basics = BasicFieldInfo {
+            ident,
+            ty: &field.ty,
         };
 
-        ::core::result::Result::Ok((
-            Self {
-                ident,
-                ty: &field.ty,
-                span: field.span(),
-                default,
+        Ok(if let Some(debate_attr) = debate_attr {
+            let parsed = RawParsedAttr::from_meta(&debate_attr.meta)?;
+
+            // TODO: enforce that flatten doesn't coexist with other variants.
+            if let Some(()) = parsed.flatten {
+                return Ok(Self::Flatten(FlattenFieldInfo { basics }));
+            }
+
+            let long = parsed
+                .long
+                .map(|long| compute_long(long.explicit(), ident, field.span()))
+                .transpose()?;
+
+            let short = parsed
+                .short
+                .map(|short| compute_short(short.explicit(), ident, field.span()))
+                .transpose()?;
+
+            let default = FieldDefault::new(parsed.default);
+
+            match match (long, short) {
+                (None, None) => None,
+                (Some(long), None) => Some(OptionTag::Long(long)),
+                (None, Some(short)) => Some(OptionTag::Short(short)),
+                (Some(long), Some(short)) => Some(OptionTag::LongShort(long, short)),
+            } {
+                None => Self::Positional(PositionalFieldInfo {
+                    basics,
+                    default,
+                    docs: String::new(),
+                }),
+                Some(tags) => Self::Option(OptionFieldInfo {
+                    basics,
+                    default,
+                    docs: String::new(),
+                    tags,
+                }),
+            }
+        } else {
+            Self::Positional(PositionalFieldInfo {
+                basics,
+                default: FieldDefault::None,
                 docs: String::new(),
-            },
-            ParamClassification::new(long, short),
-        ))
+            })
+        })
     }
 }
 
@@ -213,28 +218,18 @@ fn derive_args_struct(
     generics: &Generics,
     attrs: &[Attribute],
 ) -> syn::Result<TokenStream2> {
-    let mut options = Vec::new();
-    let mut positionals = Vec::new();
-
-    for field in fields.iter() {
-        let (parsed, classification) = ParsedFieldInfo::from_field(field)?;
-
-        match classification {
-            ParamClassification::Positional => positionals.push(parsed),
-            ParamClassification::Option(option_tag) => options.push((option_tag, parsed)),
-        }
-    }
-
-    let field_state_contents = options
+    let fields: Vec<ParsedFieldInfo> = fields
         .iter()
-        .map(|(_, info)| info)
-        .chain(&positionals)
-        .map(|info| {
-            let ident = info.ident;
-            let ty = info.ty;
+        .map(|field| ParsedFieldInfo::from_field(field))
+        .try_collect()?;
 
-            quote! { #ident : ::core::option::Option<#ty>, }
-        });
+    let field_state_contents =
+        fields
+            .iter()
+            .map(|info| info.basics())
+            .map(|&BasicFieldInfo { ident, ty }| {
+                quote! { #ident : ::core::option::Option<#ty>, }
+            });
 
     let visit_positional_arms = match positionals.as_slice().split_last() {
         None => quote! {
