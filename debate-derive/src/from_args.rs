@@ -212,6 +212,31 @@ impl<'a> ParsedFieldInfo<'a> {
     }
 }
 
+fn activate_parameter_field(
+    field: &Ident,
+    initial_method: impl ToTokens,
+    follow_up_method: impl ToTokens,
+) -> impl ToTokens {
+    quote! {
+        match self.fields.#field_ident.take() {
+            ::core::option::Option::None => ::debate::parameter::Parameter::#initial_method(argument),
+            ::core::option::Option::Some(old) => ::debate::parameter::Parameter::#follow_up_method(old, argument),
+        }
+    }
+}
+
+/// Equivelent to a try expression:
+fn try_parameter(expr: impl ToTokens, field_ident: &str) -> impl ToTokens {
+    quote! {
+        match #expr {
+            ::core::result::Result::Ok(value) => value,
+            ::core::result::Result::Err(err) => return ::core::result::Result::Err(
+                ::debate::from_args::StateError::parameter(#field_ident, err)
+            )
+        }
+    }
+}
+
 fn derive_args_struct(
     name: &Ident,
     fields: &Punctuated<Field, Token![,]>,
@@ -228,8 +253,38 @@ fn derive_args_struct(
             .iter()
             .map(|info| info.basics())
             .map(|&BasicFieldInfo { ident, ty }| {
+                // TODO: for flattened fields, this needs to be the state.
                 quote! { #ident : ::core::option::Option<#ty>, }
             });
+
+    let visit_positional_arms = fields
+        .iter()
+        .filter_map(|info| match info {
+            ParsedFieldInfo::Positional(info) => Some((&info.basics, Some(&info.default))),
+            ParsedFieldInfo::Option(info) => None,
+            ParsedFieldInfo::Flatten(info) => Some((&info.basics, None)),
+        })
+        .enumerate()
+        .map(|(idx, field)| (Literal::usize_unsuffixed(idx), field))
+        .map(|(idx, (info, default))| match default {
+            // This is a regular positional field
+            Some(default) => {
+                let field_ident = info.ident;
+                let field_ident_str = field_ident.to_string();
+
+                let apply_argument =
+                    activate_parameter_field(field_ident, quote! {arg}, quote! {add_arg});
+                quote! {
+                    if self.position == #idx {
+                        match match self.fields.#field_ident.take() {
+                            ::
+                        }
+                    }
+                }
+            }
+            // This is a flattened field
+            None => {}
+        });
 
     let visit_positional_arms = match positionals.as_slice().split_last() {
         None => quote! {
@@ -290,6 +345,11 @@ fn derive_args_struct(
             let field_ident = info.ident;
             let field_ident_str = field_ident.to_string();
 
+            let apply_argument =
+                activate_parameter_field(field_ident, quote! {arg}, quote! {add_arg});
+
+            let handle_argument = try_parameter(apply_argument, field_ident_str);
+
             // TODO: We're gonna need to switch away from a match when we do
             // subcommands and flattened args.
             // TODO: in a REALLY ideal world, we continue to use a match if
@@ -298,15 +358,7 @@ fn derive_args_struct(
             quote! {
                 #long_bytes => {
                     self.fields.#field_ident = ::core::option::Option::Some(
-                        match match self.fields.#field_ident.take() {
-                            ::core::option::Option::None => ::debate::parameter::Parameter::arg(argument),
-                            ::core::option::Option::Some(old) => ::debate::parameter::Parameter::add_arg(old, argument),
-                        } {
-                            ::core::result::Result::Ok(value) => value,
-                            ::core::result::Result::Err(err) => return ::core::result::Result::Err(
-                                ::debate::from_args::StateError::parameter(#field_ident_str, err)
-                            ),
-                        }
+                        #handle_argument
                     );
                     ::core::result::Result::Ok(())
                 }
@@ -314,30 +366,26 @@ fn derive_args_struct(
         });
 
     let visit_long_arms = options
-            .iter()
-            .filter_map(|(tag, info)| tag.long().map(|long| (long, info)))
-            .map(|(long, info)| {
-                let long_bytes = Literal::byte_string(long.as_bytes());
-                let field_ident = info.ident;
-                let field_ident_str = field_ident.to_string();
+        .iter()
+        .filter_map(|(tag, info)| tag.long().map(|long| (long, info)))
+        .map(|(long, info)| {
+            let long_bytes = Literal::byte_string(long.as_bytes());
+            let field_ident = info.ident;
+            let field_ident_str = field_ident.to_string();
 
-                quote! {
-                    #long_bytes => {
-                        self.fields.#field_ident = ::core::option::Option::Some(
-                            match match self.fields.#field_ident.take() {
-                                ::core::option::Option::None => ::debate::parameter::Parameter::present(argument),
-                                ::core::option::Option::Some(old) => ::debate::parameter::Parameter::add_present(old, argument),
-                            } {
-                                ::core::result::Result::Ok(value) => value,
-                                ::core::result::Result::Err(err) => return ::core::result::Result::Err(
-                                    ::debate::from_args::StateError::parameter(#field_ident_str, err)
-                                ),
-                            }
-                        );
-                        ::core::result::Result::Ok(())
-                    }
+            let apply_argument =
+                activate_parameter_field(field_ident, quote! {present}, quote! {add_present});
+            let handle_argument = try_parameter(apply_argument, field_ident_str);
+
+            quote! {
+                #long_bytes => {
+                    self.fields.#field_ident = ::core::option::Option::Some(
+                        #handle_argument
+                    );
+                    ::core::result::Result::Ok(())
                 }
-            });
+            }
+        });
 
     let visit_short_arms = options
         .iter()
