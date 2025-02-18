@@ -1,41 +1,25 @@
-use crate::parameter;
+use crate::from_args;
 
 pub enum DetectUnrecognized<A, E> {
     Unrecognized(A),
     Error(E),
 }
 
-/// When used as a parameter error, we treat `got_additional_instance`
-/// as an unrecognized parameter
-impl<'arg, E> parameter::Error<'arg> for DetectUnrecognized<(), E>
+impl<'arg, A, E> from_args::StateError<'arg, A> for DetectUnrecognized<A, E>
 where
-    E: parameter::Error<'arg>,
+    E: from_args::StateError<'arg, A>,
 {
-    fn needs_arg() -> Self {
-        Self::Error(E::needs_arg())
+    type ParameterError = E::ParameterError;
+
+    fn parameter(field: &'static str, error: Self::ParameterError) -> Self {
+        Self::Error(E::parameter(field, error))
     }
 
-    fn got_arg(arg: debate_parser::Arg<'arg>) -> Self {
-        Self::Error(E::got_arg(arg))
+    fn unrecognized(argument: A) -> Self {
+        Self::Unrecognized(argument)
     }
 
-    fn got_additional_instance() -> Self {
-        Self::Unrecognized(())
-    }
-
-    fn invalid_utf8(arg: debate_parser::Arg<'arg>) -> Self {
-        Self::Error(E::invalid_utf8(arg))
-    }
-
-    fn parse_error(arg: &str, msg: impl core::fmt::Display) -> Self {
-        Self::Error(E::parse_error(arg, msg))
-    }
-
-    fn byte_parse_error(arg: debate_parser::Arg<'arg>, msg: impl core::fmt::Display) -> Self {
-        Self::Error(E::byte_parse_error(arg, msg))
-    }
-
-    fn custom(msg: impl core::fmt::Display) -> Self {
-        Self::Error(E::custom(msg))
+    fn rejected() -> Self {
+        Self::Error(E::rejected())
     }
 }

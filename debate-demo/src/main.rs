@@ -20,8 +20,25 @@ struct Arguments {
     #[debate(long, default)]
     value: i32,
 
+    #[debate(flatten)]
+    inner: Alphabet,
+
     input: String,
     other_inputs: Vec<String>,
+}
+
+#[derive(FromArgs, Debug)]
+struct Alphabet {
+    #[debate(long, short, default)]
+    alpha: u32,
+
+    #[debate(long, short, default)]
+    beta: u32,
+
+    #[debate(long, short, default)]
+    gamma: u32,
+
+    foo: String,
 }
 
 enum Direction {
@@ -48,7 +65,7 @@ impl<'arg> debate::from_args::Error<'arg> for Error {
         kind: debate::from_args::ParameterKind<'arg>,
         argument: Option<Arg<'arg>>,
     ) -> Self {
-        Self(format!("{} for {kind:?} ({argument:?})", error.0))
+        Self(format!("{} for {kind:x?} ({argument:?})", error.0))
     }
 
     fn required(field: &'static str, long: Option<&'static str>, short: Option<char>) -> Self {
