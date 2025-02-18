@@ -60,12 +60,15 @@ impl<'arg> Parameter<'arg> for bool {
     }
 
     #[inline]
-    fn add_arg<E: ParameterError<'arg>>(self, _arg: Arg<'arg>) -> Result<Self, E> {
+    fn add_arg<E: ParameterError<'arg>>(&mut self, _arg: Arg<'arg>) -> Result<(), E> {
         Err(E::got_additional_instance())
     }
 
     #[inline]
-    fn add_present<E: ParameterError<'arg>>(self, _arg: impl ArgAccess<'arg>) -> Result<Self, E> {
+    fn add_present<E: ParameterError<'arg>>(
+        &mut self,
+        _arg: impl ArgAccess<'arg>,
+    ) -> Result<(), E> {
         Err(E::got_additional_instance())
     }
 }
@@ -90,12 +93,15 @@ where
     }
 
     #[inline]
-    fn add_arg<E: ParameterError<'arg>>(self, _arg: Arg<'arg>) -> Result<Self, E> {
+    fn add_arg<E: ParameterError<'arg>>(&mut self, _arg: Arg<'arg>) -> Result<(), E> {
         Err(E::got_additional_instance())
     }
 
     #[inline]
-    fn add_present<E: ParameterError<'arg>>(self, _arg: impl ArgAccess<'arg>) -> Result<Self, E> {
+    fn add_present<E: ParameterError<'arg>>(
+        &mut self,
+        _arg: impl ArgAccess<'arg>,
+    ) -> Result<(), E> {
         Err(E::got_additional_instance())
     }
 }
@@ -124,15 +130,14 @@ where
     }
 
     #[inline]
-    fn add_arg<E: ParameterError<'arg>>(mut self, arg: Arg<'arg>) -> Result<Self, E> {
+    fn add_arg<E: ParameterError<'arg>>(&mut self, arg: Arg<'arg>) -> Result<(), E> {
         T::from_arg(arg).map(|value| {
             self.push(value);
-            self
         })
     }
 
     #[inline]
-    fn add_present<E: ParameterError<'arg>>(self, arg: impl ArgAccess<'arg>) -> Result<Self, E> {
+    fn add_present<E: ParameterError<'arg>>(&mut self, arg: impl ArgAccess<'arg>) -> Result<(), E> {
         Self::add_arg(self, arg.take().ok_or_else(|| E::needs_arg())?)
     }
 }

@@ -204,20 +204,18 @@ fn apply_arg_to_field(
     follow_up_method: &Ident,
 ) -> impl ToTokens {
     quote! {
-        match self.fields.#field_ident.take() {
-            ::core::option::Option::None => ::debate::parameter::Parameter::#initial_method(argument),
-            ::core::option::Option::Some(old) => ::debate::parameter::Parameter::#follow_up_method(old, argument),
-        }
-    }
-}
-
-fn try_parameter(expr: impl ToTokens, field_name: &str) -> impl ToTokens {
-    quote! {
-        match (#expr) {
-            ::core::result::Result::Ok(value) => value,
-            ::core::result::Result::Err(err) => return ::core::result::Result::Err(
-                ::debate::from_args::StateError::parameter(#field_name, err)
-            )
+        match self.fields.#field_ident {
+            ::core::option::Option::None => match ::debate::parameter::Parameter::#initial_method(argument) {
+                ::core::result::Result::Err(err) => ::core::result::Result::Err(err),
+                ::core::result::Result::Ok(value) => {
+                    self.fields.#field_ident = ::core::option::Option::Some(value);
+                    ::core::result::Result::Ok(())
+                }
+            }
+            ::core::option::Option::Some(ref mut old) => ::debate::parameter::Parameter::#follow_up_method(
+                old,
+                argument
+            ),
         }
     }
 }
@@ -234,18 +232,17 @@ fn create_local_option_arms<'a>(
         .filter_map(move |field| make_scrutinee(field).map(|scrutinee| (field, scrutinee)))
         .map(move |(info, scrutinee)| {
             let field_ident = info.basics.ident;
-            let handle_argument = try_parameter(
-                apply_arg_to_field(field_ident, initial_method, follow_up_method),
-                &info.basics.ident_str,
-            );
+            let field_name: &str = &info.basics.ident_str;
+
+            let expr = apply_arg_to_field(field_ident, initial_method, follow_up_method);
 
             quote! {
-                #scrutinee => {
-                    self.fields.#field_ident = ::core::option::Option::Some(
-                        #handle_argument
-                    );
-                    ::core::result::Result::Ok(())
-                }
+                #scrutinee => match (#expr) {
+                    ::core::result::Result::Ok(()) => ::core::result::Result::Ok(()),
+                    ::core::result::Result::Err(err) => ::core::result::Result::Err(
+                        ::debate::from_args::StateError::parameter(#field_name, err)
+                    ),
+                },
             }
         })
 }
@@ -344,16 +341,35 @@ fn derive_args_struct(
             // This is a regular positional field
             FlattenOr::Normal(info) => {
                 let field_ident = info.basics.ident;
-                let handle_argument = try_parameter(
-                    quote! { ::debate::parameter::Parameter::arg(argument) },
-                    info.basics.ident_str.as_str(),
-                );
+                let field_str = info.basics.ident_str.as_str();
+                let apply_argument = apply_arg_to_field(&field_ident, &arg_ident, &add_arg_ident);
 
+                // TODO: adapt handle_flatten so that it can be used here
+                // NOTE: in principle we don't need a position, we could just
+                // repeatedly apply each positional arg to each positional
+                // field in a waterfall. We're making a gesticulation towards
+                // subquadratic performance, though, espeically if the compiler
+                // can figure out how to make this into a jump table.
+                // TODO: consider `loop { match { } }` instead of a waterfall
+                // of `if`
                 quote! {
                     if self.position == #idx {
-                        self.fields.#field_ident = ::core::option::Option::Some(#handle_argument);
-                        self.position = #idx + 1;
-                        return ::core::result::Result::Ok(());
+                        self.position = match (#apply_argument) {
+                            ::core::result::Result::Ok(()) => return ::core::result::Result::Ok(()),
+                            ::core::result::Result::Err(err) => match err {
+                                ::debate::util::DetectUnrecognized::Unrecognized(()) => {
+                                    #idx + 1
+                                },
+                                ::debate::util::DetectUnrecognized::Error(err) => return (
+                                    ::core::result::Result::Err(
+                                        ::debate::from_args::StateError::parameter(
+                                            #field_str,
+                                            err
+                                        )
+                                    )
+                                ),
+                            }
+                        }
                     }
                 }
             }
@@ -374,48 +390,6 @@ fn derive_args_struct(
                 }
             }
         });
-
-    let terminal_positional_arm = match fields
-        .iter()
-        .filter_map(|info| info.get_positional())
-        .next_back()
-    {
-        // There are no positional parameters at all, so this is an
-        // unconditional error
-        None => quote! {
-            ::core::result::Result::Err(
-                ::debate::from_args::StateError::unrecognized(())
-            )
-        },
-        // This is a positional parameter
-        Some(FlattenOr::Normal(info)) => {
-            let field_ident = info.basics.ident;
-            let handle_argument = try_parameter(
-                apply_arg_to_field(field_ident, &arg_ident, &add_arg_ident),
-                &info.basics.ident_str,
-            );
-
-            // TODO: currently, it's not possible for this to return the
-            // unrecognized error that we want if the terminal positional
-            // rejects this additional argument. Need to find a way to allow
-            // for this, so that #[flatten] can work.
-            quote! {
-                self.fields.#field_ident = ::core::option::Option::Some(#handle_argument);
-                ::core::result::Result::Ok(())
-            }
-        }
-        // This is a flattened field
-        Some(FlattenOr::Flatten(info)) => {
-            let field_ident = info.basics.ident;
-
-            quote! {
-                ::debate::from_args::State::add_positional(
-                    &mut self.fields.#field_ident,
-                    argument
-                )
-            }
-        }
-    };
 
     let option_fields = fields.iter().filter_map(|info| match info {
         ParsedFieldInfo::Option(info) => Some(info),
@@ -595,7 +569,10 @@ fn derive_args_struct(
                 E: ::debate::from_args::StateError<'arg, ()>
             {
                 #(#visit_positional_arms)*
-                #terminal_positional_arm
+
+                ::core::result::Result::Err(
+                    ::debate::from_args::StateError::unrecognized(())
+                )
             }
 
             fn add_long_option<E>(

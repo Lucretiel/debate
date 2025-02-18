@@ -70,7 +70,7 @@ pub trait Parameter<'arg>: Sized {
     Most parameters should return an error here. However, some types (like
     counters and [`Vec`]) can collect more than one instance together.
     */
-    fn add_arg<E: Error<'arg>>(self, argument: Arg<'arg>) -> Result<Self, E>;
+    fn add_arg<E: Error<'arg>>(&mut self, argument: Arg<'arg>) -> Result<(), E>;
 
     /**
     This parameter appeared more than once on the command line.
@@ -78,7 +78,7 @@ pub trait Parameter<'arg>: Sized {
     Most parameters should return an error here. However, some types (like
     counters and [`Vec`]) can collect more than one instance together.
     */
-    fn add_present<E: Error<'arg>>(self, argument: impl ArgAccess<'arg>) -> Result<Self, E>;
+    fn add_present<E: Error<'arg>>(&mut self, argument: impl ArgAccess<'arg>) -> Result<(), E>;
 }
 
 /// Error for things that can go wrong in a `Parameter` implementation
@@ -142,12 +142,12 @@ where
     }
 
     #[inline]
-    fn add_arg<E: Error<'arg>>(self, _arg: Arg<'arg>) -> Result<Self, E> {
+    fn add_arg<E: Error<'arg>>(&mut self, _arg: Arg<'arg>) -> Result<(), E> {
         Err(E::got_additional_instance())
     }
 
     #[inline]
-    fn add_present<E: Error<'arg>>(self, _arg: impl ArgAccess<'arg>) -> Result<Self, E> {
+    fn add_present<E: Error<'arg>>(&mut self, _arg: impl ArgAccess<'arg>) -> Result<(), E> {
         Err(E::got_additional_instance())
     }
 }

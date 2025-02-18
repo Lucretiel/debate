@@ -38,6 +38,8 @@ struct Alphabet {
 
     #[debate(long, short, default)]
     gamma: u32,
+
+    arg: String,
 }
 
 enum Direction {
@@ -108,7 +110,7 @@ impl<'arg> debate::from_args::Error<'arg> for BuildError {
 
 #[derive(Debug, thiserror::Error)]
 enum StateError {
-    #[error("error for field {0}: 1")]
+    #[error("error for field {0}: {1}")]
     Parameter(&'static str, ParameterError),
 
     #[error("unrecognized argument")]
