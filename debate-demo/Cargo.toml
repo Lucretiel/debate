@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+anyhow = "1.0.95"
 debate = { version = "0.1.0", path = "../debate" }
 debate-derive = { version = "0.1.0", path = "../debate-derive" }
 debate-parser = { version = "0.1.0", path = "../debate-parser" }
+thiserror = "2.0.11"

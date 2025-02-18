@@ -79,25 +79,25 @@ where
             fn visit_positional(self, argument: Arg<'arg>) -> Self::Value {
                 self.builder
                     .add_positional(argument)
-                    .map_err(|err| E::argument(err, ParameterKind::Positional, Some(argument)))
+                    .map_err(|error| E::positional(argument, error))
             }
 
             fn visit_long_option(self, option: Arg<'arg>, argument: Arg<'arg>) -> Self::Value {
                 self.builder
                     .add_long_option(option, argument)
-                    .map_err(|err| E::argument(err, ParameterKind::Long(option), Some(argument)))
+                    .map_err(|error| E::long_with_argument(option, argument, error))
             }
 
             fn visit_long(self, option: Arg<'arg>, arg: impl ArgAccess<'arg>) -> Self::Value {
                 self.builder
                     .add_long(option, arg)
-                    .map_err(|err| E::argument(err, ParameterKind::Long(option), None))
+                    .map_err(|error| E::long(option, error))
             }
 
             fn visit_short(self, option: u8, arg: impl ArgAccess<'arg>) -> Self::Value {
                 self.builder
                     .add_short(option, arg)
-                    .map_err(|err| E::argument(err, ParameterKind::Short(option), None))
+                    .map_err(|error| E::short(option, error))
             }
         }
 
@@ -136,32 +136,25 @@ pub trait StateError<'arg, Arg> {
     fn rejected() -> Self;
 }
 
-/// Simple enum used to indicate what kind of argument encountered an error
-#[derive(Debug, Clone, Copy)]
-pub enum ParameterKind<'arg> {
-    /// A positional parameter
-    Positional,
-
-    /// A `--long` flag or option
-    Long(Arg<'arg>),
-
-    /// A `-s` short flag or option
-    Short(u8),
-}
-
 /// Errors that can occur while parsing arguments into some kind of structure
 pub trait Error<'arg> {
     type StateError<A>: StateError<'arg, A>;
 
-    /// There was an error handling one of the arguments provided on the
-    /// command line: it wasn't recognized, or there was a parse error, or
-    /// something like that. If there was a known argument value (for instance,
-    /// because of a `--arg=value` or positional `value`), it is included.
-    fn argument<A>(
-        error: Self::StateError<A>,
-        kind: ParameterKind<'arg>,
-        argument: Option<Arg<'arg>>,
+    /// There was an error handling a positional argument
+    fn positional(argument: Arg<'arg>, error: Self::StateError<()>) -> Self;
+
+    /// There was an error handling a `--long=argument` argument
+    fn long_with_argument(
+        option: Arg<'arg>,
+        argument: Arg<'arg>,
+        error: Self::StateError<()>,
     ) -> Self;
+
+    /// There was an error handling a `--long` long argument
+    fn long<A>(option: Arg<'arg>, error: Self::StateError<A>) -> Self;
+
+    /// There was an error handling a `-s` short argument
+    fn short<A>(option: u8, error: Self::StateError<A>) -> Self;
 
     /// A required field wasn't present among the command line arguments. If
     /// the field is a flag or an option, its long and short CLI names are also
