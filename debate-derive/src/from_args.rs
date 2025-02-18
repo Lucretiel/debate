@@ -400,7 +400,7 @@ fn derive_args_struct(
             // rejects this additional argument. Need to find a way to allow
             // for this, so that #[flatten] can work.
             quote! {
-                self.fields.#field_ident = Some(#handle_argument);
+                self.fields.#field_ident = ::core::option::Option::Some(#handle_argument);
                 ::core::result::Result::Ok(())
             }
         }
