@@ -89,7 +89,7 @@ pub trait Error<'arg> {
     /// The argument must NOT have a value, and got one
     fn got_arg(arg: Arg<'arg>) -> Self;
 
-    /// The argument appeared more than once on the command line, and shouldn't have
+    /// The argument appeared more times than expected on the command line
     fn got_additional_instance() -> Self;
 
     /// The argument wasn't valid UTF-8 and should be

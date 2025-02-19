@@ -1,18 +1,23 @@
-use darling::{FromMeta, util::Override};
+use darling::{
+    FromAttributes,
+    util::{Override, SpannedValue},
+};
+
 use heck::ToKebabCase;
 use itertools::Itertools as _;
 
-use proc_macro2::{Literal, Span, TokenStream as TokenStream2};
+use proc_macro2::{Literal, TokenStream as TokenStream2};
 use quote::{ToTokens, format_ident, quote};
 use syn::{
     Attribute, DataEnum, DeriveInput, Expr, Field, Fields, Generics, Ident, Token, Type,
     punctuated::Punctuated, spanned::Spanned,
 };
 
-#[derive(darling::FromMeta)]
+#[derive(darling::FromAttributes, Debug)]
+#[darling(attributes(debate))]
 struct RawParsedAttr {
-    long: Option<Override<String>>,
-    short: Option<Override<char>>,
+    long: Option<Override<SpannedValue<String>>>,
+    short: Option<Override<SpannedValue<char>>>,
     default: Option<Override<Expr>>,
     // clear = "no-verbose"
     // placeholder = "VALUE"
@@ -69,16 +74,6 @@ enum ParsedFieldInfo<'a> {
 
 impl<'a> ParsedFieldInfo<'a> {
     pub fn from_field(field: &'a Field) -> syn::Result<Self> {
-        let debate_attr = field
-            .attrs
-            .iter()
-            .filter(|attr| attr.path().is_ident("debate"))
-            .at_most_one()
-            .map_err(|mut err| {
-                let extra = err.nth(1).unwrap();
-                syn::Error::new(extra.span(), "extra `debate` attribute")
-            })?;
-
         let ident = field
             .ident
             .as_ref()
@@ -90,26 +85,26 @@ impl<'a> ParsedFieldInfo<'a> {
             ty: &field.ty,
         };
 
-        Ok(if let Some(debate_attr) = debate_attr {
-            let parsed = RawParsedAttr::from_meta(&debate_attr.meta)?;
+        let parsed = RawParsedAttr::from_attributes(&field.attrs)?;
 
-            // TODO: enforce that flatten doesn't coexist with other variants.
-            if let Some(()) = parsed.flatten {
-                return Ok(Self::Flatten(FlattenFieldInfo { basics }));
-            }
+        // TODO: enforce that flatten doesn't coexist with other variants.
+        if let Some(()) = parsed.flatten {
+            return Ok(Self::Flatten(FlattenFieldInfo { basics }));
+        }
 
-            let long = parsed
-                .long
-                .map(|long| compute_long(long.explicit(), ident, field.span()))
-                .transpose()?;
+        let long = parsed
+            .long
+            .map(|long| compute_long(long.explicit(), ident))
+            .transpose()?;
 
-            let short = parsed
-                .short
-                .map(|short| compute_short(short.explicit(), ident, field.span()))
-                .transpose()?;
+        let short = parsed
+            .short
+            .map(|short| compute_short(short.explicit(), ident))
+            .transpose()?;
 
-            let default = FieldDefault::new(parsed.default);
+        let default = FieldDefault::new(parsed.default);
 
+        Ok(
             match match (long, short) {
                 (None, None) => None,
                 (Some(long), None) => Some(OptionTag::Long(long)),
@@ -127,14 +122,8 @@ impl<'a> ParsedFieldInfo<'a> {
                     docs: String::new(),
                     tags,
                 }),
-            }
-        } else {
-            Self::Positional(PositionalFieldInfo {
-                basics,
-                default: FieldDefault::None,
-                docs: String::new(),
-            })
-        })
+            },
+        )
     }
 
     pub fn get_positional(&self) -> Option<FlattenOr<&FlattenFieldInfo, &PositionalFieldInfo>> {
@@ -151,48 +140,81 @@ enum FlattenOr<F, T> {
     Normal(T),
 }
 
-fn compute_long(user_long: Option<String>, field_name: &Ident, _span: Span) -> syn::Result<String> {
+fn compute_long(
+    long: Option<SpannedValue<String>>,
+    field_name: &Ident,
+) -> syn::Result<SpannedValue<String>> {
     // Currently this can never fail, but we want to leave open the possibility
-    Ok(user_long.unwrap_or_else(|| field_name.to_string().to_kebab_case()))
-}
-
-fn compute_short(user_short: Option<char>, field_name: &Ident, span: Span) -> syn::Result<char> {
-    let c = user_short.unwrap_or_else(|| {
-        field_name
-            .to_string()
-            .chars()
-            .next()
-            .expect("Identifiers can't be empty")
+    let long = long.unwrap_or_else(|| {
+        SpannedValue::new(field_name.to_string().to_kebab_case(), field_name.span())
     });
 
-    match c.is_ascii_graphic() {
-        true => Ok(c),
-        false => Err(syn::Error::new(
-            span,
-            "short flags must be ascii printables",
-        )),
+    if long.starts_with("--") {
+        Err(syn::Error::new(
+            long.span(),
+            "long parameters don't need to start with --; this is handled automatically",
+        ))
+    } else if !long.starts_with(|c: char| c.is_alphabetic()) {
+        Err(syn::Error::new(
+            long.span(),
+            "long parameters should start with something alphabetic. This might be relaxed later.",
+        ))
+    } else if long.contains('=') {
+        Err(syn::Error::new(
+            long.span(),
+            "long parameters must not include an '=', as it is the argument separator",
+        ))
+    } else {
+        Ok(long)
+    }
+}
+
+fn compute_short(
+    short: Option<SpannedValue<char>>,
+    field_name: &Ident,
+) -> syn::Result<SpannedValue<char>> {
+    let c = short.unwrap_or_else(|| {
+        SpannedValue::new(
+            field_name
+                .to_string()
+                .chars()
+                .next()
+                .expect("Identifiers can't be empty"),
+            field_name.span(),
+        )
+    });
+
+    if *c == '-' {
+        Err(syn::Error::new(c.span(), "short parameter must not be '-'"))
+    } else if !c.is_ascii_graphic() {
+        Err(syn::Error::new(
+            c.span(),
+            "short parameter should be an ascii printable",
+        ))
+    } else {
+        Ok(c)
     }
 }
 
 enum OptionTag {
-    Long(String),
-    Short(char),
-    LongShort(String, char),
+    Long(SpannedValue<String>),
+    Short(SpannedValue<char>),
+    LongShort(SpannedValue<String>, SpannedValue<char>),
 }
 
 impl OptionTag {
-    pub fn long(&self) -> Option<&str> {
+    pub fn long(&self) -> Option<SpannedValue<&str>> {
         match *self {
-            OptionTag::Long(ref long) => Some(long),
-            OptionTag::LongShort(ref long, _) => Some(long),
+            OptionTag::Long(ref long) | OptionTag::LongShort(ref long, _) => {
+                Some(SpannedValue::new(long.as_str(), long.span()))
+            }
             OptionTag::Short(_) => None,
         }
     }
 
-    pub fn short(&self) -> Option<char> {
+    pub fn short(&self) -> Option<SpannedValue<char>> {
         match *self {
-            OptionTag::Short(short) => Some(short),
-            OptionTag::LongShort(_, short) => Some(short),
+            OptionTag::Short(short) | OptionTag::LongShort(_, short) => Some(short),
             OptionTag::Long(_) => None,
         }
     }
@@ -240,7 +262,7 @@ fn create_local_option_arms<'a>(
                 #scrutinee => match (#expr) {
                     ::core::result::Result::Ok(()) => ::core::result::Result::Ok(()),
                     ::core::result::Result::Err(err) => ::core::result::Result::Err(
-                        ::debate::from_args::StateError::parameter(#field_name, err)
+                        ::debate::state::Error::parameter(#field_name, err)
                     ),
                 },
             }
@@ -261,13 +283,13 @@ fn handle_flatten(
 ) -> impl ToTokens {
     let expr = match mode {
         FlattenMode::Positional => quote! {
-            ::debate::from_args::State::#method(
+            ::debate::state::State::#method(
                 &mut self.fields.#field_ident,
                 argument,
             )
         },
         FlattenMode::Option => quote! {
-            ::debate::from_args::State::#method(
+            ::debate::state::State::#method(
                 &mut self.fields.#field_ident,
                 option,
                 argument,
@@ -362,7 +384,7 @@ fn derive_args_struct(
                                 },
                                 ::debate::util::DetectUnrecognized::Error(err) => return (
                                     ::core::result::Result::Err(
-                                        ::debate::from_args::StateError::parameter(
+                                        ::debate::state::Error::parameter(
                                             #field_str,
                                             err
                                         )
@@ -452,7 +474,7 @@ fn derive_args_struct(
         |info| {
             info.tags
                 .short()
-                .map(|short| Literal::byte_character(short as u8))
+                .map(|short| Literal::byte_character(*short as u8))
         },
         &present_ident,
         &add_present_ident,
@@ -491,13 +513,13 @@ fn derive_args_struct(
                 let field_ident = info.ident;
                 let field_ident_str = field_ident.to_string();
 
-                let long = match long {
-                    Some(long) => quote! {::core::option::Option::Some(#long)},
+                let long = match long.as_deref() {
+                    Some(&long) => quote! {::core::option::Option::Some(#long)},
                     None => quote! {::core::option::Option::None},
                 };
 
-                let short = match short {
-                    Some(short) => quote! {::core::option::Option::Some(#short)},
+                let short = match short.as_deref() {
+                    Some(&short) => quote! {::core::option::Option::Some(#short)},
                     None => quote! {::core::option::Option::None},
                 };
 
@@ -560,18 +582,18 @@ fn derive_args_struct(
             help: bool,
         }
 
-        impl<'arg> ::debate::from_args::State<'arg> for #state_ident<'arg> {
+        impl<'arg> ::debate::state::State<'arg> for #state_ident<'arg> {
             fn add_positional<E>(
                 &mut self,
                 argument: ::debate_parser::Arg<'arg>
             ) -> ::core::result::Result<(), E>
             where
-                E: ::debate::from_args::StateError<'arg, ()>
+                E: ::debate::state::Error<'arg, ()>
             {
                 #(#visit_positional_arms)*
 
                 ::core::result::Result::Err(
-                    ::debate::from_args::StateError::unrecognized(())
+                    ::debate::state::Error::unrecognized(())
                 )
             }
 
@@ -581,7 +603,7 @@ fn derive_args_struct(
                 argument: ::debate_parser::Arg<'arg>
             ) -> ::core::result::Result<(), E>
             where
-                E: ::debate::from_args::StateError<'arg, ()>
+                E: ::debate::state::Error<'arg, ()>
             {
                 match option.bytes() {
                     #(#visit_long_option_arms)*
@@ -589,7 +611,7 @@ fn derive_args_struct(
                         #(#visit_long_option_flattened_arms)*
 
                         ::core::result::Result::Err(
-                            ::debate::from_args::StateError::unrecognized(())
+                            ::debate::state::Error::unrecognized(())
                         )
                     }
                 }
@@ -602,7 +624,7 @@ fn derive_args_struct(
             ) -> ::core::result::Result<(), E>
             where
                 A: ::debate_parser::ArgAccess<'arg>,
-                E: ::debate::from_args::StateError<'arg, A>
+                E: ::debate::state::Error<'arg, A>
             {
                 match option.bytes() {
                     #(#visit_long_arms)*
@@ -610,7 +632,7 @@ fn derive_args_struct(
                         #(#visit_long_flattened_arms)*
 
                         ::core::result::Result::Err(
-                            ::debate::from_args::StateError::unrecognized(
+                            ::debate::state::Error::unrecognized(
                                 argument
                             )
                         )
@@ -625,7 +647,7 @@ fn derive_args_struct(
             ) -> ::core::result::Result<(), E>
             where
                 A: ::debate_parser::ArgAccess<'arg>,
-                E: ::debate::from_args::StateError<'arg, A>
+                E: ::debate::state::Error<'arg, A>
             {
                 match option {
                     #(#visit_short_arms)*
@@ -633,7 +655,7 @@ fn derive_args_struct(
                         #(#visit_short_flattened_arms)*
 
                         ::core::result::Result::Err(
-                            ::debate::from_args::StateError::unrecognized(
+                            ::debate::state::Error::unrecognized(
                                 argument
                             )
                         )

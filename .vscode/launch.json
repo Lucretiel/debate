@@ -1,0 +1,80 @@
+{
+	// Use IntelliSense to learn about possible attributes.
+	// Hover to view descriptions of existing attributes.
+	// For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+	"version": "0.2.0",
+	"configurations": [
+		{
+			"type": "lldb",
+			"request": "launch",
+			"name": "Cargo test",
+			"program": "${workspaceFolder}/target/debug/deps/your_test_binary",
+			"args": [],
+			"cwd": "${workspaceFolder}",
+			"env": {
+				"DYLD_LIBRARY_PATH": "${userHome}/.rustup/toolchains/nightly-aarch64-apple-darwin/lib/rustlib/aarch64-apple-darwin/lib/"
+			}
+		},
+		{
+			"type": "lldb",
+			"request": "launch",
+			"name": "Debug executable 'debate-demo'",
+			"cargo": {
+				"args": ["build", "--bin=debate-demo", "--package=debate-demo"],
+				"filter": {
+					"name": "debate-demo",
+					"kind": "bin"
+				}
+			},
+			"args": [],
+			"cwd": "${workspaceFolder}"
+		},
+		{
+			"type": "lldb",
+			"request": "launch",
+			"name": "Debug unit tests in executable 'debate-demo'",
+			"cargo": {
+				"args": [
+					"test",
+					"--no-run",
+					"--bin=debate-demo",
+					"--package=debate-demo"
+				],
+				"filter": {
+					"name": "debate-demo",
+					"kind": "bin"
+				}
+			},
+			"args": [],
+			"cwd": "${workspaceFolder}"
+		},
+		{
+			"type": "lldb",
+			"request": "launch",
+			"name": "Debug unit tests in library 'debate'",
+			"cargo": {
+				"args": ["test", "--no-run", "--lib", "--package=debate"],
+				"filter": {
+					"name": "debate",
+					"kind": "lib"
+				}
+			},
+			"args": [],
+			"cwd": "${workspaceFolder}"
+		},
+		{
+			"type": "lldb",
+			"request": "launch",
+			"name": "Debug unit tests in library 'debate_parser'",
+			"cargo": {
+				"args": ["test", "--no-run", "--lib", "--package=debate-parser"],
+				"filter": {
+					"name": "debate_parser",
+					"kind": "lib"
+				}
+			},
+			"args": [],
+			"cwd": "${workspaceFolder}"
+		}
+	]
+}

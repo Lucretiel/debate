@@ -1,4 +1,4 @@
-use crate::{from_args, parameter};
+use crate::{from_args, parameter, state};
 
 pub enum DetectUnrecognized<A, E> {
     Unrecognized(A),
@@ -38,9 +38,9 @@ where
     }
 }
 
-impl<'arg, A, E> from_args::StateError<'arg, A> for DetectUnrecognized<A, E>
+impl<'arg, A, E> state::Error<'arg, A> for DetectUnrecognized<A, E>
 where
-    E: from_args::StateError<'arg, A>,
+    E: state::Error<'arg, A>,
 {
     type ParameterError = E::ParameterError;
 

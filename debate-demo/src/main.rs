@@ -2,23 +2,26 @@ use std::path::PathBuf;
 use std::str;
 
 use anyhow::Context;
-use debate::from_args::FromArgs;
+use debate::{
+    from_args::{self, FromArgs},
+    state,
+};
 use debate_derive::FromArgs;
 use debate_parser::{Arg, ArgumentsParser};
 
 #[derive(FromArgs, Debug)]
 #[debate(help, author)]
 struct Arguments {
-    #[debate(short, long)]
+    #[debate(short, long = "foo")]
     path: PathBuf,
 
-    #[debate(short, long)]
+    #[debate(short, long = "verbose")]
     verbose: bool,
 
-    #[debate(short, long)]
+    #[debate(short)]
     second_path: Option<PathBuf>,
 
-    #[debate(long, default)]
+    #[debate(long = "cool-value", default)]
     value: i32,
 
     #[debate(flatten)]
@@ -73,7 +76,7 @@ enum BuildError {
     Positional(String, StateError),
 }
 
-impl<'arg> debate::from_args::Error<'arg> for BuildError {
+impl<'arg> from_args::Error<'arg> for BuildError {
     type StateError<A> = StateError;
 
     fn positional(argument: Arg<'arg>, error: Self::StateError<()>) -> Self {
@@ -117,7 +120,7 @@ enum StateError {
     Unrecognized,
 }
 
-impl<'arg, A> debate::from_args::StateError<'arg, A> for StateError {
+impl<'arg, A> state::Error<'arg, A> for StateError {
     type ParameterError = ParameterError;
     fn parameter(field: &'static str, error: Self::ParameterError) -> Self {
         Self::Parameter(field, error)
