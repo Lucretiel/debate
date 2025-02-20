@@ -1,8 +1,6 @@
 use debate_parser::{Arg, ArgAccess};
 
-use crate::parameter::{
-    Error as ParameterError, Parameter, ParsedValue, RawValue, RequiredError, Value,
-};
+use crate::parameter::{Error as ParameterError, Parameter, ParsedValue, RequiredError, Value};
 
 macro_rules! from_str {
     ($(
@@ -30,7 +28,7 @@ from_str! {
 
 impl<'arg> Value<'arg> for &'arg str {
     #[inline]
-    fn from_arg<E: ParameterError<'arg>>(arg: &'arg str) -> Result<Self, E> {
+    fn from_arg_str<E: ParameterError<'arg>>(arg: &'arg str) -> Result<Self, E> {
         Ok(arg)
     }
 }
@@ -38,7 +36,7 @@ impl<'arg> Value<'arg> for &'arg str {
 #[cfg(feature = "std")]
 impl<'arg> Value<'arg> for &'arg std::path::Path {
     #[inline]
-    fn from_arg<E: ParameterError<'arg>>(arg: &'arg str) -> Result<Self, E> {
+    fn from_arg_str<E: ParameterError<'arg>>(arg: &'arg str) -> Result<Self, E> {
         Ok(std::path::Path::new(arg))
     }
 }
@@ -75,7 +73,7 @@ impl<'arg> Parameter<'arg> for bool {
 
 impl<'arg, T> Parameter<'arg> for Option<T>
 where
-    T: RawValue<'arg>,
+    T: Value<'arg>,
 {
     #[inline]
     fn absent() -> Result<Self, RequiredError> {
@@ -112,7 +110,7 @@ where
 #[cfg(feature = "std")]
 impl<'arg, T> Parameter<'arg> for std::vec::Vec<T>
 where
-    T: RawValue<'arg>,
+    T: Value<'arg>,
 {
     #[inline]
     fn absent() -> Result<Self, RequiredError> {

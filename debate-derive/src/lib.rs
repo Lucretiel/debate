@@ -1,7 +1,7 @@
 use proc_macro::TokenStream;
 
 mod from_args;
-//mod value;
+mod value;
 
 #[proc_macro_derive(FromArgs, attributes(doc, debate))]
 pub fn derive_args(item: TokenStream) -> TokenStream {
@@ -11,5 +11,10 @@ pub fn derive_args(item: TokenStream) -> TokenStream {
     }
 }
 
-// #[proc_macro_derive(Value, attributes(debate))]
-// pub fn derive_value(item: TokenStream) -> TokenStream {}
+#[proc_macro_derive(Value, attributes(debate))]
+pub fn derive_value(item: TokenStream) -> TokenStream {
+    match value::derive_value_result(item.into()) {
+        Ok(tokens) => tokens.into(),
+        Err(err) => err.to_compile_error().into(),
+    }
+}

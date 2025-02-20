@@ -6,7 +6,7 @@ use debate::{
     from_args::{self, FromArgs},
     state,
 };
-use debate_derive::FromArgs;
+use debate_derive::{FromArgs, Value};
 use debate_parser::{Arg, ArgumentsParser};
 
 #[derive(FromArgs, Debug)]
@@ -42,9 +42,13 @@ struct Alphabet {
     #[debate(long, short, default)]
     gamma: u32,
 
+    #[debate(long)]
+    direction: Option<Direction>,
+
     arg: String,
 }
 
+#[derive(Debug, Clone, Copy, Value)]
 enum Direction {
     Up,
     Down,

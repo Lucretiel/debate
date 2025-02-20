@@ -117,14 +117,18 @@ that they return an error if they are absent, don't receive an argument, or are
 present more than once. See also [`Value`] for the common case that your type
 needs to be parsed from a [`str`] instead of a byte slice.
 */
-pub trait RawValue<'arg>: Sized {
+pub trait Value<'arg>: Sized {
     /// Parse a `Value` from an [`Arg`] given on the command line
-    fn from_arg<E: Error<'arg>>(arg: Arg<'arg>) -> Result<Self, E>;
+    fn from_arg<E: Error<'arg>>(arg: Arg<'arg>) -> Result<Self, E> {
+        Self::from_arg_str(str::from_utf8(arg.bytes()).map_err(|_| E::invalid_utf8(arg))?)
+    }
+
+    fn from_arg_str<E: Error<'arg>>(arg: &'arg str) -> Result<Self, E>;
 }
 
 impl<'arg, T> Parameter<'arg> for T
 where
-    T: RawValue<'arg>,
+    T: Value<'arg>,
 {
     #[inline]
     fn absent() -> Result<Self, RequiredError> {
@@ -152,29 +156,6 @@ where
     }
 }
 
-/**
-Parameters that must appear exactly once and take an argument.
-
-Types that implement [`Value`] automatically implement [`Parameter`] such that
-they return an error if they are absent, don't receive an argument, are present
-more than once, or the argument they receive isn't a valid UTF-8 string. See
-also the [`RawValue`] type for the case that your type can make do with a byte
-slice instead of a [`str`].
-*/
-pub trait Value<'arg>: Sized {
-    fn from_arg<E: Error<'arg>>(arg: &'arg str) -> Result<Self, E>;
-}
-
-impl<'arg, T> RawValue<'arg> for T
-where
-    T: Value<'arg>,
-{
-    #[inline]
-    fn from_arg<E: Error<'arg>>(arg: Arg<'arg>) -> Result<Self, E> {
-        Value::from_arg(str::from_utf8(arg.bytes()).map_err(|_| E::invalid_utf8(arg))?)
-    }
-}
-
 /// For types with a [`FromStr`] implementation, [`ParsedValue`] automatically
 /// gives them a [`Parameter`] implementation so that they can be used as
 /// command line argument.
@@ -186,7 +167,7 @@ where
     T::Err: Display,
 {
     #[inline]
-    fn from_arg<E: Error<'arg>>(arg: &'arg str) -> Result<Self, E> {
+    fn from_arg_str<E: Error<'arg>>(arg: &'arg str) -> Result<Self, E> {
         arg.parse().map_err(|err| E::parse_error(arg, err))
     }
 }
