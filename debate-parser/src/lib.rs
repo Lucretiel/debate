@@ -6,7 +6,11 @@ between flags, options, and positionals, that sort of thing. No type handling
 happens here. Usually this is too low level to use directly.
 */
 
-use core::fmt::{self, Debug, Write};
+mod populated_slice;
+
+use ::core::fmt::{self, Debug, Write};
+
+use populated_slice::PopulatedSlice;
 
 /**
 A single, raw argument passed in from the command line.
@@ -118,7 +122,7 @@ pub trait ArgAccess<'arg>: Sized {
 enum State<'arg> {
     Ready,
     PositionalOnly,
-    ShortInProgress(&'arg [u8]),
+    ShortInProgress(&'arg PopulatedSlice<u8>),
 }
 
 /**
@@ -185,12 +189,12 @@ where
     /// Put `self` into a `ShortInProgress` state, then return a ShortArgAccess.
     /// `short` must be non-empty.
     #[inline]
-    fn short_arg(&mut self, short: &'arg [u8]) -> ShortArgAccess<'_, 'arg> {
+    fn short_arg(&mut self, short: &'arg PopulatedSlice<u8>) -> ShortArgAccess<'_, 'arg> {
         debug_assert!(!matches!(self.state, State::PositionalOnly));
 
         self.state = State::ShortInProgress(short);
         ShortArgAccess {
-            short,
+            short: short.get(),
             state: &mut self.state,
         }
     }
@@ -199,13 +203,15 @@ where
     /// remaining content in the short, it's a candidate for the argument;
     /// otherwise, the next argument in the input args is the candidate.
     #[inline]
-    fn handle_short_argument<V>(&mut self, option: u8, short: &'arg [u8], visitor: V) -> V::Value
+    fn handle_short_argument<V>(&mut self, short: &'arg PopulatedSlice<u8>, visitor: V) -> V::Value
     where
         V: Visitor<'arg>,
     {
-        match short.is_empty() {
-            true => visitor.visit_short(option, self.standard_arg()),
-            false => visitor.visit_short(option, self.short_arg(short)),
+        let (&option, short) = short.split_first();
+
+        match PopulatedSlice::new(short) {
+            None => visitor.visit_short(option, self.standard_arg()),
+            Some(short) => visitor.visit_short(option, self.short_arg(short)),
         }
     }
 
@@ -216,23 +222,22 @@ where
         match self.state {
             State::Ready => match self.args.next()? {
                 b"--" => self.positional_only_arg(visitor),
-                [b'-', b'-', option @ ..] => Some(match split_once(option, b'=') {
-                    Some((option, argument)) => {
-                        visitor.visit_long_option(Arg(option), Arg(argument))
-                    }
-                    None => visitor.visit_long(Arg(option), self.standard_arg()),
+                argument => Some(match argument {
+                    [b'-', b'-', option @ ..] => match split_once(option, b'=') {
+                        Some((option, argument)) => {
+                            visitor.visit_long_option(Arg(option), Arg(argument))
+                        }
+                        None => visitor.visit_long(Arg(option), self.standard_arg()),
+                    },
+                    [b'-', short @ ..] => match PopulatedSlice::new(short) {
+                        None => visitor.visit_positional(Arg(b"-")),
+                        Some(short) => self.handle_short_argument(short, visitor),
+                    },
+                    positional => visitor.visit_positional(Arg(positional)),
                 }),
-                [b'-', short @ ..] => Some(match short.split_first() {
-                    None => visitor.visit_positional(Arg(b"-")),
-                    Some((&option, short)) => self.handle_short_argument(option, short, visitor),
-                }),
-                positional => Some(visitor.visit_positional(Arg(positional))),
             },
             State::PositionalOnly => self.positional_only_arg(visitor),
-            State::ShortInProgress(short) => Some(match short.split_first() {
-                None => panic!("short arg should always have at least one element"),
-                Some((&option, short)) => self.handle_short_argument(option, short, visitor),
-            }),
+            State::ShortInProgress(short) => Some(self.handle_short_argument(short, visitor)),
         }
     }
 }
@@ -267,6 +272,11 @@ struct ShortArgAccess<'a, 'arg> {
 
 impl<'arg> ArgAccess<'arg> for ShortArgAccess<'_, 'arg> {
     fn take(self) -> Option<Arg<'arg>> {
+        debug_assert!(match *self.state {
+            State::ShortInProgress(short) => short.get() == self.short,
+            _ => false,
+        });
+
         *self.state = State::Ready;
         Some(Arg(self.short))
     }
