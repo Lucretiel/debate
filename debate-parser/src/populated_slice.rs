@@ -1,6 +1,6 @@
 use core::mem;
 
-/// A slice that is statically guaranteed to have a lenght of at least 1
+/// A slice that is statically guaranteed to have a length of at least 1
 #[derive(Debug)]
 #[repr(transparent)]
 pub struct PopulatedSlice<T>([T]);
