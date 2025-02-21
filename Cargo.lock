@@ -64,6 +64,7 @@ dependencies = [
  "darling",
  "heck",
  "itertools",
+ "lazy_format",
  "proc-macro2",
  "quote",
  "syn",

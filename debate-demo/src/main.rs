@@ -15,7 +15,7 @@ struct Arguments {
     #[debate(short, long = "foo")]
     path: PathBuf,
 
-    #[debate(short, long = "verbose")]
+    #[debate(short, long)]
     verbose: bool,
 
     #[debate(short)]

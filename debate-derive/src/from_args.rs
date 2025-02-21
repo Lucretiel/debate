@@ -1,12 +1,15 @@
+use std::collections::{HashMap, hash_map::Entry};
+use std::fmt::Display;
+use std::hash::Hash;
+
 use darling::{
     FromAttributes,
     util::{Override, SpannedValue},
 };
-
-use heck::ToKebabCase;
+use heck::ToKebabCase as _;
 use itertools::Itertools as _;
-
-use proc_macro2::{Literal, TokenStream as TokenStream2};
+use lazy_format::lazy_format;
+use proc_macro2::{Literal, Span, TokenStream as TokenStream2};
 use quote::{ToTokens, format_ident, quote};
 use syn::{
     Attribute, DataEnum, DeriveInput, Expr, Field, Fields, Generics, Ident, Token, Type,
@@ -153,6 +156,11 @@ fn compute_long(
         Err(syn::Error::new(
             long.span(),
             "long parameters don't need to start with --; this is handled automatically",
+        ))
+    } else if long.starts_with('-') {
+        Err(syn::Error::new(
+            long.span(),
+            "long parameters don't start with '-'",
         ))
     } else if !long.starts_with(|c: char| c.is_alphabetic()) {
         Err(syn::Error::new(
@@ -310,6 +318,29 @@ fn handle_flatten(
     }
 }
 
+fn detect_collision<T: Hash + Eq + Copy, M: Display>(
+    known_tags: &mut HashMap<T, Span>,
+    new_tag: Option<SpannedValue<T>>,
+    message: impl Fn(T) -> M,
+) -> syn::Result<()> {
+    match new_tag {
+        Some(tag) => match known_tags.entry(*tag) {
+            Entry::Occupied(entry) => {
+                let mut err1 = syn::Error::new(tag.span(), message(*tag));
+                let err2 = syn::Error::new(*entry.get(), "original use here");
+
+                err1.combine(err2);
+                Err(err1)
+            }
+            Entry::Vacant(entry) => {
+                entry.insert(tag.span());
+                Ok(())
+            }
+        },
+        None => Ok(()),
+    }
+}
+
 fn derive_args_struct(
     name: &Ident,
     fields: &Punctuated<Field, Token![,]>,
@@ -320,6 +351,24 @@ fn derive_args_struct(
         .iter()
         .map(ParsedFieldInfo::from_field)
         .try_collect()?;
+
+    // Collision detection
+    {
+        let mut long_tags = HashMap::new();
+        let mut short_tags = HashMap::new();
+
+        for tags in fields.iter().filter_map(|field| match field {
+            ParsedFieldInfo::Option(option) => Some(&option.tags),
+            ParsedFieldInfo::Positional(_) | ParsedFieldInfo::Flatten(_) => None,
+        }) {
+            detect_collision(&mut long_tags, tags.long(), |tag| {
+                lazy_format!("duplicate option --{tag}")
+            })?;
+            detect_collision(&mut short_tags, tags.short(), |tag| {
+                lazy_format!("duplicate option -{tag}")
+            })?;
+        }
+    }
 
     let field_state_contents = fields.iter().map(|info| match info {
         // For both positional and optional parameters, emit an option
