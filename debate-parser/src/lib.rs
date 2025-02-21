@@ -122,6 +122,7 @@ pub trait ArgAccess<'arg>: Sized {
 enum State<'arg> {
     Ready,
     PositionalOnly,
+    // TODO: reuse the better byte slice formatter here
     ShortInProgress(&'arg PopulatedSlice<u8>),
 }
 
