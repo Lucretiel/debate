@@ -52,6 +52,13 @@ where
         Self::Unrecognized(argument)
     }
 
+    fn flattened(field: &'static str, error: Self) -> Self {
+        Self::Error(match error {
+            DetectUnrecognized::Unrecognized(_) => todo!(),
+            DetectUnrecognized::Error(err) => E::flattened(field, err),
+        })
+    }
+
     fn rejected() -> Self {
         Self::Error(E::rejected())
     }

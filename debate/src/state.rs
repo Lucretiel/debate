@@ -38,6 +38,9 @@ pub trait Error<'arg, Arg> {
     /// a global argument.
     fn unrecognized(argument: Arg) -> Self;
 
+    /// There was a state error from a flattened field
+    fn flattened(field: &'static str, error: Self) -> Self;
+
     /// An argument was recognized, but rejected (for instance, because of a
     /// mutual exclusion rule). This variant should gain a field for rationale
     /// to be attached.

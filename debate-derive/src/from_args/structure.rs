@@ -12,9 +12,9 @@ use itertools::Itertools as _;
 use lazy_format::lazy_format;
 use proc_macro2::{Literal, Span, TokenStream as TokenStream2};
 use quote::{ToTokens, format_ident, quote};
-use syn::Index;
 use syn::spanned::Spanned;
 use syn::{Attribute, Expr, Field, Generics, Ident, Token, Type, punctuated::Punctuated};
+use syn::{Index, LitInt};
 
 #[derive(darling::FromAttributes, Debug)]
 #[darling(attributes(debate))]
@@ -47,26 +47,46 @@ impl FieldDefault {
     }
 }
 
-struct BasicFieldInfo<'a> {
-    ident: Cow<'a, Ident>,
-    ident_str: String,
-    ty: &'a Type,
+struct IdentString<'a> {
+    raw: &'a Ident,
+    string: String,
+}
+
+impl<'a> IdentString<'a> {
+    pub fn new(ident: &'a Ident) -> Self {
+        Self {
+            string: ident.to_string(),
+            raw: ident,
+        }
+    }
+    pub fn as_str(&self) -> &str {
+        self.string.as_str()
+    }
+}
+
+impl ToTokens for IdentString<'_> {
+    fn to_tokens(&self, tokens: &mut TokenStream2) {
+        self.raw.to_tokens(tokens);
+    }
 }
 
 struct PositionalFieldInfo<'a> {
-    basics: BasicFieldInfo<'a>,
+    ident: IdentString<'a>,
+    ty: &'a Type,
     default: FieldDefault,
     docs: String,
 }
 
 struct OptionFieldInfo<'a> {
-    basics: BasicFieldInfo<'a>,
+    ident: IdentString<'a>,
+    ty: &'a Type,
     default: FieldDefault,
     docs: String,
     tags: OptionTag,
 }
 
 struct FlattenFieldInfo<'a> {
+    ident: Option<IdentString<'a>>,
     ty: &'a Type,
 }
 
@@ -80,40 +100,29 @@ impl<'a> ParsedFieldInfo<'a> {
     pub fn from_field(field: &'a Field) -> syn::Result<Self> {
         let parsed = RawParsedAttr::from_attributes(&field.attrs)?;
 
+        let ty = &field.ty;
+        let ident = field.ident.as_ref().map(IdentString::new);
+
         // TODO: enforce that flatten doesn't coexist with other variants.
         if let Some(()) = parsed.flatten {
-            return Ok(Self::Flatten(FlattenFieldInfo { ty: &field.ty }));
+            return Ok(Self::Flatten(FlattenFieldInfo { ident, ty }));
         }
 
-        let ident = match parsed.id {
-            Some(ident) => Cow::Owned(ident),
-            None => match field.ident.as_ref() {
-                Some(ident) => Cow::Borrowed(ident),
-                None => {
-                    // TODO: loosen this requirement; in principle we don't need
-                    // an id for anonymous
-                    return Err(syn::Error::new(
-                        field.span(),
-                        "anonymous fields must include `#[debate(id=<ID>)]` to identify them",
-                    ));
-                }
-            },
-        };
-
-        let basics = BasicFieldInfo {
-            ident_str: ident.to_string(),
-            ident,
-            ty: &field.ty,
-        };
+        let ident = ident.ok_or_else(|| {
+            syn::Error::new(
+                field.span(),
+                "can't use non-flattened fields in tuple structs",
+            )
+        })?;
 
         let long = parsed
             .long
-            .map(|long| compute_long(long.explicit(), &basics.ident))
+            .map(|long| compute_long(long.explicit(), ident.raw))
             .transpose()?;
 
         let short = parsed
             .short
-            .map(|short| compute_short(short.explicit(), &basics.ident))
+            .map(|short| compute_short(short.explicit(), ident.raw))
             .transpose()?;
 
         let default = FieldDefault::new(parsed.default);
@@ -126,12 +135,14 @@ impl<'a> ParsedFieldInfo<'a> {
                 (Some(long), Some(short)) => Some(OptionTag::LongShort(long, short)),
             } {
                 None => Self::Positional(PositionalFieldInfo {
-                    basics,
+                    ident,
+                    ty,
                     default,
                     docs: String::new(),
                 }),
                 Some(tags) => Self::Option(OptionFieldInfo {
-                    basics,
+                    ident,
+                    ty,
                     default,
                     docs: String::new(),
                     tags,
@@ -278,7 +289,7 @@ fn create_local_option_arms<'a>(
             make_scrutinee(field).map(|scrutinee| (field, scrutinee, index))
         })
         .map(move |(info, scrutinee, index)| {
-            let field_name: &str = &info.basics.ident_str;
+            let field_name = info.ident.as_str();
 
             let expr = apply_arg_to_field(&index, initial_method, follow_up_method);
 
@@ -302,7 +313,7 @@ enum FlattenMode {
 /// handles the error returned by it (specifically, it uses DetectUnrecognized
 /// to allow arguments to be retried).
 fn handle_flatten(
-    field_index: &Index,
+    field_index: Index,
     method: &Ident,
     mode: FlattenMode,
     unrecognized_bind: impl ToTokens,
@@ -398,14 +409,10 @@ pub fn derive_args_struct(
     let field_state_contents = fields.iter().map(|info| match info {
         // For both positional and optional parameters, emit an option
         // containing the value
-        ParsedFieldInfo::Positional(PositionalFieldInfo {
-            basics: BasicFieldInfo { ty, .. },
-            ..
-        })
-        | ParsedFieldInfo::Option(OptionFieldInfo {
-            basics: BasicFieldInfo { ty, .. },
-            ..
-        }) => quote! {  ::core::option::Option<#ty>, },
+        ParsedFieldInfo::Positional(PositionalFieldInfo { ty, .. })
+        | ParsedFieldInfo::Option(OptionFieldInfo { ty, .. }) => {
+            quote! {  ::core::option::Option<#ty>, }
+        }
 
         // For flattened fields, emit the state
         ParsedFieldInfo::Flatten(FlattenFieldInfo { ty, .. }) => quote! {
@@ -428,13 +435,15 @@ pub fn derive_args_struct(
 
     let visit_positional_arms = fields
         .iter()
-        .filter_map(|info| info.get_positional())
         .enumerate()
         .map(|(idx, field)| (Index::from(idx), field))
-        .map(|(idx, info)| match info {
+        .filter_map(|(idx, info)| info.get_positional().map(|info| (idx, info)))
+        .enumerate()
+        .map(|(position, info)| (Literal::usize_unsuffixed(position), info))
+        .map(|(position, (idx, info))| match info {
             // This is a regular positional field
             FlattenOr::Normal(info) => {
-                let field_str = info.basics.ident_str.as_str();
+                let field_str = info.ident.as_str();
                 let apply_argument = apply_arg_to_field(&idx, &arg_ident, &add_arg_ident);
 
                 // TODO: adapt handle_flatten so that it can be used here
@@ -446,12 +455,12 @@ pub fn derive_args_struct(
                 // TODO: consider `loop { match { } }` instead of a waterfall
                 // of `if`
                 quote! {
-                    if self.position == #idx {
+                    if self.position == #position {
                         self.position = match (#apply_argument) {
                             ::core::result::Result::Ok(()) => return ::core::result::Result::Ok(()),
                             ::core::result::Result::Err(err) => match err {
                                 ::debate::util::DetectUnrecognized::Unrecognized(()) => {
-                                    #idx + 1
+                                    #position + 1
                                 },
                                 ::debate::util::DetectUnrecognized::Error(err) => return (
                                     ::core::result::Result::Err(
@@ -469,15 +478,15 @@ pub fn derive_args_struct(
             // This is a flattened field
             FlattenOr::Flatten(info) => {
                 let body = handle_flatten(
-                    &idx,
+                    idx,
                     &add_positional_ident,
                     FlattenMode::Positional,
                     quote! { () },
-                    quote! { #idx + 1 },
+                    quote! { #position + 1 },
                 );
 
                 quote! {
-                    if self.position == #idx {
+                    if self.position == #position {
                         self.position = #body;
                     }
                 }
@@ -511,9 +520,9 @@ pub fn derive_args_struct(
         &add_arg_ident,
     );
 
-    let visit_long_option_flattened_arms = flatten_fields.clone().map(|(index, info)| {
+    let visit_long_option_flattened_arms = flatten_fields.clone().map(|(index, _)| {
         handle_flatten(
-            &index,
+            index,
             &add_long_option_ident,
             FlattenMode::Option,
             quote! { () },
@@ -534,7 +543,7 @@ pub fn derive_args_struct(
 
     let visit_long_flattened_arms = flatten_fields.clone().map(|(index, info)| {
         let body = handle_flatten(
-            &index,
+            index,
             &add_long_ident,
             FlattenMode::Option,
             &argument_ident,
@@ -559,7 +568,7 @@ pub fn derive_args_struct(
 
     let visit_short_flattened_arms = flatten_fields.map(|(index, info)| {
         let body = handle_flatten(
-            &index,
+            index,
             &add_short_ident,
             FlattenMode::Option,
             &argument_ident,
@@ -575,12 +584,13 @@ pub fn derive_args_struct(
         .iter()
         .map(|info| match info {
             ParsedFieldInfo::Positional(info) => {
-                FlattenOr::Normal((None, None, &info.basics, &info.default))
+                FlattenOr::Normal((None, None, &info.ident, info.ty, &info.default))
             }
             ParsedFieldInfo::Option(info) => FlattenOr::Normal((
                 info.tags.long(),
                 info.tags.short(),
-                &info.basics,
+                &info.ident,
+                info.ty,
                 &info.default,
             )),
             ParsedFieldInfo::Flatten(flatten_field_info) => FlattenOr::Flatten(flatten_field_info),
@@ -588,9 +598,8 @@ pub fn derive_args_struct(
         .enumerate()
         .map(|(idx, field)| (Index::from(idx), field))
         .map(|(idx, field)| match field {
-            FlattenOr::Normal((long, short, info, default)) => {
-                let field_ident = info.ident;
-                let field_ident_str = field_ident.to_string();
+            FlattenOr::Normal((long, short, ident, ty, default)) => {
+                let field_ident_str = ident.as_str();
 
                 let long = match long.as_deref() {
                     Some(&long) => quote! {::core::option::Option::Some(#long)},
@@ -617,47 +626,39 @@ pub fn derive_args_struct(
                 };
 
                 quote! {
-                    match state.fields.#field_ident {
+                    #ident: match state.fields.#idx {
                         ::core::option::Option::Some(value) => value,
                         ::core::option::Option::None => #default,
                     },
                 }
             }
-            FlattenOr::Flatten(info) => {
-                let field_index = Index::new(idx)
-                quote! {
+            FlattenOr::Flatten(FlattenFieldInfo { ident, .. }) => {
+                let expr = quote! {
                     match ::debate::from_args::BuildFromArgs::build(
-                        state.fields.#field_ident
+                        state.fields.#idx
                     ) {
                         ::core::result::Result::Ok(value) => value,
                         ::core::result::Result::Err(err) => return ::core::result::Result::Err(err),
                     },
+                };
+
+                match ident {
+                    Some(ident) => quote! { #ident : #expr },
+                    None => expr,
                 }
             }
         });
 
     let state_ident = format_ident!("__{name}State");
-    let field_state_ident = format_ident!("__{name}FieldState");
 
     Ok(quote! {
-        // TODO: instead of polluting the namespace with this pair of types,
-        // consider using a tuple? Need to find a good way to map field
-        // identifiers to it.
-        #[derive(::core::default::Default)]
-        #[doc(hidden)]
-        struct #field_state_ident<'arg> {
-            #(#field_state_contents)*
-
-            // TODO: find a way to create a safe name for the phantom
-            phantom: ::core::marker::PhantomData<&'arg ()>,
-        }
-
         #[doc(hidden)]
         #[derive(::core::default::Default)]
         struct #state_ident<'arg> {
-            fields: #field_state_ident<'arg>,
+            fields: (#(#field_state_contents)*),
             position: u16,
             help: bool,
+            phantom: ::core::marker::PhantomData<&'arg ()>,
         }
 
         impl<'arg> ::debate::state::State<'arg> for #state_ident<'arg> {

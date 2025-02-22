@@ -1,6 +1,10 @@
 use debate_parser::{Arg, ArgAccess};
 
-use crate::parameter::{Error as ParameterError, Parameter, ParsedValue, RequiredError, Value};
+use crate::{
+    from_args::BuildFromArgs,
+    parameter::{Error as ParameterError, Parameter, ParsedValue, RequiredError, Value},
+    state::{self, State},
+};
 
 macro_rules! from_str {
     ($(
@@ -137,5 +141,71 @@ where
     #[inline]
     fn add_present<E: ParameterError<'arg>>(&mut self, arg: impl ArgAccess<'arg>) -> Result<(), E> {
         Self::add_arg(self, arg.take().ok_or_else(|| E::needs_arg())?)
+    }
+}
+
+impl<'arg, T> BuildFromArgs<'arg> for Option<T>
+where
+    T: BuildFromArgs<'arg>,
+{
+    type State = Option<T::State>;
+
+    fn build<E>(state: Self::State) -> Result<Self, E>
+    where
+        E: crate::from_args::Error<'arg>,
+    {
+        state.map(|state| T::build(state)).transpose()
+    }
+}
+
+#[inline]
+fn update_optional_state<'arg, T, E>(
+    state: &mut Option<T>,
+    apply: impl FnOnce(&mut T) -> Result<(), E>,
+) -> Result<(), E>
+where
+    T: Default,
+{
+    match state {
+        Some(state) => apply(state),
+        None => {
+            let mut local = T::default();
+            apply(&mut local).inspect(|&()| *state = Some(local))
+        }
+    }
+}
+
+impl<'arg, T> State<'arg> for Option<T>
+where
+    T: State<'arg>,
+{
+    fn add_positional<E>(&mut self, argument: Arg<'arg>) -> Result<(), E>
+    where
+        E: crate::state::Error<'arg, ()>,
+    {
+        update_optional_state(self, |state| state.add_positional(argument))
+    }
+
+    fn add_long_option<E>(&mut self, option: Arg<'arg>, argument: Arg<'arg>) -> Result<(), E>
+    where
+        E: crate::state::Error<'arg, ()>,
+    {
+        update_optional_state(self, |state| state.add_long_option(option, argument))
+    }
+
+    fn add_long<A, E>(&mut self, option: Arg<'arg>, argument: A) -> Result<(), E>
+    where
+        A: ArgAccess<'arg>,
+        E: crate::state::Error<'arg, A>,
+    {
+        update_optional_state(self, |state| state.add_long(option, argument))
+    }
+
+    fn add_short<A, E>(&mut self, option: u8, argument: A) -> Result<(), E>
+    where
+        A: ArgAccess<'arg>,
+        E: crate::state::Error<'arg, A>,
+    {
+        update_optional_state(self, |state| state.add_short(option, argument))
     }
 }
