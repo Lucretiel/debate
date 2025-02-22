@@ -3,8 +3,9 @@ use std::str;
 
 use anyhow::Context;
 use debate::{
-    from_args::{self, FromArgs},
-    state,
+    from_args::{self, BuildFromArgs, FromArgs},
+    parameter::Parameter,
+    state::{self, State},
 };
 use debate_derive::{FromArgs, Value};
 use debate_parser::{Arg, ArgumentsParser};
@@ -44,8 +45,6 @@ struct Alphabet {
 
     #[debate(long)]
     direction: Option<Direction>,
-
-    arg: String,
 }
 
 #[derive(Debug, Clone, Copy, Value)]
@@ -60,6 +59,102 @@ enum FlagChoice {
     OutDir(PathBuf),
     WorkingDir,
     OutFile(PathBuf),
+}
+
+enum Subcommand {
+    Clean,
+    Build { target: PathBuf },
+    Add { item: String },
+}
+
+enum SubcommandFieldState {
+    Clean,
+    Build { target: Option<PathBuf> },
+    Add { item: Option<String> },
+}
+
+#[derive(Default)]
+struct SubcommandState {
+    fields: Option<SubcommandFieldState>,
+    position: u16,
+}
+
+impl<'arg> State<'arg> for SubcommandState {
+    fn add_positional<E>(&mut self, argument: Arg<'arg>) -> Result<(), E>
+    where
+        E: state::Error<'arg, ()>,
+    {
+        match self.fields {
+            None => {
+                self.fields = match argument.bytes() {
+                    b"clean" => SubcommandFieldState::Clean,
+                    b"build" => SubcommandFieldState::Build { target: None },
+                    b"add" => SubcommandFieldState::Add { item: None },
+                    _ => return Err(E::unrecognized(())),
+                };
+
+                Ok(())
+            }
+            Some(state) => match state {
+                SubcommandFieldState::Clean => Err(E::unrecognized(())),
+                SubcommandFieldState::Build { target } => todo!(),
+                SubcommandFieldState::Add { item } => todo!(),
+            },
+        }
+    }
+
+    fn add_long_option<E>(&mut self, option: Arg<'arg>, argument: Arg<'arg>) -> Result<(), E>
+    where
+        E: state::Error<'arg, ()>,
+    {
+        todo!()
+    }
+
+    fn add_long<A, E>(&mut self, option: Arg<'arg>, argument: A) -> Result<(), E>
+    where
+        A: debate_parser::ArgAccess<'arg>,
+        E: state::Error<'arg, A>,
+    {
+        todo!()
+    }
+
+    fn add_short<A, E>(&mut self, option: u8, argument: A) -> Result<(), E>
+    where
+        A: debate_parser::ArgAccess<'arg>,
+        E: state::Error<'arg, A>,
+    {
+        todo!()
+    }
+}
+
+impl<'arg> BuildFromArgs<'arg> for Subcommand {
+    type State = SubcommandState;
+
+    fn build<E>(state: Self::State) -> Result<Self, E>
+    where
+        E: from_args::Error<'arg>,
+    {
+        match state.fields {
+            None => Err(E::required("subcommand", None, None)),
+            Some(fields) => match fields {
+                SubcommandFieldState::Clean => Ok(Self::Clean),
+                SubcommandFieldState::Build { target } => Ok(Self::Build {
+                    target: match target {
+                        Some(target) => target,
+                        None => Parameter::absent()
+                            .map_err(|_| E::required("target", Some("target"), None))?,
+                    },
+                }),
+                SubcommandFieldState::Add { item } => Ok(Self::Add {
+                    item: match item {
+                        Some(item) => item,
+                        None => Parameter::absent()
+                            .map_err(|_| E::required("item", Some("item"), None))?,
+                    },
+                }),
+            },
+        }
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
