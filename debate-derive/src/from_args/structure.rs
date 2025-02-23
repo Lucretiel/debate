@@ -16,6 +16,8 @@ use syn::spanned::Spanned;
 use syn::{Attribute, Expr, Field, Generics, Ident, Token, Type, punctuated::Punctuated};
 use syn::{Index, LitInt};
 
+use super::common::IdentString;
+
 #[derive(darling::FromAttributes, Debug)]
 #[darling(attributes(debate))]
 struct RawParsedAttr {
@@ -44,29 +46,6 @@ impl FieldDefault {
             Some(Override::Inherit) => Self::Trait,
             None => Self::None,
         }
-    }
-}
-
-struct IdentString<'a> {
-    raw: &'a Ident,
-    string: String,
-}
-
-impl<'a> IdentString<'a> {
-    pub fn new(ident: &'a Ident) -> Self {
-        Self {
-            string: ident.to_string(),
-            raw: ident,
-        }
-    }
-    pub fn as_str(&self) -> &str {
-        self.string.as_str()
-    }
-}
-
-impl ToTokens for IdentString<'_> {
-    fn to_tokens(&self, tokens: &mut TokenStream2) {
-        self.raw.to_tokens(tokens);
     }
 }
 
@@ -117,12 +96,12 @@ impl<'a> ParsedFieldInfo<'a> {
 
         let long = parsed
             .long
-            .map(|long| compute_long(long.explicit(), ident.raw))
+            .map(|long| compute_long(long.explicit(), ident.raw()))
             .transpose()?;
 
         let short = parsed
             .short
-            .map(|short| compute_short(short.explicit(), ident.raw))
+            .map(|short| compute_short(short.explicit(), ident.raw()))
             .transpose()?;
 
         let default = FieldDefault::new(parsed.default);
@@ -253,18 +232,19 @@ impl OptionTag {
 /// Create an expression that applies an incoming `argument` to a given parameter
 /// by calling either `Parameter::initial_method` or `Parameter::follow_up_method`,
 /// depending on whether the field is present already. This expression's type
-/// is always `Result<(), impl ParameterError>`.
+/// is always `Result<(), impl ParameterError>`. The field is
+/// `fields.#field-index`.
 fn apply_arg_to_field(
     field_index: &Index,
     initial_method: &Ident,
     follow_up_method: &Ident,
 ) -> impl ToTokens {
     quote! {
-        match self.fields.#field_index {
+        match fields.#field_index {
             ::core::option::Option::None => match ::debate::parameter::Parameter::#initial_method(argument) {
                 ::core::result::Result::Err(err) => ::core::result::Result::Err(err),
                 ::core::result::Result::Ok(value) => {
-                    self.fields.#field_index = ::core::option::Option::Some(value);
+                    fields.#field_index = ::core::option::Option::Some(value);
                     ::core::result::Result::Ok(())
                 }
             }
@@ -312,6 +292,7 @@ enum FlattenMode {
 /// Create an expression that calls a state method on a given field, then
 /// handles the error returned by it (specifically, it uses DetectUnrecognized
 /// to allow arguments to be retried).
+// TODO: wrap the error in `StateError::flatten`
 fn handle_flatten(
     field_index: Index,
     method: &Ident,
@@ -322,13 +303,13 @@ fn handle_flatten(
     let expr = match mode {
         FlattenMode::Positional => quote! {
             ::debate::state::State::#method(
-                &mut self.fields.#field_index,
+                &mut fields.#field_index,
                 argument,
             )
         },
         FlattenMode::Option => quote! {
             ::debate::state::State::#method(
-                &mut self.fields.#field_index,
+                &mut fields.#field_index,
                 option,
                 argument,
             )
@@ -455,8 +436,8 @@ pub fn derive_args_struct(
                 // TODO: consider `loop { match { } }` instead of a waterfall
                 // of `if`
                 quote! {
-                    if self.position == #position {
-                        self.position = match (#apply_argument) {
+                    if *position == #position {
+                        *position = match (#apply_argument) {
                             ::core::result::Result::Ok(()) => return ::core::result::Result::Ok(()),
                             ::core::result::Result::Err(err) => match err {
                                 ::debate::util::DetectUnrecognized::Unrecognized(()) => {
@@ -486,8 +467,8 @@ pub fn derive_args_struct(
                 );
 
                 quote! {
-                    if self.position == #position {
-                        self.position = #body;
+                    if *position == #position {
+                        *position = #body;
                     }
                 }
             }
@@ -626,7 +607,7 @@ pub fn derive_args_struct(
                 };
 
                 quote! {
-                    #ident: match state.fields.#idx {
+                    #ident: match fields.#idx {
                         ::core::option::Option::Some(value) => value,
                         ::core::option::Option::None => #default,
                     },
@@ -635,7 +616,7 @@ pub fn derive_args_struct(
             FlattenOr::Flatten(FlattenFieldInfo { ident, .. }) => {
                 let expr = quote! {
                     match ::debate::from_args::BuildFromArgs::build(
-                        state.fields.#idx
+                        fields.#idx
                     ) {
                         ::core::result::Result::Ok(value) => value,
                         ::core::result::Result::Err(err) => return ::core::result::Result::Err(err),
@@ -669,6 +650,9 @@ pub fn derive_args_struct(
             where
                 E: ::debate::state::Error<'arg, ()>
             {
+                let fields = &mut self.fields;
+                let position = &mut self.position;
+
                 #(#visit_positional_arms)*
 
                 ::core::result::Result::Err(
@@ -684,6 +668,9 @@ pub fn derive_args_struct(
             where
                 E: ::debate::state::Error<'arg, ()>
             {
+                let fields = &mut self.fields;
+                let position = &mut self.position;
+
                 match option.bytes() {
                     #(#visit_long_option_arms)*
                     _ => {
@@ -705,6 +692,9 @@ pub fn derive_args_struct(
                 A: ::debate_parser::ArgAccess<'arg>,
                 E: ::debate::state::Error<'arg, A>
             {
+                let fields = &mut self.fields;
+                let position = &mut self.position;
+
                 match option.bytes() {
                     #(#visit_long_arms)*
                     _ => {
@@ -728,6 +718,9 @@ pub fn derive_args_struct(
                 A: ::debate_parser::ArgAccess<'arg>,
                 E: ::debate::state::Error<'arg, A>
             {
+                let fields = &mut self.fields;
+                let position = &mut self.position;
+
                 match option {
                     #(#visit_short_arms)*
                     _ => {
@@ -750,6 +743,8 @@ pub fn derive_args_struct(
             where
                 E: ::debate::from_args::Error<'arg>
             {
+                let fields = &mut state.fields;
+
                 ::core::result::Result::Ok(Self {
                     #(#final_field_initializers)*
                 })
