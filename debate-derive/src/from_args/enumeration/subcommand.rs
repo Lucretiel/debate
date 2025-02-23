@@ -2,6 +2,15 @@ use proc_macro2::TokenStream as TokenStream2;
 use quote::{format_ident, quote};
 use syn::{Attribute, DataEnum, Generics, Ident, Token, Variant, punctuated::Punctuated};
 
+/// Ident of the unselected subcommand (that is, the enum variant)
+enum Unselected {
+
+}
+
+struct ParsedSubcommandInfo<'a> {
+    unselected_ident:
+}
+
 pub fn derive_args_enum_subcommand(
     name: &Ident,
     variants: &Punctuated<Variant, Token![,]>,
