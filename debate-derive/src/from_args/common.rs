@@ -53,7 +53,7 @@ pub fn make_struct_state_block<'a>(
         {
             fields: (#(#field_state_contents,)*),
             position: u16,
-            phantom: ::core::marker::PhantomData<'arg ()>,
+            phantom: ::core::marker::PhantomData<& 'arg ()>,
         }
     }
 }

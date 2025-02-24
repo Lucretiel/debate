@@ -729,7 +729,7 @@ pub fn derive_args_struct(
             where
                 E: ::debate::from_args::Error<'arg>
             {
-                let fields = &mut state.fields;
+                let fields = state.fields;
 
                 ::core::result::Result::Ok(Self {
                     #(#final_field_initializers)*
