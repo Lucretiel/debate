@@ -11,7 +11,7 @@ checksum = "34ac096ce696dc2fcabef30516bb13c0a68a11d30131d3df6f04711467681b04"
 [[package]]
 name = "darling"
 version = "0.20.10"
-source = "git+https://github.com/Lucretiel/darling.git?rev=c1b987d9420444f8c9f94a24116bd62ebf9581ce#c1b987d9420444f8c9f94a24116bd62ebf9581ce"
+source = "git+https://github.com/Lucretiel/darling.git?rev=fe980626af98fe71f089672be2e411c0825a327c#fe980626af98fe71f089672be2e411c0825a327c"
 dependencies = [
  "darling_core",
  "darling_macro",
@@ -20,7 +20,7 @@ dependencies = [
 [[package]]
 name = "darling_core"
 version = "0.20.10"
-source = "git+https://github.com/Lucretiel/darling.git?rev=c1b987d9420444f8c9f94a24116bd62ebf9581ce#c1b987d9420444f8c9f94a24116bd62ebf9581ce"
+source = "git+https://github.com/Lucretiel/darling.git?rev=fe980626af98fe71f089672be2e411c0825a327c#fe980626af98fe71f089672be2e411c0825a327c"
 dependencies = [
  "fnv",
  "ident_case",
@@ -32,7 +32,7 @@ dependencies = [
 [[package]]
 name = "darling_macro"
 version = "0.20.10"
-source = "git+https://github.com/Lucretiel/darling.git?rev=c1b987d9420444f8c9f94a24116bd62ebf9581ce#c1b987d9420444f8c9f94a24116bd62ebf9581ce"
+source = "git+https://github.com/Lucretiel/darling.git?rev=fe980626af98fe71f089672be2e411c0825a327c#fe980626af98fe71f089672be2e411c0825a327c"
 dependencies = [
  "darling_core",
  "quote",

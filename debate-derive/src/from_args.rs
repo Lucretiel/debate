@@ -18,16 +18,14 @@ pub fn derive_args_result(item: TokenStream2) -> syn::Result<TokenStream2> {
             &input.ident,
             match data.fields {
                 Fields::Named(ref fields) => &fields.named,
-                Fields::Unnamed(_) => {
-                    return no_derive("Can't derive `FromArgs` on a tuple struct");
-                }
+                Fields::Unnamed(ref fields) => &fields.unnamed,
                 Fields::Unit => return no_derive("can't derive `FromArgs` on a unit struct"),
             },
             &input.generics,
             &input.attrs,
         ),
         syn::Data::Enum(ref data) => {
-            derive_args_enum(&input.ident, data, &input.generics, &input.attrs)
+            derive_args_enum(&input.ident, &data.variants, &input.generics, &input.attrs)
         }
         syn::Data::Union(_) => no_derive("can't derive `FromArgs` on a union"),
     }

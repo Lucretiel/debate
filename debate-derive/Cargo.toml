@@ -7,7 +7,6 @@ edition = "2024"
 proc-macro = true
 
 [dependencies]
-darling = { version = "0.20.10", default-features = false, git = "https://github.com/Lucretiel/darling.git", rev = "c1b987d9420444f8c9f94a24116bd62ebf9581ce" }
 heck = { version = "0.5.0", default-features = false }
 itertools = "0.14.0"
 lazy_format = "2.0.3"
@@ -20,3 +19,9 @@ syn = { version = "2.0.98", default-features = false, features = [
     "parsing",
     "printing",
 ] }
+
+[dependencies.darling]
+version = "0.20.10"
+default-features = false
+git = "https://github.com/Lucretiel/darling.git"
+rev = "fe980626af98fe71f089672be2e411c0825a327c"

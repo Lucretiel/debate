@@ -1,13 +1,19 @@
+use std::collections::HashSet;
+
 use darling::FromAttributes;
 use heck::ToKebabCase;
-use proc_macro2::TokenStream as TokenStream2;
+use itertools::Itertools as _;
+use proc_macro2::{Literal, TokenStream as TokenStream2};
 use quote::{format_ident, quote};
 use syn::{
-    Attribute, DataEnum, Fields, Generics, Ident, Token, Variant, punctuated::Punctuated,
-    spanned::Spanned,
+    Attribute, DataEnum, Fields, FieldsNamed, FieldsUnnamed, Generics, Ident, Token, Variant,
+    punctuated::Punctuated, spanned::Spanned,
 };
 
-use crate::from_args::common::IdentString;
+use crate::from_args::common::{
+    IdentString, ParsedFieldInfo, struct_state_block_from_fields,
+    struct_state_init_block_from_fields, visit_positional_arms_for_fields,
+};
 
 /// Ident of the unselected subcommand (that is, the enum variant)
 enum Fallback<'a> {
@@ -34,11 +40,23 @@ struct VariantAttr {
     fallback: Option<()>,
 }
 
+enum VariantMode {
+    Unit,
+    Tuple,
+    Struct,
+}
+
 struct ParsedSubcommandVariant<'a> {
     ident: IdentString<'a>,
 
     /// Case-converted command name
     command: String,
+
+    /// All of the fields in this variant. Basically agnostic to
+    /// struct/unit/tuple distinctions.
+    fields: Vec<ParsedFieldInfo<'a>>,
+
+    mode: VariantMode,
 }
 
 struct ParsedSubcommandInfo<'a> {
@@ -77,8 +95,32 @@ impl<'a> ParsedSubcommandInfo<'a> {
             } else {
                 let ident = IdentString::new(&variant.ident);
                 let command = ident.as_str().to_kebab_case();
+                let fields = match variant.fields {
+                    Fields::Unnamed(FieldsUnnamed {
+                        unnamed: ref fields,
+                        ..
+                    })
+                    | Fields::Named(FieldsNamed {
+                        named: ref fields, ..
+                    }) => fields
+                        .iter()
+                        .map(|field| ParsedFieldInfo::from_field(field))
+                        .try_collect()?,
 
-                parsed_variants.push(ParsedSubcommandVariant { ident, command });
+                    Fields::Unit => Vec::new(),
+                };
+                let mode = match variant.fields {
+                    Fields::Named(_) => VariantMode::Struct,
+                    Fields::Unnamed(_) => VariantMode::Tuple,
+                    Fields::Unit => VariantMode::Unit,
+                };
+
+                parsed_variants.push(ParsedSubcommandVariant {
+                    ident,
+                    command,
+                    fields,
+                    mode,
+                });
             }
         }
 
@@ -111,17 +153,82 @@ pub fn derive_args_enum_subcommand(
     name: &Ident,
     variants: &Punctuated<Variant, Token![,]>,
     generics: &Generics,
-    attrs: &[Attribute],
 ) -> syn::Result<TokenStream2> {
+    // Reuse these everywhere
+    let arg_ident = format_ident!("arg");
+    let present_ident = format_ident!("present");
+    let add_arg_ident = format_ident!("add_arg");
+    let add_present_ident = format_ident!("add_present");
+
     let state_ident = format_ident!("__{name}State");
 
-    let parsed_variants = ParsedSubcommandInfo::from_variants(variants);
+    let parsed_variants = ParsedSubcommandInfo::from_variants(variants)?;
+
+    let fallback_ident = parsed_variants.fallback.ident();
+
+    let state_variants = parsed_variants.variants.iter().map(|variant| {
+        let variant_ident = variant.ident.raw();
+        let variant_state_body = struct_state_block_from_fields(&variant.fields);
+
+        quote! {
+            #variant_ident #variant_state_body
+        }
+    });
+
+    let all_option_fields = parsed_variants
+        .variants
+        .iter()
+        .flat_map(|variant| &variant.fields)
+        .filter_map(|field| match field {
+            ParsedFieldInfo::Option(field) => Some(field),
+            ParsedFieldInfo::Positional(_) | ParsedFieldInfo::Flatten(_) => None,
+        });
+
+    let all_known_long_tags: HashSet<&str> = all_option_fields
+        .clone()
+        .filter_map(|field| field.tags.long())
+        .map(|tag| *tag)
+        .collect();
+
+    let all_known_short_tags: HashSet<char> = all_option_fields
+        .filter_map(|field| field.tags.short())
+        .map(|tag| *tag)
+        .collect();
+
+    let select_subcommand_arms = parsed_variants.variants.iter().map(|variant| {
+        let scrutinee = variant.command.as_bytes();
+        let scrutinee = Literal::byte_string(scrutinee);
+        let variant_ident = variant.ident.raw();
+        let variant_init_block = struct_state_init_block_from_fields(&variant.fields);
+
+        quote! {
+            #scrutinee => #state_ident :: #variant_ident #variant_init_block
+        }
+    });
+
+    let visit_positional_arms = parsed_variants.variants.iter().map(|variant| {
+        let variant_ident = variant.ident.raw();
+        let local_positional_arms =
+            visit_positional_arms_for_fields(&arg_ident, &add_arg_ident, &variant.fields);
+
+        quote! {
+            #state_ident :: #variant_ident { ref mut fields, ref mut position, .. } => {
+                #(#local_positional_arms)*
+
+                ::core::result::Result::Err(
+                    ::debate::state::Error::unrecognized(())
+                )
+            }
+        }
+    });
 
     Ok(quote! {
         #[doc(hidden)]
         #[derive(::core::default::Default)]
         enum #state_ident<'arg> {
-            // TODO
+            #[default]
+            #fallback_ident,
+            #(#state_variants,)*
         }
 
         impl<'arg> ::debate::state::State<'arg> for #state_ident<'arg> {
@@ -131,7 +238,22 @@ pub fn derive_args_enum_subcommand(
             ) -> ::core::result::Result<(), E>
             where
                 E: ::debate::state::Error<'arg, ()>
-            {}
+            {
+                match *state {
+                    #state_ident :: #fallback_ident => {
+                        *self = match argument.bytes() {
+                            #(#select_subcommand_arms,)*
+                            _ => return Err(::debate::state::Error::unknown_subcommand(&[])),
+                        };
+
+                        Ok(())
+                    }
+
+                    #(
+                        #visit_positional_arms,
+                    )*
+                }
+            }
 
             fn add_long_option<E>(
                 &mut self,

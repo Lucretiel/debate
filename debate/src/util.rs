@@ -1,3 +1,5 @@
+use std::marker::PhantomData;
+
 use crate::{parameter, state};
 
 pub enum DetectUnrecognized<A, E> {
