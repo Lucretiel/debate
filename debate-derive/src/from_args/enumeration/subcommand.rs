@@ -20,7 +20,7 @@ enum Fallback<'a> {
 }
 
 impl Fallback<'_> {
-    fn ident(&self) -> &Ident {
+    pub fn ident(&self) -> &Ident {
         match *self {
             Fallback::Explicit(ident) => ident,
             Fallback::Internal(ref ident) => ident,
