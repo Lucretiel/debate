@@ -19,6 +19,15 @@ enum Fallback<'a> {
     Internal(Ident),
 }
 
+impl Fallback<'_> {
+    fn ident(&self) -> &Ident {
+        match *self {
+            Fallback::Explicit(ident) => ident,
+            Fallback::Internal(ref ident) => ident,
+        }
+    }
+}
+
 #[derive(darling::FromAttributes)]
 #[darling(attributes(debate))]
 struct VariantAttr {
