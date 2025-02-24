@@ -1,14 +1,101 @@
+use darling::FromAttributes;
+use heck::ToKebabCase;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::{format_ident, quote};
-use syn::{Attribute, DataEnum, Generics, Ident, Token, Variant, punctuated::Punctuated};
+use syn::{
+    Attribute, DataEnum, Fields, Generics, Ident, Token, Variant, punctuated::Punctuated,
+    spanned::Spanned,
+};
+
+use crate::from_args::common::IdentString;
 
 /// Ident of the unselected subcommand (that is, the enum variant)
-enum Unselected {
+enum Fallback<'a> {
+    /// The user explicitly included this variant with `debate(fallback)`
+    Explicit(&'a Ident),
 
+    /// There's no user-provided unselected subcommand. This ident isn't a
+    /// member of the original enum and has been computed to avoid a collision.
+    Internal(Ident),
+}
+
+#[derive(darling::FromAttributes)]
+#[darling(attributes(debate))]
+struct VariantAttr {
+    fallback: Option<()>,
+}
+
+struct ParsedSubcommandVariant<'a> {
+    ident: IdentString<'a>,
+
+    /// Case-converted command name
+    command: String,
 }
 
 struct ParsedSubcommandInfo<'a> {
-    unselected_ident:
+    fallback: Fallback<'a>,
+    variants: Vec<ParsedSubcommandVariant<'a>>,
+}
+
+impl<'a> ParsedSubcommandInfo<'a> {
+    pub fn from_variants(variants: impl IntoIterator<Item = &'a Variant>) -> syn::Result<Self> {
+        let mut fallback: Option<&Ident> = None;
+        let mut parsed_variants = Vec::new();
+
+        for variant in variants {
+            let attr = VariantAttr::from_attributes(&variant.attrs)?;
+
+            if let Some(()) = attr.fallback {
+                if let Some(fallback) = fallback {
+                    let mut err = syn::Error::new(
+                        variant.span(),
+                        "can't have more than one fallback variant",
+                    );
+
+                    err.combine(syn::Error::new(fallback.span(), "previous fallback here"));
+
+                    return Err(err);
+                }
+
+                if !matches!(variant.fields, Fields::Unit) {
+                    return Err(syn::Error::new(
+                        variant.span(),
+                        "fallback variant must be a unit variant",
+                    ));
+                }
+
+                fallback = Some(&variant.ident);
+            } else {
+                let ident = IdentString::new(&variant.ident);
+                let command = ident.as_str().to_kebab_case();
+
+                parsed_variants.push(ParsedSubcommandVariant { ident, command });
+            }
+        }
+
+        let fallback = match fallback {
+            Some(fallback) => Fallback::Explicit(fallback),
+            None => {
+                let mut base_ident = format_ident!("Fallback");
+
+                // Performance nitpick: == on an identifier is internally doing
+                // to_string
+                while parsed_variants
+                    .iter()
+                    .any(|variant| *variant.ident.raw() == base_ident)
+                {
+                    base_ident = format_ident!("_{base_ident}");
+                }
+
+                Fallback::Internal(base_ident)
+            }
+        };
+
+        Ok(Self {
+            fallback,
+            variants: parsed_variants,
+        })
+    }
 }
 
 pub fn derive_args_enum_subcommand(
@@ -18,6 +105,8 @@ pub fn derive_args_enum_subcommand(
     attrs: &[Attribute],
 ) -> syn::Result<TokenStream2> {
     let state_ident = format_ident!("__{name}State");
+
+    let parsed_variants = ParsedSubcommandInfo::from_variants(variants);
 
     Ok(quote! {
         #[doc(hidden)]

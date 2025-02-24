@@ -4,68 +4,68 @@ use std::str;
 use anyhow::Context;
 use debate::{
     from_args::{self, BuildFromArgs, FromArgs},
-    parameter::Parameter,
+    parameter::{self, Parameter},
     state::{self, State},
 };
 use debate_derive::{FromArgs, Value};
 use debate_parser::{Arg, ArgumentsParser};
 
-#[derive(FromArgs, Debug)]
-#[debate(help, author)]
-struct Arguments {
-    #[debate(short, long = "foo")]
-    path: PathBuf,
+// #[derive(FromArgs, Debug)]
+// #[debate(help, author)]
+// struct Arguments {
+//     #[debate(short, long = "foo")]
+//     path: PathBuf,
 
-    #[debate(short, long)]
-    verbose: bool,
+//     #[debate(short, long)]
+//     verbose: bool,
 
-    #[debate(short)]
-    second_path: Option<PathBuf>,
+//     #[debate(short)]
+//     second_path: Option<PathBuf>,
 
-    #[debate(long = "cool-value", default)]
-    value: i32,
+//     #[debate(long = "cool-value", default)]
+//     value: i32,
 
-    #[debate(flatten)]
-    inner: Alphabet,
+//     #[debate(flatten)]
+//     inner: Alphabet,
 
-    input: String,
-    other_inputs: Vec<String>,
-}
+//     input: String,
+//     other_inputs: Vec<String>,
+// }
 
-#[derive(FromArgs, Debug)]
-struct Alphabet {
-    #[debate(long, short, default)]
-    alpha: u32,
+// #[derive(FromArgs, Debug)]
+// struct Alphabet {
+//     #[debate(long, short, default)]
+//     alpha: u32,
 
-    #[debate(long, short, default)]
-    beta: u32,
+//     #[debate(long, short, default)]
+//     beta: u32,
 
-    #[debate(long, short, default)]
-    gamma: u32,
+//     #[debate(long, short, default)]
+//     gamma: u32,
 
-    #[debate(long)]
-    direction: Option<Direction>,
-}
+//     #[debate(long)]
+//     direction: Option<Direction>,
+// }
 
-#[derive(Debug, Clone, Copy, Value)]
-enum Direction {
-    Up,
-    Down,
-    Left,
-    Right,
-}
+// #[derive(Debug, Clone, Copy, Value)]
+// enum Direction {
+//     Up,
+//     Down,
+//     Left,
+//     Right,
+// }
 
-enum FlagChoice {
-    OutDir(PathBuf),
-    WorkingDir,
-    OutFile(PathBuf),
-}
+// enum FlagChoice {
+//     OutDir(PathBuf),
+//     WorkingDir,
+//     OutFile(PathBuf),
+// }
 
-enum Subcommand {
-    Clean,
-    Build { target: PathBuf },
-    Add { item: String },
-}
+// enum Subcommand {
+//     Clean,
+//     Build { target: PathBuf },
+//     Add { item: String },
+// }
 
 // enum SubcommandFieldState {
 //     Clean,
@@ -249,6 +249,13 @@ impl<'arg, A> state::Error<'arg, A> for StateError {
         error
     }
 
+    fn unknown_subcommand(expected: &'static [&'static str]) -> Self {
+        Self::Parameter(
+            "subcommand",
+            ParameterError::Custom("invalid subcommand".to_owned()),
+        )
+    }
+
     fn rejected() -> Self {
         Self::Unrecognized
     }
@@ -313,17 +320,17 @@ impl<'arg> debate::parameter::Error<'arg> for ParameterError {
 }
 
 fn main() -> anyhow::Result<()> {
-    let args: Vec<Vec<u8>> = std::env::args_os()
-        .map(|arg| arg.into_encoded_bytes())
-        .collect();
+    // let args: Vec<Vec<u8>> = std::env::args_os()
+    //     .map(|arg| arg.into_encoded_bytes())
+    //     .collect();
 
-    let args: Result<Arguments, BuildError> = Arguments::from_args(ArgumentsParser::new(
-        args.iter().skip(1).map(|arg| arg.as_slice()),
-    ));
+    // let args: Result<Arguments, BuildError> = Arguments::from_args(ArgumentsParser::new(
+    //     args.iter().skip(1).map(|arg| arg.as_slice()),
+    // ));
 
-    let args = args.context("error parsing CLI argument")?;
+    // let args = args.context("error parsing CLI argument")?;
 
-    println!("{args:#?}");
+    // println!("{args:#?}");
 
     Ok(())
 }

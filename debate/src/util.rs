@@ -59,6 +59,10 @@ where
         })
     }
 
+    fn unknown_subcommand(expected: &'static [&'static str]) -> Self {
+        Self::Error(E::unknown_subcommand(expected))
+    }
+
     fn rejected() -> Self {
         Self::Error(E::rejected())
     }

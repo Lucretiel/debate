@@ -16,7 +16,7 @@ use syn::spanned::Spanned;
 use syn::{Attribute, Expr, Field, Generics, Ident, Token, Type, punctuated::Punctuated};
 use syn::{Index, LitInt};
 
-use super::common::IdentString;
+use super::common::{FlattenOr, IdentString, make_struct_state_block};
 
 #[derive(darling::FromAttributes, Debug)]
 #[darling(attributes(debate))]
@@ -137,11 +137,6 @@ impl<'a> ParsedFieldInfo<'a> {
             ParsedFieldInfo::Option(_) => None,
         }
     }
-}
-
-enum FlattenOr<F, T> {
-    Flatten(F),
-    Normal(T),
 }
 
 fn compute_long(
@@ -387,19 +382,15 @@ pub fn derive_args_struct(
         }
     }
 
-    let field_state_contents = fields.iter().map(|info| match info {
+    let state_block = make_struct_state_block(fields.iter().map(|info| match *info {
         // For both positional and optional parameters, emit an option
         // containing the value
         ParsedFieldInfo::Positional(PositionalFieldInfo { ty, .. })
-        | ParsedFieldInfo::Option(OptionFieldInfo { ty, .. }) => {
-            quote! {  ::core::option::Option<#ty>, }
-        }
+        | ParsedFieldInfo::Option(OptionFieldInfo { ty, .. }) => FlattenOr::Normal(ty),
 
         // For flattened fields, emit the state
-        ParsedFieldInfo::Flatten(FlattenFieldInfo { ty, .. }) => quote! {
-           <#ty as ::debate::from_args::BuildFromArgs<'arg>>::State,
-        },
-    });
+        ParsedFieldInfo::Flatten(FlattenFieldInfo { ty, .. }) => FlattenOr::Flatten(ty),
+    }));
 
     // Reuse these everywhere
     let arg_ident = format_ident!("arg");
@@ -635,12 +626,7 @@ pub fn derive_args_struct(
     Ok(quote! {
         #[doc(hidden)]
         #[derive(::core::default::Default)]
-        struct #state_ident<'arg> {
-            fields: (#(#field_state_contents)*),
-            position: u16,
-            help: bool,
-            phantom: ::core::marker::PhantomData<&'arg ()>,
-        }
+        struct #state_ident<'arg> #state_block
 
         impl<'arg> ::debate::state::State<'arg> for #state_ident<'arg> {
             fn add_positional<E>(
