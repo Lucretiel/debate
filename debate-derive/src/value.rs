@@ -173,16 +173,63 @@ fn derive_value_enum(
     })
 }
 
+fn derive_value_newtype(ident: &Ident, field: Option<&Ident>) -> syn::Result<TokenStream2> {
+    let struct_body = match field {
+        Some(field) => quote! { { #field: value} },
+        None => quote! { ( #field ) },
+    };
+
+    let match_body = |method| {
+        quote! {
+            match ::debate::parameter::Value::#method(argument) {
+                ::core::result::Result::Ok(value) => ::core::result::Result::Ok(
+                    Self #struct_body
+                ),
+                ::core::result::Result::Err(err) => ::core::result::Result::Err(err),
+            }
+        }
+    };
+
+    let from_arg_body = match_body(format_ident!("from_arg"));
+    let from_str_body = match_body(format_ident!("from_arg_str"));
+
+    Ok(quote! {
+        impl<'arg> ::debate::parameter::Value<'arg> for #ident {
+            fn from_arg<E: ::debate::parameter::Error<'arg>>(
+                argument: ::debate_parser::Arg<'arg>,
+            ) -> Result<Self, E> {
+                #from_arg_body
+            }
+
+            fn from_arg_str<E: ::debate::parameter::Error<'arg>>(
+                argument: &str,
+            ) -> Result<Self, E> {
+                #from_str_body
+            }
+        }
+    })
+}
+
 pub fn derive_value_result(item: TokenStream2) -> syn::Result<TokenStream2> {
     let input: DeriveInput = syn::parse2(item)?;
 
-    let no_derive = |msg| Err(syn::Error::new(input.span(), msg));
-
     match input.data {
-        syn::Data::Struct(data_struct) => todo!(),
+        syn::Data::Struct(ref data) => {
+            let field = data.fields.iter().exactly_one().map_err(|_| {
+                syn::Error::new(
+                    input.span(),
+                    "can only derive `Value` on structs with exactly one field",
+                )
+            })?;
+
+            derive_value_newtype(&input.ident, field.ident.as_ref())
+        }
         syn::Data::Enum(ref data) => {
             derive_value_enum(&input.ident, &input.generics, &data.variants)
         }
-        syn::Data::Union(_) => no_derive("can't derive `Value` on a union"),
+        syn::Data::Union(_) => Err(syn::Error::new(
+            input.span(),
+            "can't derive `Value` on a union",
+        )),
     }
 }
