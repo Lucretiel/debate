@@ -220,6 +220,48 @@ impl<'a> ParsedFieldInfo<'a> {
     }
 }
 
+pub fn indexed_fields<'a>(
+    fields: &'a [ParsedFieldInfo<'a>],
+) -> impl Iterator<Item = (Index, &'a ParsedFieldInfo<'a>)> {
+    fields
+        .iter()
+        .enumerate()
+        .map(|(index, field)| (Index::from(index), field))
+}
+
+pub fn option_fields<'a>(
+    fields: &'a [ParsedFieldInfo<'a>],
+) -> impl Iterator<Item = (Index, &'a OptionFieldInfo<'a>)> {
+    indexed_fields(fields).filter_map(|(index, field)| match field {
+        ParsedFieldInfo::Option(field) => Some((index, field)),
+        ParsedFieldInfo::Positional(_) | ParsedFieldInfo::Flatten(_) => None,
+    })
+}
+
+pub fn flatten_fields<'a>(
+    fields: &'a [ParsedFieldInfo<'a>],
+) -> impl Iterator<Item = (Index, &'a FlattenFieldInfo<'a>)> {
+    indexed_fields(fields).filter_map(|(index, field)| match field {
+        ParsedFieldInfo::Flatten(field) => Some((index, field)),
+        ParsedFieldInfo::Option(_) | ParsedFieldInfo::Positional(_) => None,
+    })
+}
+
+pub fn positional_flatten_fields<'a>(
+    fields: &'a [ParsedFieldInfo<'a>],
+) -> impl Iterator<
+    Item = (
+        Index,
+        Literal,
+        FlattenOr<&'a FlattenFieldInfo<'a>, &'a PositionalFieldInfo<'a>>,
+    ),
+> {
+    indexed_fields(fields)
+        .filter_map(|(idx, field)| field.get_positional().map(|info| (idx, info)))
+        .enumerate()
+        .map(|(position, (index, field))| (index, Literal::usize_unsuffixed(position), field))
+}
+
 fn compute_long(
     long: Option<SpannedValue<String>>,
     field_name: &Ident,
@@ -311,16 +353,18 @@ impl OptionTag {
 /// is always `Result<(), impl ParameterError>`. The field is
 /// `fields.#field-index`.
 pub fn apply_arg_to_field(
+    fields_ident: &Ident,
+    argument_ident: &Ident,
     field_index: &Index,
     initial_method: &Ident,
     follow_up_method: &Ident,
 ) -> impl ToTokens {
     quote! {
-        match fields.#field_index {
-            ::core::option::Option::None => match ::debate::parameter::Parameter::#initial_method(argument) {
+        match #fields_ident.#field_index {
+            ::core::option::Option::None => match ::debate::parameter::Parameter::#initial_method(#argument_ident) {
                 ::core::result::Result::Err(err) => ::core::result::Result::Err(err),
                 ::core::result::Result::Ok(value) => {
-                    fields.#field_index = ::core::option::Option::Some(value);
+                    #fields_ident.#field_index = ::core::option::Option::Some(value);
                     ::core::result::Result::Ok(())
                 }
             }
@@ -349,7 +393,7 @@ pub fn handle_propagated_error(
             ::core::result::Result::Ok(()) => return ::core::result::Result::Ok(()),
             ::core::result::Result::Err(err) => match err {
                 ::debate::util::DetectUnrecognized::Unrecognized(#unrecognized_bind) => #unrecognized,
-                ::debate::util::DetectUnrecognized::Error(#err) => return #wrap_err,
+                ::debate::util::DetectUnrecognized::Error(#err) => return ::core::result::Result::Err(#wrap_err),
             }
         }
     }
@@ -364,7 +408,7 @@ pub fn handle_flatten(
     field_name: Option<&str>,
     unrecognized_bind: impl ToTokens,
     unrecognized: impl ToTokens,
-) -> impl ToTokens {
+) -> TokenStream2 {
     handle_propagated_error(
         expr,
         unrecognized_bind,
@@ -388,25 +432,27 @@ pub fn handle_flatten(
 ///     *position = {/* handle argument for this field */}
 /// }
 /// ```
-pub fn visit_positional_arms_for_fields<'a>(
+pub fn visit_positional_arms_for_fields(
+    fields_ident: &Ident,
+    argument_ident: &Ident,
     arg_ident: &Ident,
     add_arg_ident: &Ident,
-    fields: impl IntoIterator<Item = &'a ParsedFieldInfo<'a>>,
+    fields: &[ParsedFieldInfo<'_>],
 ) -> impl Iterator<Item = TokenStream2> {
-    fields
-        .into_iter()
-        .enumerate()
-        .map(|(idx, field)| (Index::from(idx), field))
-        .filter_map(|(idx, info)| info.get_positional().map(|info| (idx, info)))
-        .enumerate()
-        .map(|(position, info)| (Literal::usize_unsuffixed(position), info))
-        .map(|(position, (idx, info))| match info {
+    positional_flatten_fields(fields).map(|(idx, position, info)| {
+        let body = match info {
             // This is a regular positional field
             FlattenOr::Normal(info) => {
                 let field_str = info.ident.as_str();
-                let apply_argument = apply_arg_to_field(&idx, arg_ident, add_arg_ident);
+                let apply_argument = apply_arg_to_field(
+                    fields_ident,
+                    argument_ident,
+                    &idx,
+                    arg_ident,
+                    add_arg_ident,
+                );
 
-                let body = handle_propagated_error(
+                handle_propagated_error(
                     apply_argument,
                     quote! { () },
                     quote! { #position + 1 },
@@ -418,15 +464,7 @@ pub fn visit_positional_arms_for_fields<'a>(
                             )
                         }
                     },
-                );
-
-                // TODO: consider `loop { match { } }` instead of a waterfall
-                // of `if`
-                quote! {
-                    if *position == #position {
-                        *position = #body;
-                    }
-                }
+                )
             }
             // This is a flattened field
             FlattenOr::Flatten(info) => {
@@ -437,18 +475,184 @@ pub fn visit_positional_arms_for_fields<'a>(
                     )
                 };
 
-                let body = handle_flatten(
+                handle_flatten(
                     expr,
                     info.ident_str(),
                     quote! { () },
                     quote! { #position + 1 },
-                );
+                )
+            }
+        };
 
-                quote! {
-                    if *position == #position {
-                        *position = #body;
-                    }
-                }
+        quote! {
+            if *position == #position {
+                *position = #body;
+            }
+        }
+    })
+}
+
+/// Create match arms for long_option, long, and short
+pub fn create_local_option_arms<'a>(
+    fields_ident: &Ident,
+    argument_ident: &Ident,
+    fields: &'a [ParsedFieldInfo<'a>],
+    make_scrutinee: impl Fn(&'a OptionFieldInfo<'a>) -> Option<Literal>,
+    initial_method: &Ident,
+    follow_up_method: &Ident,
+) -> impl Iterator<Item = impl ToTokens> {
+    option_fields(fields)
+        .filter_map(move |(index, field)| {
+            make_scrutinee(field).map(|scrutinee| (field, scrutinee, index))
+        })
+        .map(move |(field, scrutinee, index)| {
+            let field_name = field.ident.as_str();
+
+            let expr = apply_arg_to_field(
+                fields_ident,
+                argument_ident,
+                &index,
+                initial_method,
+                follow_up_method,
+            );
+
+            quote! {
+                #scrutinee => match (#expr) {
+                    ::core::result::Result::Ok(()) => ::core::result::Result::Ok(()),
+                    ::core::result::Result::Err(err) => ::core::result::Result::Err(
+                        ::debate::state::Error::parameter(#field_name, err)
+                    ),
+                },
             }
         })
+}
+
+fn complete_option_body<'a>(
+    fields_ident: &Ident,
+    argument_ident: &Ident,
+    option_expr: impl ToTokens,
+
+    fields: &'a [ParsedFieldInfo<'a>],
+    make_scrutinee: impl Fn(&'a OptionFieldInfo<'a>) -> Option<Literal>,
+
+    parameter_method: &Ident,
+    add_parameter_method: &Ident,
+
+    flatten_state_method: &Ident,
+    flatten_rebind_argument: impl ToTokens,
+) -> TokenStream2 {
+    let local_arms = create_local_option_arms(
+        fields_ident,
+        argument_ident,
+        fields,
+        make_scrutinee,
+        parameter_method,
+        add_parameter_method,
+    );
+
+    let flatten_arms = flatten_fields(fields).map(|(index, info)| {
+        let body = handle_flatten(
+            quote! {
+                ::debate::state::State::#flatten_state_method(
+                    &mut fields.#index,
+                    option,
+                    argument
+                )
+            },
+            info.ident_str(),
+            argument_ident,
+            argument_ident,
+        );
+
+        quote! {
+            let #flatten_rebind_argument = #body;
+        }
+    });
+
+    quote! {
+        match (#option_expr) {
+            #(#local_arms)*
+            _ => {
+                #(#flatten_arms)*
+
+                ::core::result::Result::Err(
+                    ::debate::state::Error::unrecognized(
+                        #flatten_rebind_argument
+                    )
+                )
+            }
+        }
+    }
+}
+
+pub fn complete_long_option_body<'a>(
+    fields_ident: &Ident,
+    argument_ident: &Ident,
+    option_ident: &Ident,
+
+    fields: &'a [ParsedFieldInfo<'a>],
+) -> TokenStream2 {
+    complete_option_body(
+        fields_ident,
+        argument_ident,
+        quote! { #option_ident.bytes() },
+        fields,
+        |info| {
+            info.tags
+                .long()
+                .map(|long| Literal::byte_string(long.as_bytes()))
+        },
+        &format_ident!("arg"),
+        &format_ident!("add_arg"),
+        &format_ident!("add_long_option"),
+        quote! { () },
+    )
+}
+
+pub fn complete_long_body<'a>(
+    fields_ident: &Ident,
+    argument_ident: &Ident,
+    option_ident: &Ident,
+
+    fields: &'a [ParsedFieldInfo<'a>],
+) -> TokenStream2 {
+    complete_option_body(
+        fields_ident,
+        argument_ident,
+        quote! { #option_ident.bytes() },
+        fields,
+        |info| {
+            info.tags
+                .long()
+                .map(|long| Literal::byte_string(long.as_bytes()))
+        },
+        &format_ident!("present"),
+        &format_ident!("add_present"),
+        &format_ident!("add_long"),
+        argument_ident,
+    )
+}
+
+pub fn complete_short_body<'a>(
+    fields_ident: &Ident,
+    argument_ident: &Ident,
+    option_ident: &Ident,
+
+    fields: &'a [ParsedFieldInfo<'a>],
+) -> TokenStream2 {
+    complete_option_body(
+        fields_ident,
+        argument_ident,
+        option_ident,
+        fields,
+        |info| {
+            info.tags
+                .short()
+                .map(|short| Literal::byte_character(*short as u8))
+        },
+        &format_ident!("present"),
+        &format_ident!("add_present"),
+        &format_ident!("add_short"),
+        argument_ident,
+    )
 }

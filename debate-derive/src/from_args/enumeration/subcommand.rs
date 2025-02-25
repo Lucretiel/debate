@@ -6,13 +6,17 @@ use itertools::Itertools as _;
 use proc_macro2::{Literal, TokenStream as TokenStream2};
 use quote::{format_ident, quote};
 use syn::{
-    Attribute, DataEnum, Fields, FieldsNamed, FieldsUnnamed, Generics, Ident, Token, Variant,
-    punctuated::Punctuated, spanned::Spanned,
+    Fields, FieldsNamed, FieldsUnnamed, Generics, Ident, Token, Variant, punctuated::Punctuated,
+    spanned::Spanned,
 };
 
-use crate::from_args::common::{
-    IdentString, ParsedFieldInfo, struct_state_block_from_fields,
-    struct_state_init_block_from_fields, visit_positional_arms_for_fields,
+use crate::from_args::{
+    common::{
+        IdentString, ParsedFieldInfo, complete_long_option_body, create_local_option_arms,
+        struct_state_block_from_fields, struct_state_init_block_from_fields,
+        visit_positional_arms_for_fields,
+    },
+    from_args_impl,
 };
 
 /// Ident of the unselected subcommand (that is, the enum variant)
@@ -159,21 +163,11 @@ pub fn derive_args_enum_subcommand(
     let present_ident = format_ident!("present");
     let add_arg_ident = format_ident!("add_arg");
     let add_present_ident = format_ident!("add_present");
-
-    let state_ident = format_ident!("__{name}State");
+    let fields_ident = format_ident!("fields");
 
     let parsed_variants = ParsedSubcommandInfo::from_variants(variants)?;
 
     let fallback_ident = parsed_variants.fallback.ident();
-
-    let state_variants = parsed_variants.variants.iter().map(|variant| {
-        let variant_ident = variant.ident.raw();
-        let variant_state_body = struct_state_block_from_fields(&variant.fields);
-
-        quote! {
-            #variant_ident #variant_state_body
-        }
-    });
 
     let all_option_fields = parsed_variants
         .variants
@@ -195,53 +189,68 @@ pub fn derive_args_enum_subcommand(
         .map(|tag| *tag)
         .collect();
 
-    let select_subcommand_arms = parsed_variants.variants.iter().map(|variant| {
-        let scrutinee = variant.command.as_bytes();
-        let scrutinee = Literal::byte_string(scrutinee);
-        let variant_ident = variant.ident.raw();
-        let variant_init_block = struct_state_init_block_from_fields(&variant.fields);
+    Ok(from_args_impl(
+        name,
+        |state_ident, lifetime| {
+            let state_variants = parsed_variants.variants.iter().map(|variant| {
+                let variant_ident = variant.ident.raw();
+                let variant_state_body = struct_state_block_from_fields(&variant.fields);
 
-        quote! {
-            #scrutinee => #state_ident :: #variant_ident #variant_init_block
-        }
-    });
+                quote! {
+                    #variant_ident #variant_state_body
+                }
+            });
 
-    let visit_positional_arms = parsed_variants.variants.iter().map(|variant| {
-        let variant_ident = variant.ident.raw();
-        let local_positional_arms =
-            visit_positional_arms_for_fields(&arg_ident, &add_arg_ident, &variant.fields);
-
-        quote! {
-            #state_ident :: #variant_ident { ref mut fields, ref mut position, .. } => {
-                #(#local_positional_arms)*
-
-                ::core::result::Result::Err(
-                    ::debate::state::Error::unrecognized(())
-                )
+            quote! {
+                #[doc(hidden)]
+                #[derive(::core::default::Default)]
+                enum #state_ident<#lifetime> {
+                    #[default]
+                    #fallback_ident,
+                    #(#state_variants,)*
+                }
             }
-        }
-    });
+        },
+        |state_ident, lifetime| quote! { #state_ident<#lifetime> },
+        |argument| {
+            // Arms of the match block that attempts to convert a positional argument
+            // into a selected subcommand
+            let select_subcommand_arms = parsed_variants.variants.iter().map(|variant| {
+                let scrutinee = variant.command.as_bytes();
+                let scrutinee = Literal::byte_string(scrutinee);
+                let variant_ident = variant.ident.raw();
+                let variant_init_block = struct_state_init_block_from_fields(&variant.fields);
 
-    Ok(quote! {
-        #[doc(hidden)]
-        #[derive(::core::default::Default)]
-        enum #state_ident<'arg> {
-            #[default]
-            #fallback_ident,
-            #(#state_variants,)*
-        }
+                quote! {
+                    #scrutinee => Self :: #variant_ident #variant_init_block
+                }
+            });
 
-        impl<'arg> ::debate::state::State<'arg> for #state_ident<'arg> {
-            fn add_positional<E>(
-                &mut self,
-                argument: ::debate_parser::Arg<'arg>
-            ) -> ::core::result::Result<(), E>
-            where
-                E: ::debate::state::Error<'arg, ()>
-            {
-                match *state {
-                    #state_ident :: #fallback_ident => {
-                        *self = match argument.bytes() {
+            let visit_positional_arms = parsed_variants.variants.iter().map(|variant| {
+                let variant_ident = variant.ident.raw();
+                let local_positional_arms = visit_positional_arms_for_fields(
+                    &fields_ident,
+                    argument,
+                    &arg_ident,
+                    &add_arg_ident,
+                    &variant.fields,
+                );
+
+                quote! {
+                    Self :: #variant_ident { ref mut fields, ref mut position, .. } => {
+                        #(#local_positional_arms)*
+
+                        ::core::result::Result::Err(
+                            ::debate::state::Error::unrecognized(())
+                        )
+                    }
+                }
+            });
+
+            quote! {
+                match *self {
+                    Self :: #fallback_ident => {
+                        *self = match #argument.bytes() {
                             #(#select_subcommand_arms,)*
                             _ => return Err(::debate::state::Error::unknown_subcommand(&[])),
                         };
@@ -254,42 +263,33 @@ pub fn derive_args_enum_subcommand(
                     )*
                 }
             }
+        },
+        |option, argument| {
+            let arms = parsed_variants.variants.iter().map(|variant| {
+                let variant_ident = variant.ident.raw();
+                let body =
+                    complete_long_option_body(&fields_ident, argument, option, &variant.fields);
 
-            fn add_long_option<E>(
-                &mut self,
-                option: ::debate_parser::Arg<'arg>,
-                argument: ::debate_parser::Arg<'arg>
-            ) -> ::core::result::Result<(), E>
-            where
-                E: ::debate::state::Error<'arg, ()>
-            {}
+                quote! {
+                    Self :: #variant_ident { ref mut fields, .. } => #body,
+                }
+            });
 
-            fn add_long<A, E>(
-                &mut self,
-                option: ::debate_parser::Arg<'arg>,
-                argument: A
-            ) -> ::core::result::Result<(), E>
-            where
-                A: ::debate_parser::ArgAccess<'arg>,
-                E: ::debate::state::Error<'arg, A>
-            {}
-
-            fn add_short<A, E>(
-                &mut self,
-                option: u8,
-                argument: A
-            ) -> ::core::result::Result<(), E>
-            where
-                A: ::debate_parser::ArgAccess<'arg>,
-                E: ::debate::state::Error<'arg, A>
-            {}
-        }
-
-        impl<'arg> ::debate::from_args::BuildFromArgs<'arg> for #name {
-            fn build<E>(state: Self::State) -> ::core::result::Result<Self, E>
-            where
-                E: ::debate::from_args::Error<'arg>
-            {}
-        }
-    })
+            quote! {
+                // TODO: for now we just say unrecognized, but in the future
+                // we need to instead return `rejected` for variants that
+                // we do recognize but which are not a part of the current
+                // subcommand, or are observed before a subcommand is selected
+                match *self {
+                    Self :: #fallback_ident => Err(
+                        ::debate::state::Error::unrecognized(())
+                    ),
+                    #(#arms)*
+                }
+            }
+        },
+        |option, argument| quote! {},
+        |option, argument| quote! {},
+        |state| quote! {},
+    ))
 }
