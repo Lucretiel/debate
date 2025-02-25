@@ -70,8 +70,8 @@ where
         Self::Error(E::unknown_subcommand(expected))
     }
 
-    fn rejected() -> Self {
-        Self::Error(E::rejected())
+    fn wrong_subcommand_for_argument(allowed: &[&'static str]) -> Self {
+        Self::Error(E::wrong_subcommand_for_argument(allowed))
     }
 }
 

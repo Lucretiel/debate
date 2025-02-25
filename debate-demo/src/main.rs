@@ -176,8 +176,8 @@ impl<'arg, A> state::Error<'arg, A> for StateError {
         )
     }
 
-    fn rejected() -> Self {
-        Self::Unrecognized
+    fn wrong_subcommand_for_argument(allowed: &[&'static str]) -> Self {
+        todo!()
     }
 }
 

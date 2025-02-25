@@ -1,4 +1,7 @@
-use std::collections::HashSet;
+use std::{
+    collections::{HashMap, HashSet},
+    hash::Hash,
+};
 
 use darling::FromAttributes;
 use heck::ToKebabCase;
@@ -12,9 +15,10 @@ use syn::{
 
 use crate::from_args::{
     common::{
-        IdentString, ParsedFieldInfo, complete_long_body, complete_long_option_body,
-        complete_short_body, final_field_initializers, struct_state_block_from_fields,
-        struct_state_init_block_from_fields, visit_positional_arms_for_fields,
+        IdentString, OptionFieldInfo, OptionTag, ParsedFieldInfo, complete_long_body,
+        complete_long_option_body, complete_short_body, final_field_initializers,
+        struct_state_block_from_fields, struct_state_init_block_from_fields,
+        visit_positional_arms_for_fields,
     },
     from_args_impl,
 };
@@ -153,6 +157,27 @@ impl<'a> ParsedSubcommandInfo<'a> {
     }
 }
 
+/// Compute a mapping from tags (such as --field or -f) to commands that are
+/// known to use them.
+fn compute_recognition_set<'a, T: Hash + Eq>(
+    variants: impl IntoIterator<Item = &'a ParsedSubcommandVariant<'a>>,
+    get_tag: impl Fn(&'a OptionTag) -> Option<T>,
+) -> HashMap<T, Vec<&'a str>> {
+    let mut set: HashMap<T, Vec<&str>> = HashMap::new();
+
+    for variant in variants {
+        for field in &variant.fields {
+            if let ParsedFieldInfo::Option(field) = field {
+                if let Some(tag) = get_tag(&field.tags) {
+                    set.entry(tag).or_default().push(&variant.command);
+                }
+            }
+        }
+    }
+
+    set
+}
+
 pub fn derive_args_enum_subcommand(
     name: &Ident,
     variants: &Punctuated<Variant, Token![,]>,
@@ -176,16 +201,13 @@ pub fn derive_args_enum_subcommand(
             ParsedFieldInfo::Positional(_) | ParsedFieldInfo::Flatten(_) => None,
         });
 
-    let all_known_long_tags: HashSet<&str> = all_option_fields
-        .clone()
-        .filter_map(|field| field.tags.long())
-        .map(|tag| *tag)
-        .collect();
+    let long_option_commands = compute_recognition_set(&parsed_variants.variants, |tags| {
+        tags.long().as_deref().copied()
+    });
 
-    let all_known_short_tags: HashSet<char> = all_option_fields
-        .filter_map(|field| field.tags.short())
-        .map(|tag| *tag)
-        .collect();
+    let short_option_commands = compute_recognition_set(&parsed_variants.variants, |tags| {
+        tags.short().as_deref().copied()
+    });
 
     let all_commands = parsed_variants
         .variants

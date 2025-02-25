@@ -41,12 +41,12 @@ pub trait Error<'arg, Arg> {
     /// There was a state error from a flattened field
     fn flattened(field: &'static str, error: Self) -> Self;
 
-    /// The argument was interpreted as a subcommand, but wasn't recognized as
-    /// a known subcommand.
+    /// The positional argument was interpreted as a subcommand, but wasn't
+    /// recognized as a known subcommand. The list of known subcommands is
+    /// given.
     fn unknown_subcommand(expected: &'static [&'static str]) -> Self;
 
-    /// An argument was recognized, but rejected (for instance, because of a
-    /// mutual exclusion rule). This variant should gain a field for rationale
-    /// to be attached.
-    fn rejected() -> Self;
+    /// The option was recognized, but it isn't a valid  for this particular
+    /// subcommand. The list of subcommands that accept this option is given
+    fn wrong_subcommand_for_argument(allowed: &[&'static str]) -> Self;
 }
