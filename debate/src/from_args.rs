@@ -1,8 +1,8 @@
 use core::{fmt::Display, marker::PhantomData};
 
-use debate_parser::{Arg, ArgAccess, ArgumentsParser};
+use debate_parser::{Arg, ArgumentsParser};
 
-use crate::state;
+use crate::{parameter, state};
 
 /// A type that can be parsed from command line arguments
 pub trait FromArgs<'arg>: Sized {
@@ -101,15 +101,23 @@ where
                     .map_err(|error| E::long_with_argument(option, argument, error))
             }
 
-            fn visit_long(self, option: Arg<'arg>, arg: impl ArgAccess<'arg>) -> Self::Value {
+            fn visit_long(
+                self,
+                option: Arg<'arg>,
+                arg: impl debate_parser::ArgAccess<'arg>,
+            ) -> Self::Value {
                 self.state
-                    .add_long(option, arg)
+                    .add_long(option, ArgAccessAdapter(arg))
                     .map_err(|error| E::long(option, error))
             }
 
-            fn visit_short(self, option: u8, arg: impl ArgAccess<'arg>) -> Self::Value {
+            fn visit_short(
+                self,
+                option: u8,
+                arg: impl debate_parser::ArgAccess<'arg>,
+            ) -> Self::Value {
                 self.state
-                    .add_short(option, arg)
+                    .add_short(option, ArgAccessAdapter(arg))
                     .map_err(|error| E::short(option, error))
             }
         }
@@ -124,5 +132,20 @@ where
                 Some(Ok(())) => continue,
             }
         }
+    }
+}
+
+struct ArgAccessAdapter<A>(A);
+
+impl<'arg, A> parameter::ArgAccess<'arg> for ArgAccessAdapter<A>
+where
+    A: debate_parser::ArgAccess<'arg>,
+{
+    #[inline]
+    fn with<T, E>(self, op: impl FnOnce(Arg<'arg>) -> Result<T, E>) -> Result<T, E>
+    where
+        E: parameter::Error<'arg>,
+    {
+        op(self.0.take().ok_or_else(|| E::needs_arg())?)
     }
 }

@@ -1,6 +1,8 @@
-use debate_parser::{Arg, ArgAccess};
+use debate_parser::Arg;
 
-use crate::parameter::{Error as ParameterError, Parameter, ParsedValue, RequiredError, Value};
+use crate::parameter::{
+    ArgAccess, Error as ParameterError, Parameter, ParsedValue, RequiredError, Value,
+};
 
 macro_rules! from_str {
     ($(
@@ -143,18 +145,18 @@ where
     }
 
     #[inline]
-    fn arg<E: ParameterError<'arg>>(arg: Arg<'arg>) -> Result<Self, E> {
-        T::from_arg(arg).map(|value| std::vec::Vec::from([value]))
+    fn arg<E: ParameterError<'arg>>(argument: Arg<'arg>) -> Result<Self, E> {
+        T::from_arg(argument).map(|value| std::vec::Vec::from([value]))
     }
 
     #[inline]
-    fn present<E: ParameterError<'arg>>(arg: impl ArgAccess<'arg>) -> Result<Self, E> {
-        Self::arg(arg.take().ok_or_else(|| E::needs_arg())?)
+    fn present<E: ParameterError<'arg>>(argument: impl ArgAccess<'arg>) -> Result<Self, E> {
+        argument.with(Self::arg)
     }
 
     #[inline]
-    fn add_arg<E: ParameterError<'arg>>(&mut self, arg: Arg<'arg>) -> Result<(), E> {
-        T::from_arg(arg).map(|value| {
+    fn add_arg<E: ParameterError<'arg>>(&mut self, argument: Arg<'arg>) -> Result<(), E> {
+        T::from_arg(argument).map(|value| {
             self.push(value);
         })
     }
@@ -164,6 +166,6 @@ where
         &mut self,
         argument: impl ArgAccess<'arg>,
     ) -> Result<(), E> {
-        Self::add_arg(self, argument.take().ok_or_else(|| E::needs_arg())?)
+        argument.with(|arg| self.add_arg(arg))
     }
 }

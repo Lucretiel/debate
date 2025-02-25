@@ -3,7 +3,7 @@ use core::{
     str::{self, FromStr},
 };
 
-use debate_parser::{Arg, ArgAccess};
+use debate_parser::Arg;
 
 /**
 A required [`Parameter`] was absent from the command-line arguments.
@@ -15,6 +15,12 @@ which includes more context.
  */
 #[derive(Debug, Clone, Copy)]
 pub struct RequiredError;
+
+pub trait ArgAccess<'arg> {
+    fn with<T, E>(self, op: impl FnOnce(Arg<'arg>) -> Result<T, E>) -> Result<T, E>
+    where
+        E: Error<'arg>;
+}
 
 /**
 A parameter is a type that can be parsed from one or more command line
@@ -136,13 +142,13 @@ where
     }
 
     #[inline]
-    fn arg<E: Error<'arg>>(arg: Arg<'arg>) -> Result<Self, E> {
-        T::from_arg(arg)
+    fn arg<E: Error<'arg>>(argument: Arg<'arg>) -> Result<Self, E> {
+        T::from_arg(argument)
     }
 
     #[inline]
-    fn present<E: Error<'arg>>(arg: impl ArgAccess<'arg>) -> Result<Self, E> {
-        T::from_arg(arg.take().ok_or_else(|| E::needs_arg())?)
+    fn present<E: Error<'arg>>(argument: impl ArgAccess<'arg>) -> Result<Self, E> {
+        argument.with(T::from_arg)
     }
 
     #[inline]

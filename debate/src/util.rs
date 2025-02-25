@@ -1,9 +1,9 @@
 use core::fmt;
 
-use debate_parser::{Arg, ArgAccess};
+use debate_parser::Arg;
 
 use crate::{
-    parameter::{self, Parameter, RequiredError},
+    parameter::{self, ArgAccess, Parameter, RequiredError},
     state,
 };
 

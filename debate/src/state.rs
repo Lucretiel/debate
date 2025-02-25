@@ -1,4 +1,4 @@
-use debate_parser::{Arg, ArgAccess};
+use debate_parser::Arg;
 
 use crate::parameter;
 
@@ -15,12 +15,12 @@ pub trait State<'arg>: Default {
 
     fn add_long<A, E>(&mut self, option: Arg<'arg>, argument: A) -> Result<(), E>
     where
-        A: ArgAccess<'arg>,
+        A: parameter::ArgAccess<'arg>,
         E: Error<'arg, A>;
 
     fn add_short<A, E>(&mut self, option: u8, argument: A) -> Result<(), E>
     where
-        A: ArgAccess<'arg>,
+        A: parameter::ArgAccess<'arg>,
         E: Error<'arg, A>;
 }
 

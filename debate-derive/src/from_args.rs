@@ -125,7 +125,7 @@ fn from_args_impl(
                 argument: A
             ) -> ::core::result::Result<(), E>
             where
-                A: ::debate_parser::ArgAccess<#lifetime>,
+                A: ::debate::parameter::ArgAccess<#lifetime>,
                 E: ::debate::state::Error<#lifetime, A>
             {
                 #add_long_body
@@ -137,7 +137,7 @@ fn from_args_impl(
                 argument: A
             ) -> ::core::result::Result<(), E>
             where
-                A: ::debate_parser::ArgAccess<#lifetime>,
+                A: ::debate::parameter::ArgAccess<#lifetime>,
                 E: ::debate::state::Error<#lifetime, A>
             {
                 #add_short_body
