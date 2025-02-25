@@ -2,7 +2,7 @@ mod subcommand;
 
 use darling::FromAttributes;
 use proc_macro2::TokenStream as TokenStream2;
-use syn::{Attribute, DataEnum, Generics, Ident, Token, Variant, punctuated::Punctuated};
+use syn::{Attribute, Generics, Ident, Token, Variant, punctuated::Punctuated};
 
 #[derive(FromAttributes)]
 #[darling(attributes(debate))]

@@ -3,7 +3,7 @@ use itertools::Itertools;
 use proc_macro2::{Literal, TokenStream as TokenStream2};
 use quote::{ToTokens, format_ident, quote};
 use syn::{
-    DeriveInput, Field, FieldsNamed, FieldsUnnamed, Generics, Ident, Token, Variant,
+    DeriveInput, FieldsNamed, FieldsUnnamed, Generics, Ident, Token, Variant,
     punctuated::Punctuated, spanned::Spanned,
 };
 

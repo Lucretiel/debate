@@ -12,7 +12,8 @@ use syn::{
 
 use crate::from_args::{
     common::{
-        IdentString, ParsedFieldInfo, complete_long_option_body, struct_state_block_from_fields,
+        IdentString, ParsedFieldInfo, complete_long_body, complete_long_option_body,
+        complete_short_body, final_field_initializers, struct_state_block_from_fields,
         struct_state_init_block_from_fields, visit_positional_arms_for_fields,
     },
     from_args_impl,
@@ -159,9 +160,7 @@ pub fn derive_args_enum_subcommand(
 ) -> syn::Result<TokenStream2> {
     // Reuse these everywhere
     let arg_ident = format_ident!("arg");
-    let present_ident = format_ident!("present");
     let add_arg_ident = format_ident!("add_arg");
-    let add_present_ident = format_ident!("add_present");
     let fields_ident = format_ident!("fields");
 
     let parsed_variants = ParsedSubcommandInfo::from_variants(variants)?;
@@ -187,6 +186,15 @@ pub fn derive_args_enum_subcommand(
         .filter_map(|field| field.tags.short())
         .map(|tag| *tag)
         .collect();
+
+    let all_commands = parsed_variants
+        .variants
+        .iter()
+        .map(|variant| variant.command.as_str());
+
+    let all_commands_slice = quote! {
+        &[#(#all_commands,)*]
+    };
 
     Ok(from_args_impl(
         name,
@@ -236,7 +244,7 @@ pub fn derive_args_enum_subcommand(
                 );
 
                 quote! {
-                    Self :: #variant_ident { ref mut fields, ref mut position, .. } => {
+                    Self :: #variant_ident { ref mut #fields_ident, ref mut position, .. } => {
                         #(#local_positional_arms)*
 
                         ::core::result::Result::Err(
@@ -251,10 +259,14 @@ pub fn derive_args_enum_subcommand(
                     Self :: #fallback_ident => {
                         *self = match #argument.bytes() {
                             #(#select_subcommand_arms,)*
-                            _ => return Err(::debate::state::Error::unknown_subcommand(&[])),
+                            _ => return ::core::result::Result::Err(
+                                ::debate::state::Error::unknown_subcommand(
+                                    #all_commands_slice,
+                                )
+                            ),
                         };
 
-                        Ok(())
+                        ::core::result::Result::Ok(())
                     }
 
                     #(
@@ -270,7 +282,7 @@ pub fn derive_args_enum_subcommand(
                     complete_long_option_body(&fields_ident, argument, option, &variant.fields);
 
                 quote! {
-                    Self :: #variant_ident { ref mut fields, .. } => #body,
+                    Self :: #variant_ident { ref mut #fields_ident, .. } => #body,
                 }
             });
 
@@ -280,15 +292,92 @@ pub fn derive_args_enum_subcommand(
                 // we do recognize but which are not a part of the current
                 // subcommand, or are observed before a subcommand is selected
                 match *self {
-                    Self :: #fallback_ident => Err(
+                    Self :: #fallback_ident => ::core::result::Result::Err(
                         ::debate::state::Error::unrecognized(())
                     ),
                     #(#arms)*
                 }
             }
         },
-        |option, argument| quote! {},
-        |option, argument| quote! {},
-        |state| quote! {},
+        |option, argument| {
+            let arms = parsed_variants.variants.iter().map(|variant| {
+                let variant_ident = variant.ident.raw();
+                let body = complete_long_body(&fields_ident, argument, option, &variant.fields);
+
+                quote! {
+                    Self :: #variant_ident { ref mut #fields_ident, .. } => #body,
+                }
+            });
+
+            quote! {
+                match *self {
+                    Self :: #fallback_ident => ::core::result::Result::Err(
+                        ::debate::state::Error::unrecognized(#argument)
+                    ),
+                    #(#arms)*
+                }
+            }
+        },
+        |option, argument| {
+            let arms = parsed_variants.variants.iter().map(|variant| {
+                let variant_ident = variant.ident.raw();
+                let body = complete_short_body(&fields_ident, argument, option, &variant.fields);
+
+                quote! {
+                    Self :: #variant_ident { ref mut #fields_ident, .. } => #body,
+                }
+            });
+
+            quote! {
+                match *self {
+                    Self :: #fallback_ident => ::core::result::Result::Err(
+                        ::debate::state::Error::unrecognized(#argument)
+                    ),
+                    #(#arms)*
+                }
+            }
+        },
+        |state| {
+            let fallback_body = match parsed_variants.fallback {
+                Fallback::Explicit(ident) => quote! { Self :: #ident },
+                Fallback::Internal(_) => quote! {
+                    return ::core::result::Result::Err(
+                        ::debate::from_args::Error::required_subcommand(
+                            #all_commands_slice,
+                        )
+                    )
+                },
+            };
+
+            let variant_match_arms = parsed_variants.variants.iter().map(|variant| {
+                let variant_ident = variant.ident.raw();
+                let field_initializers = final_field_initializers(&fields_ident, &variant.fields);
+
+                let variant_body = match variant.mode {
+                    VariantMode::Unit => quote! {},
+                    VariantMode::Tuple => quote! {
+                        ( #(#field_initializers,)* )
+                    },
+                    VariantMode::Struct => quote! {
+                        { #(#field_initializers,)* }
+                    },
+                };
+
+                quote! {
+                    Self :: State :: #variant_ident { #fields_ident, ..} => (
+                        Self :: #variant_ident #variant_body
+                    )
+                }
+            });
+
+            quote! {
+                ::core::result::Result::Ok(
+                    match #state {
+                        Self :: State :: #fallback_ident => #fallback_body,
+                        #(#variant_match_arms,)*
+                    }
+                )
+            }
+        },
     ))
 }

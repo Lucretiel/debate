@@ -37,6 +37,12 @@ pub trait Error<'arg> {
     /// provided
     fn required(field: &'static str, long: Option<&'static str>, short: Option<char>) -> Self;
 
+    /// There was an error parsing arguments for a flattened field
+    fn flattened(field: &'static str, error: Self) -> Self;
+
+    /// We required a subcommand, but none was provied
+    fn required_subcommand(expected: &'static [&'static str]) -> Self;
+
     /// Something else went wrong
     fn custom(msg: impl Display) -> Self;
 }

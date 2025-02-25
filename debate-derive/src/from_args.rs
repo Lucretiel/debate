@@ -2,6 +2,7 @@ pub mod common;
 pub mod enumeration;
 pub mod structure;
 
+use itertools::Itertools;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::{format_ident, quote};
 use syn::{DeriveInput, Fields, Ident, spanned::Spanned as _};
@@ -13,7 +14,26 @@ use self::structure::derive_args_struct;
 pub fn derive_args_result(item: TokenStream2) -> syn::Result<TokenStream2> {
     let input: DeriveInput = syn::parse2(item)?;
 
-    let no_derive = |msg| Err(syn::Error::new(input.span(), msg));
+    if let Some(param) = input.generics.const_params().next() {
+        return Err(syn::Error::new(
+            param.span(),
+            "const generics aren't supported by `derive(FromArgs)`",
+        ));
+    }
+
+    if let Some(param) = input.generics.type_params().next() {
+        return Err(syn::Error::new(
+            param.span(),
+            "generic types aren't supported by `derive(FromArgs)`",
+        ));
+    }
+
+    let lifetime = input.generics.lifetimes().at_most_one().map_err(|_| {
+        syn::Error::new(
+            input.generics.span(),
+            "`derive(FromArgs)` type may have at most one lifetime, for borrowed CLI args",
+        )
+    })?;
 
     match input.data {
         syn::Data::Struct(ref data) => derive_args_struct(
@@ -21,7 +41,12 @@ pub fn derive_args_result(item: TokenStream2) -> syn::Result<TokenStream2> {
             match data.fields {
                 Fields::Named(ref fields) => &fields.named,
                 Fields::Unnamed(ref fields) => &fields.unnamed,
-                Fields::Unit => return no_derive("can't derive `FromArgs` on a unit struct"),
+                Fields::Unit => {
+                    return Err(syn::Error::new(
+                        input.span(),
+                        "can't derive `FromArgs` on a unit struct",
+                    ));
+                }
             },
             &input.generics,
             &input.attrs,
@@ -29,7 +54,12 @@ pub fn derive_args_result(item: TokenStream2) -> syn::Result<TokenStream2> {
         syn::Data::Enum(ref data) => {
             derive_args_enum(&input.ident, &data.variants, &input.generics, &input.attrs)
         }
-        syn::Data::Union(_) => no_derive("can't derive `FromArgs` on a union"),
+        syn::Data::Union(_) => {
+            return Err(syn::Error::new(
+                input.span(),
+                "can't derive `FromArgs` on a union",
+            ));
+        }
     }
 }
 
@@ -45,6 +75,7 @@ fn from_args_impl(
     add_long_body: impl FnOnce(&Ident, &Ident) -> TokenStream2,
     add_short_body: impl FnOnce(&Ident, &Ident) -> TokenStream2,
 
+    // State type, state variable
     build_body: impl FnOnce(&Ident) -> TokenStream2,
 ) -> TokenStream2 {
     let state_ident = format_ident!("__{ident}State");

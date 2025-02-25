@@ -567,12 +567,12 @@ fn complete_option_body<'a>(
     }
 }
 
-pub fn complete_long_option_body<'a>(
+pub fn complete_long_option_body(
     fields_ident: &Ident,
     argument_ident: &Ident,
     option_ident: &Ident,
 
-    fields: &'a [ParsedFieldInfo<'a>],
+    fields: &[ParsedFieldInfo<'_>],
 ) -> TokenStream2 {
     complete_option_body(
         fields_ident,
@@ -591,12 +591,12 @@ pub fn complete_long_option_body<'a>(
     )
 }
 
-pub fn complete_long_body<'a>(
+pub fn complete_long_body(
     fields_ident: &Ident,
     argument_ident: &Ident,
     option_ident: &Ident,
 
-    fields: &'a [ParsedFieldInfo<'a>],
+    fields: &[ParsedFieldInfo<'_>],
 ) -> TokenStream2 {
     complete_option_body(
         fields_ident,
@@ -615,12 +615,12 @@ pub fn complete_long_body<'a>(
     )
 }
 
-pub fn complete_short_body<'a>(
+pub fn complete_short_body(
     fields_ident: &Ident,
     argument_ident: &Ident,
     option_ident: &Ident,
 
-    fields: &'a [ParsedFieldInfo<'a>],
+    fields: &[ParsedFieldInfo<'_>],
 ) -> TokenStream2 {
     complete_option_body(
         fields_ident,
@@ -637,4 +637,101 @@ pub fn complete_short_body<'a>(
         &format_ident!("add_short"),
         argument_ident,
     )
+}
+
+pub fn final_field_initializers(
+    fields_ident: &Ident,
+    fields: &[ParsedFieldInfo<'_>],
+) -> impl Iterator<Item = TokenStream2> {
+    struct NormalFieldInfo<'a> {
+        long: Option<&'a str>,
+        short: Option<char>,
+        ident: &'a IdentString<'a>,
+        default: &'a FieldDefault,
+    }
+
+    indexed_fields(fields)
+        .map(|(index, field)| {
+            (
+                index,
+                match field {
+                    ParsedFieldInfo::Positional(field) => FlattenOr::Normal(NormalFieldInfo {
+                        long: None,
+                        short: None,
+                        ident: &field.ident,
+                        default: &field.default,
+                    }),
+                    ParsedFieldInfo::Option(field) => FlattenOr::Normal(NormalFieldInfo {
+                        long: field.tags.long().as_deref().copied(),
+                        short: field.tags.short().as_deref().copied(),
+                        ident: &field.ident,
+                        default: &field.default,
+                    }),
+                    ParsedFieldInfo::Flatten(field) => FlattenOr::Flatten(field),
+                },
+            )
+        })
+        .map(move |(idx, field)| match field {
+            FlattenOr::Normal(field) => {
+                let ident = field.ident.raw();
+                let ident_str = field.ident.as_str();
+
+                let long = match field.long {
+                    Some(long) => quote! {::core::option::Option::Some(#long)},
+                    None => quote! {::core::option::Option::None},
+                };
+
+                let short = match field.short {
+                    Some(short) => quote! {::core::option::Option::Some(#short)},
+                    None => quote! {::core::option::Option::None},
+                };
+
+                let default = match field.default {
+                    FieldDefault::Expr(expr) => quote! { #expr },
+                    FieldDefault::Trait => quote! { ::core::default::Default::default() },
+                    FieldDefault::None => quote! {
+                    match ::debate::parameter::Parameter::absent() {
+                        ::core::result::Result::Ok(value) => value,
+                        ::core::result::Result::Err(::debate::parameter::RequiredError) =>
+                            return ::core::result::Result::Err(
+                                ::debate::from_args::Error::required(
+                                    #ident_str, #long, #short
+                                )
+                            ),
+                        }
+                    },
+                };
+
+                quote! {
+                    #ident: match #fields_ident.#idx {
+                        ::core::option::Option::Some(value) => value,
+                        ::core::option::Option::None => #default,
+                    }
+                }
+            }
+            FlattenOr::Flatten(FlattenFieldInfo { ident, .. }) => {
+                let wrap_err = match ident.as_ref().map(|ident| ident.as_str()) {
+                    Some(ident) => quote! {
+                        ::debate::from_args::Error::flattened(#ident, err)
+                    },
+                    None => quote! { err },
+                };
+
+                let expr = quote! {
+                    match ::debate::from_args::BuildFromArgs::build(
+                        #fields_ident.#idx
+                    ) {
+                        ::core::result::Result::Ok(value) => value,
+                        ::core::result::Result::Err(err) => return (
+                            ::core::result::Result::Err(#wrap_err)
+                        ),
+                    }
+                };
+
+                match ident {
+                    Some(ident) => quote! { #ident : #expr },
+                    None => expr,
+                }
+            }
+        })
 }

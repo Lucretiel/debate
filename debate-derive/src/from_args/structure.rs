@@ -5,18 +5,13 @@ use std::hash::Hash;
 use darling::util::SpannedValue;
 use itertools::Itertools as _;
 use lazy_format::lazy_format;
-use proc_macro2::{Literal, Span, TokenStream as TokenStream2};
+use proc_macro2::{Span, TokenStream as TokenStream2};
 use quote::{format_ident, quote};
-use syn::{Attribute, Field, Generics, Ident, Index, Token, punctuated::Punctuated};
+use syn::{Attribute, Field, Generics, Ident, Token, punctuated::Punctuated};
 
 use crate::from_args::common::{
-    complete_long_body, complete_long_option_body, complete_short_body, flatten_fields,
-    option_fields,
-};
-
-use super::common::{
-    FieldDefault, FlattenFieldInfo, FlattenOr, ParsedFieldInfo, handle_flatten,
-    struct_state_block_from_fields, struct_state_init_block_from_fields,
+    ParsedFieldInfo, complete_long_body, complete_long_option_body, complete_short_body,
+    final_field_initializers, struct_state_block_from_fields, struct_state_init_block_from_fields,
     visit_positional_arms_for_fields,
 };
 
@@ -152,85 +147,14 @@ pub fn derive_args_struct(
             }
         },
         |state| {
-            let final_field_initializers = fields
-                .iter()
-                .map(|info| match info {
-                    ParsedFieldInfo::Positional(info) => {
-                        FlattenOr::Normal((None, None, &info.ident, &info.default))
-                    }
-                    ParsedFieldInfo::Option(info) => FlattenOr::Normal((
-                        info.tags.long(),
-                        info.tags.short(),
-                        &info.ident,
-                        &info.default,
-                    )),
-                    ParsedFieldInfo::Flatten(flatten_field_info) => {
-                        FlattenOr::Flatten(flatten_field_info)
-                    }
-                })
-                .enumerate()
-                .map(|(idx, field)| (Index::from(idx), field))
-                .map(|(idx, field)| match field {
-                    FlattenOr::Normal((long, short, ident, default)) => {
-                        let field_ident_str = ident.as_str();
+            let final_field_initializers = final_field_initializers(&fields_ident, &fields);
 
-                        let long = match long.as_deref() {
-                            Some(&long) => quote! {::core::option::Option::Some(#long)},
-                            None => quote! {::core::option::Option::None},
-                        };
-
-                        let short = match short.as_deref() {
-                            Some(&short) => quote! {::core::option::Option::Some(#short)},
-                            None => quote! {::core::option::Option::None},
-                        };
-
-                        let default = match default {
-                            FieldDefault::Expr(expr) => quote! { #expr },
-                            FieldDefault::Trait => quote! { ::core::default::Default::default() },
-                            FieldDefault::None => quote! {
-                            match ::debate::parameter::Parameter::absent() {
-                                ::core::result::Result::Ok(value) => value,
-                                ::core::result::Result::Err(::debate::parameter::RequiredError) =>
-                                    return ::core::result::Result::Err(
-                                        ::debate::from_args::Error::required(
-                                            #field_ident_str, #long, #short
-                                        )
-                                    ),
-                                }
-                            },
-                        };
-
-                        quote! {
-                            #ident: match fields.#idx {
-                                ::core::option::Option::Some(value) => value,
-                                ::core::option::Option::None => #default,
-                            },
-                        }
-                    }
-                    FlattenOr::Flatten(FlattenFieldInfo { ident, .. }) => {
-                        let expr = quote! {
-                            match ::debate::from_args::BuildFromArgs::build(
-                                fields.#idx
-                            ) {
-                                ::core::result::Result::Ok(value) => value,
-                                ::core::result::Result::Err(err) => return (
-                                    ::core::result::Result::Err(err)
-                                ),
-                            },
-                        };
-
-                        match ident {
-                            Some(ident) => quote! { #ident : #expr },
-                            None => expr,
-                        }
-                    }
-                });
-
+            // TODO: support for tuple structs here
             quote! {
-                let fields = #state.fields;
+                let #fields_ident = #state.fields;
 
                 ::core::result::Result::Ok(Self {
-                    #(#final_field_initializers)*
+                    #(#final_field_initializers,)*
                 })
             }
         },
