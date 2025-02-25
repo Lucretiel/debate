@@ -87,23 +87,23 @@ pub trait Error<'arg> {
     fn needs_arg() -> Self;
 
     /// The argument must NOT have a value, and got one
-    fn got_arg(arg: Arg<'arg>) -> Self;
+    fn got_arg(argument: Arg<'arg>) -> Self;
 
     /// The argument appeared more times than expected on the command line
     fn got_additional_instance() -> Self;
 
     /// The argument wasn't valid UTF-8 and should be
-    fn invalid_utf8(arg: Arg<'arg>) -> Self;
+    fn invalid_utf8(argument: Arg<'arg>) -> Self;
 
     /// The argument was valid UTF-8, but it failed to parse into an instance
     /// of the type
-    fn parse_error(arg: &str, msg: impl Display) -> Self;
+    fn parse_error(argument: &str, message: impl Display) -> Self;
 
     /// The argument failed to parse into an instance of the type.
-    fn byte_parse_error(arg: Arg<'arg>, msg: impl Display) -> Self;
+    fn byte_parse_error(argument: Arg<'arg>, message: impl Display) -> Self;
 
     /// Something else went wrong
-    fn custom(msg: impl Display) -> Self;
+    fn custom(message: impl Display) -> Self;
 }
 
 // TODO: improved version of parameter that allows for stateful, in-progress

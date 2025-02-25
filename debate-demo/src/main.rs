@@ -32,7 +32,7 @@ struct Arguments {
     inner: Alphabet,
 
     #[debate(flatten)]
-    subcommand: Option<Subcommand>,
+    subcommand: Subcommand,
 
     extra: Option<String>,
 }
@@ -69,6 +69,9 @@ enum FlagChoice {
 #[derive(FromArgs, Debug)]
 #[debate(subcommand)]
 enum Subcommand {
+    #[debate(fallback)]
+    None,
+
     Clean,
     Build {
         #[debate(long)]

@@ -1,10 +1,6 @@
 use debate_parser::{Arg, ArgAccess};
 
-use crate::{
-    from_args::BuildFromArgs,
-    parameter::{Error as ParameterError, Parameter, ParsedValue, RequiredError, Value},
-    state::{self, State},
-};
+use crate::parameter::{Error as ParameterError, Parameter, ParsedValue, RequiredError, Value};
 
 macro_rules! from_str {
     ($(
@@ -75,9 +71,34 @@ impl<'arg> Parameter<'arg> for bool {
     }
 }
 
+impl<'arg> Parameter<'arg> for () {
+    fn absent() -> Result<Self, RequiredError> {
+        Err(RequiredError)
+    }
+
+    fn arg<E: ParameterError<'arg>>(argument: Arg<'arg>) -> Result<Self, E> {
+        Err(E::got_arg(argument))
+    }
+
+    fn present<E: ParameterError<'arg>>(_arg: impl ArgAccess<'arg>) -> Result<Self, E> {
+        Ok(())
+    }
+
+    fn add_arg<E: ParameterError<'arg>>(&mut self, _arg: Arg<'arg>) -> Result<(), E> {
+        Err(E::got_additional_instance())
+    }
+
+    fn add_present<E: ParameterError<'arg>>(
+        &mut self,
+        _arg: impl ArgAccess<'arg>,
+    ) -> Result<(), E> {
+        Err(E::got_additional_instance())
+    }
+}
+
 impl<'arg, T> Parameter<'arg> for Option<T>
 where
-    T: Value<'arg>,
+    T: Parameter<'arg>,
 {
     #[inline]
     fn absent() -> Result<Self, RequiredError> {
@@ -85,13 +106,13 @@ where
     }
 
     #[inline]
-    fn arg<E: ParameterError<'arg>>(arg: Arg<'arg>) -> Result<Self, E> {
-        T::from_arg(arg).map(Some)
+    fn arg<E: ParameterError<'arg>>(argument: Arg<'arg>) -> Result<Self, E> {
+        T::arg(argument).map(Some)
     }
 
     #[inline]
-    fn present<E: ParameterError<'arg>>(arg: impl ArgAccess<'arg>) -> Result<Self, E> {
-        Self::arg(arg.take().ok_or_else(|| E::needs_arg())?)
+    fn present<E: ParameterError<'arg>>(argument: impl ArgAccess<'arg>) -> Result<Self, E> {
+        T::present(argument).map(Some)
     }
 
     #[inline]
@@ -139,73 +160,10 @@ where
     }
 
     #[inline]
-    fn add_present<E: ParameterError<'arg>>(&mut self, arg: impl ArgAccess<'arg>) -> Result<(), E> {
-        Self::add_arg(self, arg.take().ok_or_else(|| E::needs_arg())?)
-    }
-}
-
-impl<'arg, T> BuildFromArgs<'arg> for Option<T>
-where
-    T: BuildFromArgs<'arg>,
-{
-    type State = Option<T::State>;
-
-    fn build<E>(state: Self::State) -> Result<Self, E>
-    where
-        E: crate::from_args::Error<'arg>,
-    {
-        state.map(|state| T::build(state)).transpose()
-    }
-}
-
-#[inline]
-fn update_optional_state<'arg, T, E>(
-    state: &mut Option<T>,
-    apply: impl FnOnce(&mut T) -> Result<(), E>,
-) -> Result<(), E>
-where
-    T: Default,
-{
-    match state {
-        Some(state) => apply(state),
-        None => {
-            let mut local = T::default();
-            apply(&mut local).inspect(|&()| *state = Some(local))
-        }
-    }
-}
-
-impl<'arg, T> State<'arg> for Option<T>
-where
-    T: State<'arg>,
-{
-    fn add_positional<E>(&mut self, argument: Arg<'arg>) -> Result<(), E>
-    where
-        E: crate::state::Error<'arg, ()>,
-    {
-        update_optional_state(self, |state| state.add_positional(argument))
-    }
-
-    fn add_long_option<E>(&mut self, option: Arg<'arg>, argument: Arg<'arg>) -> Result<(), E>
-    where
-        E: crate::state::Error<'arg, ()>,
-    {
-        update_optional_state(self, |state| state.add_long_option(option, argument))
-    }
-
-    fn add_long<A, E>(&mut self, option: Arg<'arg>, argument: A) -> Result<(), E>
-    where
-        A: ArgAccess<'arg>,
-        E: crate::state::Error<'arg, A>,
-    {
-        update_optional_state(self, |state| state.add_long(option, argument))
-    }
-
-    fn add_short<A, E>(&mut self, option: u8, argument: A) -> Result<(), E>
-    where
-        A: ArgAccess<'arg>,
-        E: crate::state::Error<'arg, A>,
-    {
-        update_optional_state(self, |state| state.add_short(option, argument))
+    fn add_present<E: ParameterError<'arg>>(
+        &mut self,
+        argument: impl ArgAccess<'arg>,
+    ) -> Result<(), E> {
+        Self::add_arg(self, argument.take().ok_or_else(|| E::needs_arg())?)
     }
 }
