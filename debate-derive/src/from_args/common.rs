@@ -492,41 +492,7 @@ pub fn visit_positional_arms_for_fields(
     })
 }
 
-/// Create match arms for long_option, long, and short
-pub fn create_local_option_arms<'a>(
-    fields_ident: &Ident,
-    argument_ident: &Ident,
-    fields: &'a [ParsedFieldInfo<'a>],
-    make_scrutinee: impl Fn(&'a OptionFieldInfo<'a>) -> Option<Literal>,
-    initial_method: &Ident,
-    follow_up_method: &Ident,
-) -> impl Iterator<Item = impl ToTokens> {
-    option_fields(fields)
-        .filter_map(move |(index, field)| {
-            make_scrutinee(field).map(|scrutinee| (field, scrutinee, index))
-        })
-        .map(move |(field, scrutinee, index)| {
-            let field_name = field.ident.as_str();
-
-            let expr = apply_arg_to_field(
-                fields_ident,
-                argument_ident,
-                &index,
-                initial_method,
-                follow_up_method,
-            );
-
-            quote! {
-                #scrutinee => match (#expr) {
-                    ::core::result::Result::Ok(()) => ::core::result::Result::Ok(()),
-                    ::core::result::Result::Err(err) => ::core::result::Result::Err(
-                        ::debate::state::Error::parameter(#field_name, err)
-                    ),
-                },
-            }
-        })
-}
-
+#[expect(clippy::too_many_arguments)]
 fn complete_option_body<'a>(
     fields_ident: &Ident,
     argument_ident: &Ident,
@@ -541,14 +507,30 @@ fn complete_option_body<'a>(
     flatten_state_method: &Ident,
     flatten_rebind_argument: impl ToTokens,
 ) -> TokenStream2 {
-    let local_arms = create_local_option_arms(
-        fields_ident,
-        argument_ident,
-        fields,
-        make_scrutinee,
-        parameter_method,
-        add_parameter_method,
-    );
+    let local_arms = option_fields(fields)
+        .filter_map(move |(index, field)| {
+            make_scrutinee(field).map(|scrutinee| (field, scrutinee, index))
+        })
+        .map(move |(field, scrutinee, index)| {
+            let field_name = field.ident.as_str();
+
+            let expr = apply_arg_to_field(
+                fields_ident,
+                argument_ident,
+                &index,
+                parameter_method,
+                add_parameter_method,
+            );
+
+            quote! {
+                #scrutinee => match (#expr) {
+                    ::core::result::Result::Ok(()) => ::core::result::Result::Ok(()),
+                    ::core::result::Result::Err(err) => ::core::result::Result::Err(
+                        ::debate::state::Error::parameter(#field_name, err)
+                    ),
+                },
+            }
+        });
 
     let flatten_arms = flatten_fields(fields).map(|(index, info)| {
         let body = handle_flatten(

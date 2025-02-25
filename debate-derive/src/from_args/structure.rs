@@ -15,8 +15,8 @@ use crate::from_args::common::{
 };
 
 use super::common::{
-    FieldDefault, FlattenFieldInfo, FlattenOr, ParsedFieldInfo, create_local_option_arms,
-    handle_flatten, struct_state_block_from_fields, struct_state_init_block_from_fields,
+    FieldDefault, FlattenFieldInfo, FlattenOr, ParsedFieldInfo, handle_flatten,
+    struct_state_block_from_fields, struct_state_init_block_from_fields,
     visit_positional_arms_for_fields,
 };
 

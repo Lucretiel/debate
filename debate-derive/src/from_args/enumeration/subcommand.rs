@@ -12,9 +12,8 @@ use syn::{
 
 use crate::from_args::{
     common::{
-        IdentString, ParsedFieldInfo, complete_long_option_body, create_local_option_arms,
-        struct_state_block_from_fields, struct_state_init_block_from_fields,
-        visit_positional_arms_for_fields,
+        IdentString, ParsedFieldInfo, complete_long_option_body, struct_state_block_from_fields,
+        struct_state_init_block_from_fields, visit_positional_arms_for_fields,
     },
     from_args_impl,
 };
