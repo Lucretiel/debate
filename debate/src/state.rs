@@ -46,7 +46,8 @@ pub trait Error<'arg, Arg> {
     /// given.
     fn unknown_subcommand(expected: &'static [&'static str]) -> Self;
 
-    /// The option was recognized, but it isn't a valid  for this particular
-    /// subcommand. The list of subcommands that accept this option is given
-    fn wrong_subcommand_for_argument(allowed: &[&'static str]) -> Self;
+    /// The option was recognized, but it isn't a valid for this particular
+    /// subcommand. The current subcommand, along with the list of subcommands
+    /// that accept this option, are given
+    fn wrong_subcommand_for_argument(subcommand: &str, allowed: &[&'static str]) -> Self;
 }

@@ -176,7 +176,7 @@ impl<'arg, A> state::Error<'arg, A> for StateError {
         )
     }
 
-    fn wrong_subcommand_for_argument(allowed: &[&'static str]) -> Self {
+    fn wrong_subcommand_for_argument(subcommand: &str, allowed: &[&'static str]) -> Self {
         todo!()
     }
 }
