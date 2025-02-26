@@ -9,6 +9,8 @@ impl<T> PopulatedSlice<T> {
     /// SAFETY: the slice's length must be greater than 0
     #[inline(always)]
     pub unsafe fn new_unchecked(slice: &[T]) -> &Self {
+        debug_assert!(slice.len() > 0);
+
         unsafe { mem::transmute(slice) }
     }
 
@@ -24,6 +26,8 @@ impl<T> PopulatedSlice<T> {
     /// The whole point: a static guarantee that this slice is not empty
     #[inline]
     pub fn split_first(&self) -> (&T, &[T]) {
+        debug_assert!(self.0.len() > 0);
+
         // Safety: `self.0` is guaranteed to be non-empty, so the split is
         // guaranteed to exist
         unsafe { self.0.split_first().unwrap_unchecked() }
