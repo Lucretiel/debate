@@ -273,10 +273,9 @@ struct ShortArgAccess<'a, 'arg> {
 
 impl<'arg> ArgAccess<'arg> for ShortArgAccess<'_, 'arg> {
     fn take(self) -> Option<Arg<'arg>> {
-        debug_assert!(match *self.state {
-            State::ShortInProgress(short) => short.get() == self.short,
-            _ => false,
-        });
+        debug_assert!(
+            matches!(*self.state, State::ShortInProgress(short) if short.get() == self.short)
+        );
 
         *self.state = State::Ready;
         Some(Arg(self.short))
