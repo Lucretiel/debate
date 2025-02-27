@@ -76,3 +76,16 @@ pub trait ParameterUsage {
     fn repetition() -> Repetition;
     fn possible_values() -> Option<impl Iterator<Item = &'static str>>;
 }
+
+pub trait UsagePrinter {
+    fn synopsis() -> impl Display;
+    fn complete_usage_message() -> impl Display;
+}
+
+impl<T: Usage> UsagePrinter for T {
+    fn synopsis() -> impl Display {
+        
+    }
+
+    fn complete_usage_message() -> impl Display;
+}
