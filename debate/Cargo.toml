@@ -6,7 +6,9 @@ edition = "2024"
 [dependencies]
 debate-parser = { path = "../debate-parser", version = "0.1.0" }
 indent_write = "2.2.0"
+joinery = "3.1.0"
 lazy_format = "2.0.3"
+textwrap = "0.16.1"
 
 [features]
 default = ["std"]

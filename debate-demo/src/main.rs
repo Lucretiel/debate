@@ -1,13 +1,17 @@
-use std::path::PathBuf;
+use std::ops::Add;
 use std::str;
+use std::{ops::Sub, path::PathBuf};
 
 use anyhow::Context;
+use debate::help::{Repetition, Requirement, print_long_description};
 use debate::{
     from_args::{self, FromArgs},
+    help::{Argument, Descriptions, Usage, UsageHelper},
     state,
 };
 use debate_derive::{FromArgs, Value};
 use debate_parser::{Arg, ArgumentsParser};
+use lazy_format::make_lazy_format;
 
 // Recursive expansion of FromArgs macro
 // ======================================
@@ -36,6 +40,90 @@ struct Arguments {
     extra: Option<String>,
 }
 
+impl Usage for Arguments {
+    fn describe<R>(receiver: &mut R) -> Result<(), R::Err>
+    where
+        R: debate::help::Receiver,
+    {
+        receiver.option(
+            debate::help::Tags::LongShort {
+                long: "foo",
+                short: 'p',
+            },
+            Some(Argument {
+                metavariable: "PATH",
+                values: None,
+            }),
+            debate::help::Requirement::Mandatory,
+            Repetition::Single,
+            Descriptions {
+                short: "the path",
+                long: "the path",
+            },
+        )?;
+
+        receiver.option(
+            debate::help::Tags::LongShort {
+                long: "verbose",
+                short: 'v',
+            },
+            None,
+            debate::help::Requirement::Optional,
+            Repetition::Single,
+            Descriptions {
+                short: "enable verbose output",
+                long: "enable verbose output",
+            },
+        )?;
+
+        receiver.option(
+            debate::help::Tags::Short { short: 's' },
+            Some(Argument {
+                metavariable: "SECOND_PATH",
+                values: None,
+            }),
+            debate::help::Requirement::Optional,
+            Repetition::Single,
+            Descriptions {
+                short: "the second path",
+                long: "the second path",
+            },
+        )?;
+
+        receiver.option(
+            debate::help::Tags::Long { long: "cool-value" },
+            Some(Argument {
+                metavariable: "VALUE",
+                values: None,
+            }),
+            debate::help::Requirement::Optional,
+            Repetition::Single,
+            Descriptions {
+                short: "a cool value",
+                long: "a cool value",
+            },
+        )?;
+
+        receiver.group("Inner", UsageHelper::<Alphabet>::new())?;
+        receiver.group("Subcommand", UsageHelper::<Subcommand>::new())?;
+
+        receiver.positional(
+            Argument {
+                metavariable: "EXTRA",
+                values: None,
+            },
+            Requirement::Optional,
+            Repetition::Single,
+            Descriptions {
+                short: "a positional field",
+                long: "a positional field",
+            },
+        )?;
+
+        Ok(())
+    }
+}
+
 #[derive(FromArgs, Debug)]
 struct Alphabet {
     #[debate(long, short, default)]
@@ -49,6 +137,80 @@ struct Alphabet {
 
     #[debate(long)]
     direction: Option<Direction>,
+}
+
+impl Usage for Alphabet {
+    fn describe<R>(receiver: &mut R) -> Result<(), R::Err>
+    where
+        R: debate::help::Receiver,
+    {
+        receiver.option(
+            debate::help::Tags::LongShort {
+                long: "alpha",
+                short: 'a',
+            },
+            Some(Argument {
+                metavariable: "ALPHA",
+                values: None,
+            }),
+            debate::help::Requirement::Optional,
+            Repetition::Single,
+            Descriptions {
+                short: "alpha value",
+                long: "alpha value",
+            },
+        )?;
+
+        receiver.option(
+            debate::help::Tags::LongShort {
+                long: "beta",
+                short: 'b',
+            },
+            Some(Argument {
+                metavariable: "BETA",
+                values: None,
+            }),
+            debate::help::Requirement::Optional,
+            Repetition::Single,
+            Descriptions {
+                short: "beta value",
+                long: "beta value",
+            },
+        )?;
+
+        receiver.option(
+            debate::help::Tags::LongShort {
+                long: "gamma",
+                short: 'g',
+            },
+            Some(Argument {
+                metavariable: "GAMMA",
+                values: None,
+            }),
+            debate::help::Requirement::Optional,
+            Repetition::Single,
+            Descriptions {
+                short: "gamma value",
+                long: "gamma value",
+            },
+        )?;
+
+        receiver.option(
+            debate::help::Tags::Long { long: "direction" },
+            Some(Argument {
+                metavariable: "DIRECTION",
+                values: Some(&["up", "down", "left", "right"]),
+            }),
+            debate::help::Requirement::Optional,
+            Repetition::Single,
+            Descriptions {
+                short: "direction value",
+                long: "direction value",
+            },
+        )?;
+
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Copy, Value)]
@@ -79,6 +241,111 @@ enum Subcommand {
     Add {
         item: String,
     },
+}
+
+impl Usage for Subcommand {
+    fn describe<R>(receiver: &mut R) -> Result<(), R::Err>
+    where
+        R: debate::help::Receiver,
+    {
+        struct CleanSubcommand;
+        impl Usage for CleanSubcommand {
+            fn describe<R>(_receiver: &mut R) -> Result<(), R::Err>
+            where
+                R: debate::help::Receiver,
+            {
+                Ok(())
+            }
+        }
+
+        struct BuildSubcommand;
+        impl Usage for BuildSubcommand {
+            fn describe<R>(receiver: &mut R) -> Result<(), R::Err>
+            where
+                R: debate::help::Receiver,
+            {
+                receiver.option(
+                    debate::help::Tags::Long { long: "target" },
+                    Some(Argument {
+                        metavariable: "TARGET",
+                        values: None,
+                    }),
+                    debate::help::Requirement::Mandatory,
+                    Repetition::Single,
+                    Descriptions {
+                        short: "build target",
+                        long: "build target",
+                    },
+                )?;
+
+                Ok(())
+            }
+        }
+
+        struct AddSubcommand;
+        impl Usage for AddSubcommand {
+            fn describe<R>(receiver: &mut R) -> Result<(), R::Err>
+            where
+                R: debate::help::Receiver,
+            {
+                receiver.positional(
+                    Argument {
+                        metavariable: "ITEM",
+                        values: None,
+                    },
+                    Requirement::Mandatory,
+                    Repetition::Single,
+                    Descriptions {
+                        short: "the item to add",
+                        long: "the item to add",
+                    },
+                )
+            }
+        }
+
+        struct SubcommandGroups;
+
+        impl Usage for SubcommandGroups {
+            fn describe<R>(receiver: &mut R) -> Result<(), R::Err>
+            where
+                R: debate::help::Receiver,
+            {
+                receiver.subcommand(
+                    "clean",
+                    Descriptions {
+                        short: "clean something",
+                        long: "clean something",
+                    },
+                    UsageHelper::<CleanSubcommand>::new(),
+                )?;
+
+                receiver.subcommand(
+                    "build",
+                    Descriptions {
+                        short: "build a target",
+                        long: "build a target",
+                    },
+                    UsageHelper::<BuildSubcommand>::new(),
+                )?;
+
+                receiver.subcommand(
+                    "add",
+                    Descriptions {
+                        short: "add an item",
+                        long: "add an item",
+                    },
+                    UsageHelper::<AddSubcommand>::new(),
+                )?;
+
+                Ok(())
+            }
+        }
+
+        receiver.exclusive_group(
+            Requirement::Optional,
+            UsageHelper::<SubcommandGroups>::new(),
+        )
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -250,6 +517,14 @@ fn main() -> anyhow::Result<()> {
     let args = args.context("error parsing CLI argument")?;
 
     println!("{args:#?}");
+
+    println!(
+        "{}",
+        make_lazy_format!(|fmt| {
+            let mut fmt = fmt;
+            print_long_description(&mut fmt, UsageHelper::<Arguments>::new())
+        })
+    );
 
     Ok(())
 }
