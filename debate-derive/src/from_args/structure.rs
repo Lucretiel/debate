@@ -14,6 +14,7 @@ use crate::from_args::common::{
     final_field_initializers, struct_state_block_from_fields, struct_state_init_block_from_fields,
     visit_positional_arms_for_fields,
 };
+use crate::generics::compute_generics;
 
 fn detect_collision<T: Hash + Eq + Copy, M: Display>(
     known_tags: &mut HashMap<T, Span>,
@@ -47,13 +48,16 @@ pub fn derive_args_struct(
     generics: &Generics,
     attrs: &[Attribute],
 ) -> syn::Result<TokenStream2> {
-    // TODO: handle generics. My current idea is this:
-    // - enforce at most one lifetime. Not much reason I can see to allow an
-    //   opt-out of this. We assume that lifetime is the 'arg lifetime.
-    // - detect the presence of type and const parameters in the subtypes.
-    //   add where bounds as needed for these: `where #field_type: Parameter<'arg>`
-    //   (or `BuildFromArgs<'arg>`)
-    // - handle the basics: reproduce the existing bounds
+    let computed_generics = compute_generics(
+        &generics,
+        fields.iter().map(|field| &field.ty),
+        |lt| quote! { ::debate::build::BuildFromArgs<#lt> },
+    )?;
+
+    let impl_generics = &computed_generics.impl_block_generics;
+    let state_type_generics = &computed_generics.type_generics_with_lt;
+    let where_clause = &computed_generics.where_clause;
+
     let fields: Vec<ParsedFieldInfo> = fields
         .iter()
         .map(ParsedFieldInfo::from_field)
@@ -76,29 +80,30 @@ pub fn derive_args_struct(
     // Reuse these everywhere
     let arg_ident = format_ident!("arg");
     let add_arg_ident = format_ident!("add_arg");
-
     let fields_ident = format_ident!("fields");
 
     Ok(super::from_args_impl(
         name,
-        |state, lifetime| {
+        &computed_generics,
+        |state| {
             let state_block = struct_state_block_from_fields(&fields);
             let state_init_block = struct_state_init_block_from_fields(&fields);
 
             quote! {
                 #[doc(hidden)]
-                struct #state<#lifetime> #state_block
+                struct #state #impl_generics #where_clause #state_block
 
                 // Sadly we can't derive debug, because default is only implemented for
                 // tuples up to 12 elements.
-                impl<#lifetime> ::core::default::Default for #state<#lifetime> {
+                impl #impl_generics ::core::default::Default for #state #state_type_generics
+                    #where_clause
+                {
                     fn default() -> Self {
                         Self #state_init_block
                     }
                 }
             }
         },
-        |state, lifetime| quote! { #state<#lifetime> },
         |argument| {
             let visit_positional_arms = visit_positional_arms_for_fields(
                 &fields_ident,

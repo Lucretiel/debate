@@ -55,7 +55,7 @@ pub fn struct_state_block_from_fields<'a>(
             })
             .map(|field| match field {
                 FlattenOr::Flatten(ty) => quote! {
-                    <#ty as ::debate::from_args::BuildFromArgs<'arg>>::State
+                    <#ty as ::debate::build::BuildFromArgs<'arg>>::State
                 },
                 FlattenOr::Normal(ty) => quote! {
                     ::core::option::Option<#ty>
@@ -694,7 +694,7 @@ pub fn final_field_initializers(
                         ::core::result::Result::Ok(value) => value,
                         ::core::result::Result::Err(::debate::parameter::RequiredError) =>
                             return ::core::result::Result::Err(
-                                ::debate::from_args::Error::required(
+                                ::debate::build::Error::required(
                                     #ident_str, #long, #short
                                 )
                             ),
@@ -712,13 +712,13 @@ pub fn final_field_initializers(
             FlattenOr::Flatten(FlattenFieldInfo { ident, .. }) => {
                 let wrap_err = match ident.as_ref().map(|ident| ident.as_str()) {
                     Some(ident) => quote! {
-                        ::debate::from_args::Error::flattened(#ident, err)
+                        ::debate::build::Error::flattened(#ident, err)
                     },
                     None => quote! { err },
                 };
 
                 let expr = quote! {
-                    match ::debate::from_args::BuildFromArgs::build(
+                    match ::debate::build::BuildFromArgs::build(
                         #fields_ident.#idx
                     ) {
                         ::core::result::Result::Ok(value) => value,

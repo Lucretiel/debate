@@ -3,10 +3,11 @@ use std::str;
 use std::{ops::Sub, path::PathBuf};
 
 use anyhow::Context;
-use debate::help::{Repetition, Requirement, print_long_description};
+use debate::build;
+use debate::help::{Repetition, Requirement};
 use debate::{
     from_args::{self, FromArgs},
-    help::{Argument, Descriptions, Usage, UsageHelper},
+    help::{Descriptions, Usage, UsageHelper, ValueParameter},
     state,
 };
 use debate_derive::{FromArgs, Value};
@@ -50,7 +51,7 @@ impl Usage for Arguments {
                 long: "foo",
                 short: 'p',
             },
-            Some(Argument {
+            Some(ValueParameter {
                 metavariable: "PATH",
                 values: None,
             }),
@@ -78,7 +79,7 @@ impl Usage for Arguments {
 
         receiver.option(
             debate::help::Tags::Short { short: 's' },
-            Some(Argument {
+            Some(ValueParameter {
                 metavariable: "SECOND_PATH",
                 values: None,
             }),
@@ -92,7 +93,7 @@ impl Usage for Arguments {
 
         receiver.option(
             debate::help::Tags::Long { long: "cool-value" },
-            Some(Argument {
+            Some(ValueParameter {
                 metavariable: "VALUE",
                 values: None,
             }),
@@ -108,7 +109,7 @@ impl Usage for Arguments {
         receiver.group("Subcommand", UsageHelper::<Subcommand>::new())?;
 
         receiver.positional(
-            Argument {
+            ValueParameter {
                 metavariable: "EXTRA",
                 values: None,
             },
@@ -149,7 +150,7 @@ impl Usage for Alphabet {
                 long: "alpha",
                 short: 'a',
             },
-            Some(Argument {
+            Some(ValueParameter {
                 metavariable: "ALPHA",
                 values: None,
             }),
@@ -166,7 +167,7 @@ impl Usage for Alphabet {
                 long: "beta",
                 short: 'b',
             },
-            Some(Argument {
+            Some(ValueParameter {
                 metavariable: "BETA",
                 values: None,
             }),
@@ -183,7 +184,7 @@ impl Usage for Alphabet {
                 long: "gamma",
                 short: 'g',
             },
-            Some(Argument {
+            Some(ValueParameter {
                 metavariable: "GAMMA",
                 values: None,
             }),
@@ -197,7 +198,7 @@ impl Usage for Alphabet {
 
         receiver.option(
             debate::help::Tags::Long { long: "direction" },
-            Some(Argument {
+            Some(ValueParameter {
                 metavariable: "DIRECTION",
                 values: Some(&["up", "down", "left", "right"]),
             }),
@@ -266,7 +267,7 @@ impl Usage for Subcommand {
             {
                 receiver.option(
                     debate::help::Tags::Long { long: "target" },
-                    Some(Argument {
+                    Some(ValueParameter {
                         metavariable: "TARGET",
                         values: None,
                     }),
@@ -289,7 +290,7 @@ impl Usage for Subcommand {
                 R: debate::help::Receiver,
             {
                 receiver.positional(
-                    Argument {
+                    ValueParameter {
                         metavariable: "ITEM",
                         values: None,
                     },
@@ -367,6 +368,9 @@ enum BuildError {
 
     #[error("required subcommand was absent")]
     Subcommand,
+
+    #[error("got --help, need to print a usage message")]
+    HelpRequested,
 }
 
 impl<'arg> from_args::Error<'arg> for BuildError {
@@ -394,7 +398,9 @@ impl<'arg> from_args::Error<'arg> for BuildError {
     fn short<A>(option: u8, error: Self::StateError<A>) -> Self {
         Self::Short(option as char, error)
     }
+}
 
+impl build::Error for BuildError {
     fn required(field: &'static str, long: Option<&'static str>, short: Option<char>) -> Self {
         Self::Required(field)
     }
@@ -409,6 +415,10 @@ impl<'arg> from_args::Error<'arg> for BuildError {
 
     fn required_subcommand(expected: &'static [&'static str]) -> Self {
         Self::Subcommand
+    }
+
+    fn help_requested() -> Self {
+        todo!()
     }
 }
 
@@ -510,21 +520,13 @@ fn main() -> anyhow::Result<()> {
         .map(|arg| arg.into_encoded_bytes())
         .collect();
 
-    let args: Result<Arguments, BuildError> = Arguments::from_args(ArgumentsParser::new(
+    let args: Result<Arguments, BuildError> = Arguments::from_parser(ArgumentsParser::new(
         args.iter().skip(1).map(|arg| arg.as_slice()),
     ));
 
     let args = args.context("error parsing CLI argument")?;
 
     println!("{args:#?}");
-
-    println!(
-        "{}",
-        make_lazy_format!(|fmt| {
-            let mut fmt = fmt;
-            print_long_description(&mut fmt, UsageHelper::<Arguments>::new())
-        })
-    );
 
     Ok(())
 }

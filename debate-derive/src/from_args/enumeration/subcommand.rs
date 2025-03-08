@@ -1,7 +1,4 @@
-use std::{
-    collections::{HashMap, HashSet},
-    hash::Hash,
-};
+use std::{collections::HashMap, hash::Hash};
 
 use darling::FromAttributes;
 use heck::ToKebabCase;
@@ -13,14 +10,16 @@ use syn::{
     spanned::Spanned,
 };
 
-use crate::from_args::{
-    common::{
-        IdentString, OptionFieldInfo, OptionTag, ParsedFieldInfo, complete_long_body,
-        complete_long_option_body, complete_short_body, final_field_initializers,
-        struct_state_block_from_fields, struct_state_init_block_from_fields,
-        visit_positional_arms_for_fields,
+use crate::{
+    from_args::{
+        common::{
+            IdentString, OptionTag, ParsedFieldInfo, complete_long_body, complete_long_option_body,
+            complete_short_body, final_field_initializers, struct_state_block_from_fields,
+            struct_state_init_block_from_fields, visit_positional_arms_for_fields,
+        },
+        from_args_impl,
     },
-    from_args_impl,
+    generics::compute_generics,
 };
 
 /// Ident of the unselected subcommand (that is, the enum variant)
@@ -112,7 +111,7 @@ impl<'a> ParsedSubcommandInfo<'a> {
                         named: ref fields, ..
                     }) => fields
                         .iter()
-                        .map(|field| ParsedFieldInfo::from_field(field))
+                        .map(ParsedFieldInfo::from_field)
                         .try_collect()?,
 
                     Fields::Unit => Vec::new(),
@@ -183,7 +182,19 @@ pub fn derive_args_enum_subcommand(
     variants: &Punctuated<Variant, Token![,]>,
     generics: &Generics,
 ) -> syn::Result<TokenStream2> {
-    // Reuse these everywhere
+    let generics = compute_generics(
+        generics,
+        variants
+            .iter()
+            .flat_map(|variant| &variant.fields)
+            .map(|field| &field.ty),
+        |lt| quote! { ::debate::build::BuildFromArgs<#lt> },
+    )?;
+
+    let impl_generics = &generics.impl_block_generics;
+    let state_type_generics = &generics.type_generics_with_lt;
+    let where_clause = &generics.where_clause;
+
     let arg_ident = format_ident!("arg");
     let add_arg_ident = format_ident!("add_arg");
     let fields_ident = format_ident!("fields");
@@ -220,7 +231,8 @@ pub fn derive_args_enum_subcommand(
 
     Ok(from_args_impl(
         name,
-        |state_ident, lifetime| {
+        &generics,
+        |state_ident| {
             let state_variants = parsed_variants.variants.iter().map(|variant| {
                 let variant_ident = variant.ident.raw();
                 let variant_state_body = struct_state_block_from_fields(&variant.fields);
@@ -233,14 +245,13 @@ pub fn derive_args_enum_subcommand(
             quote! {
                 #[doc(hidden)]
                 #[derive(::core::default::Default)]
-                enum #state_ident<#lifetime> {
+                enum #state_ident #impl_generics {
                     #[default]
                     #fallback_ident,
                     #(#state_variants,)*
                 }
             }
         },
-        |state_ident, lifetime| quote! { #state_ident<#lifetime> },
         |argument| {
             // Arms of the match block that attempts to convert a positional argument
             // into a selected subcommand
@@ -364,7 +375,7 @@ pub fn derive_args_enum_subcommand(
                 Fallback::Explicit(ident) => quote! { Self :: #ident },
                 Fallback::Internal(_) => quote! {
                     return ::core::result::Result::Err(
-                        ::debate::from_args::Error::required_subcommand(
+                        ::debate::build::Error::required_subcommand(
                             #all_commands_slice,
                         )
                     )

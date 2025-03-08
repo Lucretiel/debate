@@ -8,6 +8,8 @@ use quote::{format_ident, quote};
 use syn::{DeriveInput, Fields, Ident, spanned::Spanned as _};
 use syn::{Lifetime, parse_quote};
 
+use crate::generics::ComputedGenerics;
+
 use self::enumeration::derive_args_enum;
 use self::structure::derive_args_struct;
 
@@ -54,21 +56,18 @@ pub fn derive_args_result(item: TokenStream2) -> syn::Result<TokenStream2> {
         syn::Data::Enum(ref data) => {
             derive_args_enum(&input.ident, &data.variants, &input.generics, &input.attrs)
         }
-        syn::Data::Union(_) => {
-            return Err(syn::Error::new(
-                input.span(),
-                "can't derive `FromArgs` on a union",
-            ));
-        }
+        syn::Data::Union(_) => Err(syn::Error::new(
+            input.span(),
+            "can't derive `FromArgs` on a union",
+        )),
     }
 }
 
-// TODO: generics
 fn from_args_impl(
     ident: &Ident,
+    generics: &ComputedGenerics,
 
-    state_definition: impl FnOnce(&Ident, &Lifetime) -> TokenStream2,
-    state_type: impl FnOnce(&Ident, &Lifetime) -> TokenStream2,
+    state_definition: impl FnOnce(&Ident) -> TokenStream2,
 
     add_positional_body: impl FnOnce(&Ident) -> TokenStream2,
     add_long_option_body: impl FnOnce(&Ident, &Ident) -> TokenStream2,
@@ -78,14 +77,18 @@ fn from_args_impl(
     // State type, state variable
     build_body: impl FnOnce(&Ident) -> TokenStream2,
 ) -> TokenStream2 {
+    let lifetime = &generics.lifetime;
+    let impl_generics = &generics.impl_block_generics;
+    let type_generics = &generics.type_generics;
+    let state_type_generics = &generics.type_generics_with_lt;
+    let where_clause = &generics.where_clause;
+
     let state_ident = format_ident!("__{ident}State");
-    let lifetime = parse_quote!('arg);
     let argument = format_ident!("argument");
     let option = format_ident!("option");
     let state = format_ident!("state");
 
-    let state_definition = state_definition(&state_ident, &lifetime);
-    let state_type = state_type(&state_ident, &lifetime);
+    let state_definition = state_definition(&state_ident);
 
     let add_positional_body = add_positional_body(&argument);
     let add_long_option_body = add_long_option_body(&option, &argument);
@@ -97,7 +100,7 @@ fn from_args_impl(
     quote! {
         #state_definition
 
-        impl<#lifetime> ::debate::state::State<#lifetime> for #state_type {
+        impl #impl_generics ::debate::state::State<#lifetime> for #state_ident #state_type_generics #where_clause {
             fn add_positional<E>(
                 &mut self,
                 #argument: ::debate_parser::Arg<#lifetime>
@@ -144,12 +147,12 @@ fn from_args_impl(
             }
         }
 
-        impl<#lifetime> ::debate::from_args::BuildFromArgs<#lifetime> for #ident {
-            type State = #state_type;
+        impl #impl_generics ::debate::build::BuildFromArgs<#lifetime> for #ident #type_generics #where_clause {
+            type State = #state_ident #state_type_generics;
 
             fn build<E>(state: Self::State) -> ::core::result::Result<Self, E>
             where
-                E: ::debate::from_args::Error<#lifetime>
+                E: ::debate::build::Error
             {
                 #build_body
             }

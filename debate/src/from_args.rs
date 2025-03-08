@@ -1,18 +1,18 @@
-use core::{fmt::Display, marker::PhantomData};
+use core::marker::PhantomData;
 
 use debate_parser::{Arg, ArgumentsParser};
 
-use crate::{parameter, state};
+use crate::{build, parameter, state};
 
 /// A type that can be parsed from command line arguments
 pub trait FromArgs<'arg>: Sized {
-    fn from_args<I, E>(args: ArgumentsParser<'arg, I>) -> Result<Self, E>
+    fn from_parser<I, E>(args: ArgumentsParser<'arg, I>) -> Result<Self, E>
     where
         I: Iterator<Item = &'arg [u8]>,
-        E: Error<'arg>;
+        E: Error<'arg> + build::Error;
 }
 
-/// Errors that can occur while parsing arguments into some kind of structure
+/// Errors that can occur while handling incoming arguments
 pub trait Error<'arg> {
     type StateError<A>: state::Error<'arg, A>;
 
@@ -31,51 +31,33 @@ pub trait Error<'arg> {
 
     /// There was an error handling a `-s` short argument
     fn short<A>(option: u8, error: Self::StateError<A>) -> Self;
-
-    /// A required field wasn't present among the command line arguments. If
-    /// the field is a flag or an option, its long and short CLI names are also
-    /// provided
-    fn required(field: &'static str, long: Option<&'static str>, short: Option<char>) -> Self;
-
-    /// There was an error parsing arguments for a flattened field
-    fn flattened(field: &'static str, error: Self) -> Self;
-
-    /// We required a subcommand, but none was provied
-    fn required_subcommand(expected: &'static [&'static str]) -> Self;
-
-    /// Something else went wrong
-    fn custom(msg: impl Display) -> Self;
-}
-
-/**
-A type that can be parsed from command line arguments by repeatedly feeding
-those argument into a `State`, and then then turning that state into this
-final type. Types that implement `BuildFromArgs` automatically implement
-`FromArgs`.
-
-If you are manually implementing [`FromArgs`], it usually makes sense to
-instead implement [`BuildFromArgs`]. It will take care of the looping logic
-and allow you to focus on individual argument handling, and this will also
-grant compatibility with delegating argument parsing with `#[debate(flatten)]`.
-*/
-pub trait BuildFromArgs<'arg>: Sized {
-    type State: state::State<'arg>;
-
-    fn build<E>(state: Self::State) -> Result<Self, E>
-    where
-        E: Error<'arg>;
 }
 
 impl<'arg, T> FromArgs<'arg> for T
 where
-    T: BuildFromArgs<'arg>,
+    T: build::BuildFromArgs<'arg>,
 {
-    fn from_args<I, E>(mut args: ArgumentsParser<'arg, I>) -> Result<Self, E>
+    fn from_parser<I, E>(mut args: ArgumentsParser<'arg, I>) -> Result<Self, E>
     where
         I: Iterator<Item = &'arg [u8]>,
-        E: Error<'arg>,
+        E: Error<'arg> + build::Error,
     {
         let mut state = T::State::default();
+
+        struct ArgAccessAdapter<A>(A);
+
+        impl<'arg, A> parameter::ArgAccess<'arg> for ArgAccessAdapter<A>
+        where
+            A: debate_parser::ArgAccess<'arg>,
+        {
+            #[inline]
+            fn with<T, E>(self, op: impl FnOnce(Arg<'arg>) -> Result<T, E>) -> Result<T, E>
+            where
+                E: parameter::Error<'arg>,
+            {
+                op(self.0.take().ok_or_else(|| E::needs_arg())?)
+            }
+        }
 
         struct Visitor<B, E> {
             state: B,
@@ -132,20 +114,5 @@ where
                 Some(Ok(())) => continue,
             }
         }
-    }
-}
-
-struct ArgAccessAdapter<A>(A);
-
-impl<'arg, A> parameter::ArgAccess<'arg> for ArgAccessAdapter<A>
-where
-    A: debate_parser::ArgAccess<'arg>,
-{
-    #[inline]
-    fn with<T, E>(self, op: impl FnOnce(Arg<'arg>) -> Result<T, E>) -> Result<T, E>
-    where
-        E: parameter::Error<'arg>,
-    {
-        op(self.0.take().ok_or_else(|| E::needs_arg())?)
     }
 }

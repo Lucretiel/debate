@@ -2,6 +2,27 @@ use debate_parser::Arg;
 
 use crate::parameter;
 
+pub struct SubcommandChain<'a> {
+    command: &'static str,
+    prev: Option<&'a SubcommandChain<'a>>,
+}
+
+impl<'a> SubcommandChain<'a> {
+    pub fn for_each(&self, func: &mut impl FnMut(&'static str)) {
+        if let Some(prev) = self.prev {
+            prev.for_each(func);
+        }
+        func(self.command)
+    }
+
+    pub fn chain(&'a self, command: &'static str) -> Self {
+        Self {
+            command,
+            prev: Some(self),
+        }
+    }
+}
+
 /// The state associated with a [`BuildFromArgs`] type that is in the middle
 /// of being parsed
 pub trait State<'arg>: Default {
@@ -22,10 +43,23 @@ pub trait State<'arg>: Default {
     where
         A: parameter::ArgAccess<'arg>,
         E: Error<'arg, A>;
+
+    // IF this state includes a subcommand, it should call the handler using
+    // that subcommand. It should first attempt to forward the handler as
+    // deeply as possible to any nested subcommands.
+    //
+    // This method exists purely to assist with printing usage messages
+    // for subcommands.
+    fn with_subcommand_context<T, F: FnOnce(SubcommandChain<'_>) -> T>(
+        &self,
+        handler: F,
+    ) -> Result<T, F> {
+        Err(handler)
+    }
 }
 
 /// Errors that can occur when adding an argument to the state during parsing
-pub trait Error<'arg, Arg> {
+pub trait Error<'arg, Arg>: Sized {
     type ParameterError: parameter::Error<'arg>;
 
     /// A parameter type returned an error

@@ -1,6 +1,7 @@
 use proc_macro::TokenStream;
 
 mod from_args;
+mod generics;
 mod value;
 
 #[proc_macro_derive(FromArgs, attributes(doc, debate))]

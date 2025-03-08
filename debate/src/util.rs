@@ -3,6 +3,7 @@ use core::fmt;
 use debate_parser::Arg;
 
 use crate::{
+    from_args,
     parameter::{self, ArgAccess, Parameter, RequiredError},
     state,
 };
