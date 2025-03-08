@@ -16,6 +16,31 @@ which includes more context.
 #[derive(Debug, Clone, Copy)]
 pub struct RequiredError;
 
+/// Error for things that can go wrong in a `Parameter` implementation
+pub trait Error<'arg> {
+    /// The argument requires a value, and none was provided
+    fn needs_arg() -> Self;
+
+    /// The argument must NOT have a value, and got one
+    fn got_arg(argument: Arg<'arg>) -> Self;
+
+    /// The argument appeared more times than expected on the command line
+    fn got_additional_instance() -> Self;
+
+    /// The argument wasn't valid UTF-8 and should be
+    fn invalid_utf8(argument: Arg<'arg>) -> Self;
+
+    /// The argument was valid UTF-8, but it failed to parse into an instance
+    /// of the type
+    fn parse_error(argument: &str, message: impl Display) -> Self;
+
+    /// The argument failed to parse into an instance of the type.
+    fn byte_parse_error(argument: Arg<'arg>, message: impl Display) -> Self;
+
+    /// Something else went wrong
+    fn custom(message: impl Display) -> Self;
+}
+
 pub trait ArgAccess<'arg> {
     fn with<T, E>(self, op: impl FnOnce(Arg<'arg>) -> Result<T, E>) -> Result<T, E>
     where
@@ -58,7 +83,9 @@ pub trait Parameter<'arg>: Sized {
     Types that operate as flags (such as `--verbose`) should return an error
     in this case, because only options should accept arguments.
     */
-    fn arg<E: Error<'arg>>(argument: Arg<'arg>) -> Result<Self, E>;
+    fn arg<E: Error<'arg>>(argument: Arg<'arg>) -> Result<Self, E> {
+        Err(E::got_arg(argument))
+    }
 
     /**
     This parameter was present on the command line.
@@ -76,7 +103,9 @@ pub trait Parameter<'arg>: Sized {
     Most parameters should return an error here. However, some types (like
     counters and [`Vec`]) can collect more than one instance together.
     */
-    fn add_arg<E: Error<'arg>>(&mut self, argument: Arg<'arg>) -> Result<(), E>;
+    fn add_arg<E: Error<'arg>>(&mut self, argument: Arg<'arg>) -> Result<(), E> {
+        Err(E::got_arg(argument))
+    }
 
     /**
     This parameter appeared more than once on the command line.
@@ -87,29 +116,60 @@ pub trait Parameter<'arg>: Sized {
     fn add_present<E: Error<'arg>>(&mut self, argument: impl ArgAccess<'arg>) -> Result<(), E>;
 }
 
-/// Error for things that can go wrong in a `Parameter` implementation
-pub trait Error<'arg> {
-    /// The argument requires a value, and none was provided
-    fn needs_arg() -> Self;
+/// A parameter that can be used as a positional parameter (as opposed to a
+/// --option), which means that it MUST take an argument.
+pub trait PositionalParameter<'arg>: Sized {
+    /**
+    This parameter was absent from the command line.
 
-    /// The argument must NOT have a value, and got one
-    fn got_arg(argument: Arg<'arg>) -> Self;
+    Most types should return a [`RequiredError`] here, and allow defaults to
+    be handled by an [`Option`] or `#[debate(default)]`. However, there are
+    plenty of cases where a type has a sensible behavior if it doesn't appear
+    on the command line, such as a bool flag being false or a [`Vec`] being
+    empty
+    */
+    fn absent() -> Result<Self, RequiredError>;
 
-    /// The argument appeared more times than expected on the command line
-    fn got_additional_instance() -> Self;
+    /**
+    This parameter got an argument from the command line.
+    */
+    fn arg<E: Error<'arg>>(argument: Arg<'arg>) -> Result<Self, E>;
 
-    /// The argument wasn't valid UTF-8 and should be
-    fn invalid_utf8(argument: Arg<'arg>) -> Self;
+    /**
+    This parameter appeared more than once on the command line, with an
+    argument.
 
-    /// The argument was valid UTF-8, but it failed to parse into an instance
-    /// of the type
-    fn parse_error(argument: &str, message: impl Display) -> Self;
+    Most parameters should return an error here. However, some types (like
+    counters and [`Vec`]) can collect more than one instance together.
+    */
+    fn add_arg<E: Error<'arg>>(&mut self, argument: Arg<'arg>) -> Result<(), E>;
+}
 
-    /// The argument failed to parse into an instance of the type.
-    fn byte_parse_error(argument: Arg<'arg>, message: impl Display) -> Self;
+impl<'arg, T: PositionalParameter<'arg>> Parameter<'arg> for T {
+    #[inline]
+    fn absent() -> Result<Self, RequiredError> {
+        PositionalParameter::absent()
+    }
 
-    /// Something else went wrong
-    fn custom(message: impl Display) -> Self;
+    #[inline]
+    fn arg<E: Error<'arg>>(argument: Arg<'arg>) -> Result<Self, E> {
+        PositionalParameter::arg(argument)
+    }
+
+    #[inline]
+    fn present<E: Error<'arg>>(argument: impl ArgAccess<'arg>) -> Result<Self, E> {
+        argument.with(PositionalParameter::arg)
+    }
+
+    #[inline]
+    fn add_arg<E: Error<'arg>>(&mut self, argument: Arg<'arg>) -> Result<(), E> {
+        PositionalParameter::add_arg(self, argument)
+    }
+
+    #[inline]
+    fn add_present<E: Error<'arg>>(&mut self, argument: impl ArgAccess<'arg>) -> Result<(), E> {
+        argument.with(|arg| PositionalParameter::add_arg(self, arg))
+    }
 }
 
 // TODO: improved version of parameter that allows for stateful, in-progress
@@ -132,7 +192,7 @@ pub trait Value<'arg>: Sized {
     fn from_arg_str<E: Error<'arg>>(arg: &'arg str) -> Result<Self, E>;
 }
 
-impl<'arg, T> Parameter<'arg> for T
+impl<'arg, T> PositionalParameter<'arg> for T
 where
     T: Value<'arg>,
 {
@@ -147,17 +207,7 @@ where
     }
 
     #[inline]
-    fn present<E: Error<'arg>>(argument: impl ArgAccess<'arg>) -> Result<Self, E> {
-        argument.with(T::from_arg)
-    }
-
-    #[inline]
     fn add_arg<E: Error<'arg>>(&mut self, _arg: Arg<'arg>) -> Result<(), E> {
-        Err(E::got_additional_instance())
-    }
-
-    #[inline]
-    fn add_present<E: Error<'arg>>(&mut self, _arg: impl ArgAccess<'arg>) -> Result<(), E> {
         Err(E::got_additional_instance())
     }
 }

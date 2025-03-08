@@ -7,14 +7,16 @@ use itertools::Itertools as _;
 use lazy_format::lazy_format;
 use proc_macro2::{Span, TokenStream as TokenStream2};
 use quote::{format_ident, quote};
+use syn::Lifetime;
 use syn::{Attribute, Field, Generics, Ident, Token, punctuated::Punctuated};
 
+use crate::common::ParsedFieldInfo;
 use crate::from_args::common::{
-    ParsedFieldInfo, complete_long_body, complete_long_option_body, complete_short_body,
-    final_field_initializers, struct_state_block_from_fields, struct_state_init_block_from_fields,
+    complete_long_body, complete_long_option_body, complete_short_body, final_field_initializers,
+    struct_state_block_from_fields, struct_state_init_block_from_fields,
     visit_positional_arms_for_fields,
 };
-use crate::generics::compute_generics;
+use crate::generics::{AngleBracedLifetime, compute_generics};
 
 fn detect_collision<T: Hash + Eq + Copy, M: Display>(
     known_tags: &mut HashMap<T, Span>,
@@ -45,19 +47,10 @@ fn detect_collision<T: Hash + Eq + Copy, M: Display>(
 pub fn derive_args_struct(
     name: &Ident,
     fields: &Punctuated<Field, Token![,]>,
-    generics: &Generics,
+    lifetime: &Lifetime,
+    type_lifetime: Option<&AngleBracedLifetime>,
     attrs: &[Attribute],
 ) -> syn::Result<TokenStream2> {
-    let computed_generics = compute_generics(
-        &generics,
-        fields.iter().map(|field| &field.ty),
-        |lt| quote! { ::debate::build::BuildFromArgs<#lt> },
-    )?;
-
-    let impl_generics = &computed_generics.impl_block_generics;
-    let state_type_generics = &computed_generics.type_generics_with_lt;
-    let where_clause = &computed_generics.where_clause;
-
     let fields: Vec<ParsedFieldInfo> = fields
         .iter()
         .map(ParsedFieldInfo::from_field)
@@ -82,21 +75,24 @@ pub fn derive_args_struct(
     let add_arg_ident = format_ident!("add_arg");
     let fields_ident = format_ident!("fields");
 
+    let parameter_ident = format_ident!("Parameter");
+    let positional_parameter_ident = format_ident!("PositionalParameter");
+
     Ok(super::from_args_impl(
         name,
-        &computed_generics,
+        lifetime,
+        type_lifetime,
         |state| {
             let state_block = struct_state_block_from_fields(&fields);
             let state_init_block = struct_state_init_block_from_fields(&fields);
 
             quote! {
                 #[doc(hidden)]
-                struct #state #impl_generics #where_clause #state_block
+                struct #state <#lifetime> #state_block
 
                 // Sadly we can't derive debug, because default is only implemented for
                 // tuples up to 12 elements.
-                impl #impl_generics ::core::default::Default for #state #state_type_generics
-                    #where_clause
+                impl<#lifetime> ::core::default::Default for #state <#lifetime>
                 {
                     fn default() -> Self {
                         Self #state_init_block
@@ -108,6 +104,7 @@ pub fn derive_args_struct(
             let visit_positional_arms = visit_positional_arms_for_fields(
                 &fields_ident,
                 argument,
+                &positional_parameter_ident,
                 &arg_ident,
                 &add_arg_ident,
                 &fields,
@@ -125,7 +122,13 @@ pub fn derive_args_struct(
             }
         },
         |option, argument| {
-            let body = complete_long_option_body(&fields_ident, argument, option, &fields);
+            let body = complete_long_option_body(
+                &fields_ident,
+                argument,
+                option,
+                &parameter_ident,
+                &fields,
+            );
 
             quote! {
                 let fields = &mut self.fields;
@@ -134,7 +137,8 @@ pub fn derive_args_struct(
             }
         },
         |option, argument| {
-            let body = complete_long_body(&fields_ident, argument, option, &fields);
+            let body =
+                complete_long_body(&fields_ident, argument, option, &parameter_ident, &fields);
 
             quote! {
                 let fields = &mut self.fields;
@@ -143,7 +147,8 @@ pub fn derive_args_struct(
             }
         },
         |option, argument| {
-            let body = complete_short_body(&fields_ident, argument, option, &fields);
+            let body =
+                complete_short_body(&fields_ident, argument, option, &parameter_ident, &fields);
 
             quote! {
                 let fields = &mut self.fields;

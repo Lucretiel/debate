@@ -1,21 +1,22 @@
 use std::collections::HashSet;
 
 use itertools::Itertools;
-use proc_macro2::{Span, TokenStream as TokenStream2};
-use quote::quote;
+use proc_macro::TokenTree;
+use proc_macro2::{Punct, Span, TokenStream as TokenStream2, TokenTree as TokenTree2};
+use quote::{ToTokens, quote};
 use syn::{
     AngleBracketedGenericArguments, AssocConst, AssocType, Expr, GenericArgument, GenericParam,
     Generics, Ident, Lifetime, LifetimeParam, Type, TypeGroup, TypeParamBound, TypeParen, TypePtr,
     TypeReference, TypeSlice, WherePredicate, parse_quote, spanned::Spanned,
 };
 
-pub struct ComputedGenerics {
-    pub impl_block_generics: TokenStream2,
-    pub type_generics: TokenStream2,
-    pub type_generics_with_lt: TokenStream2,
-    pub where_clause: TokenStream2,
-    pub lifetime: Lifetime,
-}
+// pub struct ComputedGenerics {
+//     pub impl_block_generics: TokenStream2,
+//     pub type_generics: TokenStream2,
+//     pub type_generics_with_lt: TokenStream2,
+//     pub where_clause: TokenStream2,
+//     pub lifetime: Lifetime,
+// }
 
 // fn const_includes_generic(
 //     expr: &Expr,
@@ -112,71 +113,122 @@ pub struct ComputedGenerics {
 //     }
 // }
 
-pub fn compute_generics<'a>(
+// pub fn compute_generics<'a>(
+//     generics: &Generics,
+//     types: impl IntoIterator<Item = &'a Type>,
+//     bound: impl FnOnce(&Lifetime) -> TokenStream2,
+// ) -> syn::Result<ComputedGenerics> {
+//     let mut augmented_generics = generics.clone();
+
+//     // This is probably not the most efficient way to do this, but
+//     // `split_for_impl` is just too complex and too valuable for me to
+//     // implement a subset of it by hand.
+
+//     if let Some(const_generic) = generics.const_params().next() {
+//         return Err(syn::Error::new(
+//             const_generic.span(),
+//             "debate derives don't support const generics yet. File a ticket",
+//         ));
+//     }
+
+//     let lifetime = match generics.lifetimes().at_most_one().map_err(|_| {
+//         syn::Error::new(
+//             generics.params.span(),
+//             "debate derives can have at most one generic lifetime ",
+//         )
+//     })? {
+//         Some(param) => param.lifetime.clone(),
+//         None => {
+//             let lifetime = Lifetime::new("'arg", Span::mixed_site());
+//             augmented_generics.params.insert(
+//                 0,
+//                 syn::GenericParam::Lifetime(LifetimeParam::new(lifetime.clone())),
+//             );
+//             lifetime
+//         }
+//     };
+
+//     // In theory, we could scan the types here and only add where clauses for
+//     // the ones that mention the generics. The big block of commented code
+//     // above is an initial attempt to do this. For now we don't bother anything
+//     // other than to determine that there are ANY generics on this type.
+//     if generics
+//         .params
+//         .iter()
+//         .any(|param| matches!(param, GenericParam::Const(_) | GenericParam::Type(_)))
+//     {
+//         let where_clause = augmented_generics.make_where_clause();
+//         let bound = bound(&lifetime);
+
+//         // Type inference makes it difficult to use .extend here
+//         for field_ty in types {
+//             where_clause
+//                 .predicates
+//                 .push(parse_quote!( #field_ty : #bound ));
+//         }
+//     }
+
+//     let (impl_generics, type_generics_with_lt, where_clause) = augmented_generics.split_for_impl();
+//     let (_, type_generics, _) = generics.split_for_impl();
+
+//     Ok(ComputedGenerics {
+//         impl_block_generics: quote! {#impl_generics},
+//         type_generics: quote! {#type_generics},
+//         type_generics_with_lt: quote! { #type_generics_with_lt },
+//         where_clause: quote! {#where_clause},
+//         lifetime,
+//     })
+
+//     // Scan types for types that appear to include any of our generic type
+// }
+
+pub struct AngleBracedLifetime {
+    lifetime: Lifetime,
+}
+
+impl ToTokens for AngleBracedLifetime {
+    fn to_tokens(&self, tokens: &mut TokenStream2) {
+        use proc_macro2::Spacing::*;
+
+        tokens.extend([TokenTree2::Punct(Punct::new('<', Alone))]);
+        self.lifetime.to_tokens(tokens);
+        tokens.extend([TokenTree2::Punct(Punct::new('>', Alone))]);
+    }
+}
+
+pub fn compute_generics(
     generics: &Generics,
-    types: impl IntoIterator<Item = &'a Type>,
-    bound: impl FnOnce(&Lifetime) -> TokenStream2,
-) -> syn::Result<ComputedGenerics> {
-    let mut augmented_generics = generics.clone();
-
-    // This is probably not the most efficient way to do this, but
-    // `split_for_impl` is just too complex and too valuable for me to
-    // implement a subset of it by hand.
-
-    if let Some(const_generic) = generics.const_params().next() {
+) -> syn::Result<(Lifetime, Option<AngleBracedLifetime>)> {
+    if let Some(param) = generics.const_params().next() {
         return Err(syn::Error::new(
-            const_generic.span(),
-            "debate derives don't support const generics yet. File a ticket",
+            param.span(),
+            "const generics aren't (yet) supported by debate",
         ));
     }
 
-    let lifetime = match generics.lifetimes().at_most_one().map_err(|_| {
-        syn::Error::new(
-            generics.params.span(),
-            "debate derives can have at most one generic lifetime ",
-        )
-    })? {
-        Some(param) => param.lifetime.clone(),
-        None => {
-            let lifetime = Lifetime::new("'arg", Span::mixed_site());
-            augmented_generics.params.insert(
-                0,
-                syn::GenericParam::Lifetime(LifetimeParam::new(lifetime.clone())),
-            );
-            lifetime
-        }
-    };
-
-    // In theory, we could scan the types here and only add where clauses for
-    // the ones that mention the generics. The big block of commented code
-    // above is an initial attempt to do this. For now we don't bother anything
-    // other than to determine that there are ANY generics on this type.
-    if generics
-        .params
-        .iter()
-        .any(|param| matches!(param, GenericParam::Const(_) | GenericParam::Type(_)))
-    {
-        let where_clause = augmented_generics.make_where_clause();
-        let bound = bound(&lifetime);
-
-        // Type inference makes it difficult to use .extend here
-        for field_ty in types {
-            where_clause
-                .predicates
-                .push(parse_quote!( #field_ty : #bound ));
-        }
+    if let Some(param) = generics.type_params().next() {
+        return Err(syn::Error::new(
+            param.span(),
+            "generic types aren't (yet) supported by debate",
+        ));
     }
 
-    let (impl_generics, type_generics_with_lt, where_clause) = augmented_generics.split_for_impl();
-    let (_, type_generics, _) = generics.split_for_impl();
-
-    Ok(ComputedGenerics {
-        impl_block_generics: quote! {#impl_generics},
-        type_generics: quote! {#type_generics},
-        type_generics_with_lt: quote! { #type_generics_with_lt },
-        where_clause: quote! {#where_clause},
-        lifetime,
-    })
-
-    // Scan types for types that appear to include any of our generic type
+    generics
+        .lifetimes()
+        .at_most_one()
+        .map(|param| match param {
+            None => (Lifetime::new("'arg", Span::mixed_site()), None),
+            Some(param) => (
+                param.lifetime.clone(),
+                Some(AngleBracedLifetime {
+                    lifetime: param.lifetime.clone(),
+                }),
+            ),
+        })
+        .map_err(|_| {
+            syn::Error::new(
+                generics.params.span(),
+                "can't derive debate traits with more than one lifetime",
+            )
+        })
 }

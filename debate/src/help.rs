@@ -1,12 +1,4 @@
-use core::{
-    convert::Infallible,
-    fmt::{self, Write, write},
-    marker::PhantomData,
-};
-
-use indent_write::{fmt::IndentWriter, indentable::Indentable};
-use joinery::{Joinable, JoinableIterator};
-use lazy_format::{lazy_format, make_lazy_format};
+use core::{convert::Infallible, marker::PhantomData};
 
 use crate::state::SubcommandChain;
 
@@ -22,10 +14,12 @@ pub enum Repetition {
     Multiple,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct ValueParameter<'a> {
     /// The name of the argument itself. Typically capitalized.
-    pub metavariable: &'a str,
+    ///
+    /// `[--option VALUE]`, the placeholder is `VALUE`
+    pub placeholder: &'a str,
 
     /// If given, the set of possible values that this argument can be.
     pub values: Option<&'a [&'a str]>,
@@ -54,12 +48,6 @@ impl<'a> Tags<'a> {
     }
 }
 
-pub struct Descriptions<'a> {
-    pub short: &'a str,
-    pub long: &'a str,
-}
-
-///
 pub trait Receiver {
     type Err;
 
@@ -71,7 +59,7 @@ pub trait Receiver {
         argument: Option<ValueParameter<'_>>,
         requirement: Requirement,
         repetition: Repetition,
-        description: Descriptions,
+        description: &str,
     ) -> Result<(), Self::Err> {
         Ok(())
     }
@@ -83,7 +71,7 @@ pub trait Receiver {
         argument: ValueParameter<'_>,
         requirement: Requirement,
         repetition: Repetition,
-        description: Descriptions,
+        description: &str,
     ) -> Result<(), Self::Err> {
         Ok(())
     }
@@ -93,7 +81,7 @@ pub trait Receiver {
     fn subcommand(
         &mut self,
         command: &str,
-        description: Descriptions<'_>,
+        description: &str,
         usage: UsageHelper<impl Usage>,
     ) -> Result<(), Self::Err> {
         Ok(())
@@ -185,7 +173,10 @@ impl<T: Usage> UsageHelper<T> {
 pub struct HelpRequestedError;
 
 /// Entry point for the usage system. A `UsagePrinter` is passed in during
-/// argument parsing and allows the
+/// argument parsing and allows the.
+///
+/// The methods on this trait can only possibly return an error. This is a hint
+/// that a typical `UsagePrinter` will actually print
 pub trait UsagePrinter {
     fn print_long_usage(
         self,
@@ -200,4 +191,48 @@ pub trait UsagePrinter {
         command: &SubcommandChain<'_>,
         usage: UsageHelper<impl Usage>,
     ) -> Result<Infallible, HelpRequestedError>;
+}
+
+// TODO: consider a separate PositionalUsage trait?
+
+pub trait ParameterUsage {
+    const VALUE: ParameterValueKind;
+    const REQUIREMENT: Requirement;
+    const REPETITION: Repetition;
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum ParameterValueKind {
+    Flag,
+    Value,
+    OneOf(&'static [&'static str]),
+}
+
+impl ParameterValueKind {
+    pub const fn as_value_parameter<'a>(&'a self, placeholder: &'a str) -> ValueParameter<'a> {
+        ValueParameter {
+            placeholder,
+            values: match *self {
+                Self::OneOf(values) => Some(values),
+                _ => None,
+            },
+        }
+    }
+
+    pub const fn as_maybe_value_parameter<'a>(
+        &'a self,
+        placeholder: &'a str,
+    ) -> Option<ValueParameter<'a>> {
+        match *self {
+            ParameterValueKind::Flag => None,
+            ParameterValueKind::Value => Some(ValueParameter {
+                placeholder,
+                values: None,
+            }),
+            ParameterValueKind::OneOf(values) => Some(ValueParameter {
+                placeholder,
+                values: Some(values),
+            }),
+        }
+    }
 }

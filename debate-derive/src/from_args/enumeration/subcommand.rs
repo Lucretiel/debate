@@ -6,20 +6,21 @@ use itertools::Itertools as _;
 use proc_macro2::{Literal, TokenStream as TokenStream2};
 use quote::{format_ident, quote};
 use syn::{
-    Fields, FieldsNamed, FieldsUnnamed, Generics, Ident, Token, Variant, punctuated::Punctuated,
-    spanned::Spanned,
+    Fields, FieldsNamed, FieldsUnnamed, Generics, Ident, Lifetime, Token, Variant,
+    punctuated::Punctuated, spanned::Spanned,
 };
 
 use crate::{
+    common::{IdentString, OptionTag, ParsedFieldInfo},
     from_args::{
         common::{
-            IdentString, OptionTag, ParsedFieldInfo, complete_long_body, complete_long_option_body,
-            complete_short_body, final_field_initializers, struct_state_block_from_fields,
+            complete_long_body, complete_long_option_body, complete_short_body,
+            final_field_initializers, struct_state_block_from_fields,
             struct_state_init_block_from_fields, visit_positional_arms_for_fields,
         },
         from_args_impl,
     },
-    generics::compute_generics,
+    generics::{AngleBracedLifetime, compute_generics},
 };
 
 /// Ident of the unselected subcommand (that is, the enum variant)
@@ -180,24 +181,15 @@ fn compute_recognition_set<'a, T: Hash + Eq>(
 pub fn derive_args_enum_subcommand(
     name: &Ident,
     variants: &Punctuated<Variant, Token![,]>,
-    generics: &Generics,
+    lifetime: &Lifetime,
+    type_lifetime: Option<&AngleBracedLifetime>,
 ) -> syn::Result<TokenStream2> {
-    let generics = compute_generics(
-        generics,
-        variants
-            .iter()
-            .flat_map(|variant| &variant.fields)
-            .map(|field| &field.ty),
-        |lt| quote! { ::debate::build::BuildFromArgs<#lt> },
-    )?;
-
-    let impl_generics = &generics.impl_block_generics;
-    let state_type_generics = &generics.type_generics_with_lt;
-    let where_clause = &generics.where_clause;
-
     let arg_ident = format_ident!("arg");
     let add_arg_ident = format_ident!("add_arg");
     let fields_ident = format_ident!("fields");
+
+    let parameter_ident = format_ident!("Parameter");
+    let positional_parameter_ident = format_ident!("PositionalParameter");
 
     let parsed_variants = ParsedSubcommandInfo::from_variants(variants)?;
 
@@ -231,7 +223,8 @@ pub fn derive_args_enum_subcommand(
 
     Ok(from_args_impl(
         name,
-        &generics,
+        lifetime,
+        type_lifetime,
         |state_ident| {
             let state_variants = parsed_variants.variants.iter().map(|variant| {
                 let variant_ident = variant.ident.raw();
@@ -245,7 +238,7 @@ pub fn derive_args_enum_subcommand(
             quote! {
                 #[doc(hidden)]
                 #[derive(::core::default::Default)]
-                enum #state_ident #impl_generics {
+                enum #state_ident <#lifetime> {
                     #[default]
                     #fallback_ident,
                     #(#state_variants,)*
@@ -271,6 +264,7 @@ pub fn derive_args_enum_subcommand(
                 let local_positional_arms = visit_positional_arms_for_fields(
                     &fields_ident,
                     argument,
+                    &positional_parameter_ident,
                     &arg_ident,
                     &add_arg_ident,
                     &variant.fields,
@@ -311,8 +305,13 @@ pub fn derive_args_enum_subcommand(
         |option, argument| {
             let arms = parsed_variants.variants.iter().map(|variant| {
                 let variant_ident = variant.ident.raw();
-                let body =
-                    complete_long_option_body(&fields_ident, argument, option, &variant.fields);
+                let body = complete_long_option_body(
+                    &fields_ident,
+                    argument,
+                    option,
+                    &parameter_ident,
+                    &variant.fields,
+                );
 
                 quote! {
                     Self :: #variant_ident { ref mut #fields_ident, .. } => #body,
@@ -335,7 +334,13 @@ pub fn derive_args_enum_subcommand(
         |option, argument| {
             let arms = parsed_variants.variants.iter().map(|variant| {
                 let variant_ident = variant.ident.raw();
-                let body = complete_long_body(&fields_ident, argument, option, &variant.fields);
+                let body = complete_long_body(
+                    &fields_ident,
+                    argument,
+                    option,
+                    &parameter_ident,
+                    &variant.fields,
+                );
 
                 quote! {
                     Self :: #variant_ident { ref mut #fields_ident, .. } => #body,
@@ -354,7 +359,13 @@ pub fn derive_args_enum_subcommand(
         |option, argument| {
             let arms = parsed_variants.variants.iter().map(|variant| {
                 let variant_ident = variant.ident.raw();
-                let body = complete_short_body(&fields_ident, argument, option, &variant.fields);
+                let body = complete_short_body(
+                    &fields_ident,
+                    argument,
+                    option,
+                    &parameter_ident,
+                    &variant.fields,
+                );
 
                 quote! {
                     Self :: #variant_ident { ref mut #fields_ident, .. } => #body,

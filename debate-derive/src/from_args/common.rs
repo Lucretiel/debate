@@ -1,44 +1,11 @@
-use darling::{
-    FromAttributes,
-    util::{Override, SpannedValue},
-};
-use heck::ToKebabCase as _;
 use proc_macro2::{Literal, TokenStream as TokenStream2};
 use quote::{ToTokens, format_ident, quote};
-use syn::{Expr, Field, Ident, Index, Type, spanned::Spanned as _};
+use syn::{Ident, Index};
 
-pub struct IdentString<'a> {
-    raw: &'a Ident,
-    string: String,
-}
-
-impl<'a> IdentString<'a> {
-    pub fn new(ident: &'a Ident) -> Self {
-        Self {
-            string: ident.to_string(),
-            raw: ident,
-        }
-    }
-
-    pub fn as_str(&self) -> &str {
-        self.string.as_str()
-    }
-
-    pub fn raw(&self) -> &'a Ident {
-        self.raw
-    }
-}
-
-impl ToTokens for IdentString<'_> {
-    fn to_tokens(&self, tokens: &mut TokenStream2) {
-        self.raw.to_tokens(tokens);
-    }
-}
-
-pub enum FlattenOr<F, T> {
-    Flatten(F),
-    Normal(T),
-}
+use crate::common::{
+    FieldDefault, FlattenFieldInfo, FlattenOr, IdentString, OptionFieldInfo, ParsedFieldInfo,
+    PositionalFieldInfo,
+};
 
 /// Create a state block, in curlies. Used both for the struct state, and
 /// for separate enum variant states
@@ -93,133 +60,6 @@ pub fn struct_state_init_block_from_fields<'a>(
     }
 }
 
-#[derive(darling::FromAttributes, Debug)]
-#[darling(attributes(debate))]
-struct RawParsedAttr {
-    long: Option<Override<SpannedValue<String>>>,
-    short: Option<Override<SpannedValue<char>>>,
-    default: Option<Override<Expr>>,
-    // clear = "no-verbose"
-    // placeholder = "VALUE"
-    // TODO: add a parse step where `flatten` must not coexist with the other
-    // variants. Consider switching from `darling` to `deluxe`, which apparently
-    // handles this.
-    flatten: Option<()>,
-}
-
-pub enum FieldDefault {
-    None,
-    Trait,
-    Expr(Expr),
-}
-
-impl FieldDefault {
-    pub fn new(default: Option<Override<Expr>>) -> Self {
-        match default {
-            Some(Override::Explicit(default)) => Self::Expr(default),
-            Some(Override::Inherit) => Self::Trait,
-            None => Self::None,
-        }
-    }
-}
-
-pub struct PositionalFieldInfo<'a> {
-    pub ident: IdentString<'a>,
-    pub ty: &'a Type,
-    pub default: FieldDefault,
-    pub docs: String,
-}
-
-pub struct OptionFieldInfo<'a> {
-    pub ident: IdentString<'a>,
-    pub ty: &'a Type,
-    pub default: FieldDefault,
-    pub docs: String,
-    pub tags: OptionTag,
-}
-
-pub struct FlattenFieldInfo<'a> {
-    pub ident: Option<IdentString<'a>>,
-    pub ty: &'a Type,
-}
-
-impl FlattenFieldInfo<'_> {
-    #[inline]
-    pub fn ident_str(&self) -> Option<&str> {
-        self.ident.as_ref().map(|ident| ident.as_str())
-    }
-}
-
-pub enum ParsedFieldInfo<'a> {
-    Positional(PositionalFieldInfo<'a>),
-    Option(OptionFieldInfo<'a>),
-    Flatten(FlattenFieldInfo<'a>),
-}
-
-impl<'a> ParsedFieldInfo<'a> {
-    pub fn from_field(field: &'a Field) -> syn::Result<Self> {
-        let parsed = RawParsedAttr::from_attributes(&field.attrs)?;
-
-        let ty = &field.ty;
-        let ident = field.ident.as_ref().map(IdentString::new);
-
-        // TODO: enforce that flatten doesn't coexist with other variants.
-        if let Some(()) = parsed.flatten {
-            return Ok(Self::Flatten(FlattenFieldInfo { ident, ty }));
-        }
-
-        let ident = ident.ok_or_else(|| {
-            syn::Error::new(
-                field.span(),
-                "can't use non-flattened fields in tuple structs",
-            )
-        })?;
-
-        let long = parsed
-            .long
-            .map(|long| compute_long(long.explicit(), ident.raw()))
-            .transpose()?;
-
-        let short = parsed
-            .short
-            .map(|short| compute_short(short.explicit(), ident.raw()))
-            .transpose()?;
-
-        let default = FieldDefault::new(parsed.default);
-
-        Ok(
-            match match (long, short) {
-                (None, None) => None,
-                (Some(long), None) => Some(OptionTag::Long(long)),
-                (None, Some(short)) => Some(OptionTag::Short(short)),
-                (Some(long), Some(short)) => Some(OptionTag::LongShort(long, short)),
-            } {
-                None => Self::Positional(PositionalFieldInfo {
-                    ident,
-                    ty,
-                    default,
-                    docs: String::new(),
-                }),
-                Some(tags) => Self::Option(OptionFieldInfo {
-                    ident,
-                    ty,
-                    default,
-                    docs: String::new(),
-                    tags,
-                }),
-            },
-        )
-    }
-
-    pub fn get_positional(&self) -> Option<FlattenOr<&FlattenFieldInfo, &PositionalFieldInfo>> {
-        match self {
-            ParsedFieldInfo::Positional(info) => Some(FlattenOr::Normal(info)),
-            ParsedFieldInfo::Flatten(info) => Some(FlattenOr::Flatten(info)),
-            ParsedFieldInfo::Option(_) => None,
-        }
-    }
-}
-
 pub fn indexed_fields<'a>(
     fields: &'a [ParsedFieldInfo<'a>],
 ) -> impl Iterator<Item = (Index, &'a ParsedFieldInfo<'a>)> {
@@ -262,91 +102,6 @@ pub fn positional_flatten_fields<'a>(
         .map(|(position, (index, field))| (index, Literal::usize_unsuffixed(position), field))
 }
 
-fn compute_long(
-    long: Option<SpannedValue<String>>,
-    field_name: &Ident,
-) -> syn::Result<SpannedValue<String>> {
-    // Currently this can never fail, but we want to leave open the possibility
-    let long = long.unwrap_or_else(|| {
-        SpannedValue::new(field_name.to_string().to_kebab_case(), field_name.span())
-    });
-
-    if long.starts_with("--") {
-        Err(syn::Error::new(
-            long.span(),
-            "long parameters don't need to start with --; this is handled automatically",
-        ))
-    } else if long.starts_with('-') {
-        Err(syn::Error::new(
-            long.span(),
-            "long parameters don't start with '-'",
-        ))
-    } else if !long.starts_with(|c: char| c.is_alphabetic()) {
-        Err(syn::Error::new(
-            long.span(),
-            "long parameters should start with something alphabetic. This might be relaxed later.",
-        ))
-    } else if long.contains('=') {
-        Err(syn::Error::new(
-            long.span(),
-            "long parameters must not include an '=', as it is the argument separator",
-        ))
-    } else {
-        Ok(long)
-    }
-}
-
-fn compute_short(
-    short: Option<SpannedValue<char>>,
-    field_name: &Ident,
-) -> syn::Result<SpannedValue<char>> {
-    let c = short.unwrap_or_else(|| {
-        SpannedValue::new(
-            field_name
-                .to_string()
-                .chars()
-                .next()
-                .expect("Identifiers can't be empty"),
-            field_name.span(),
-        )
-    });
-
-    if *c == '-' {
-        Err(syn::Error::new(c.span(), "short parameter must not be '-'"))
-    } else if !c.is_ascii_graphic() {
-        Err(syn::Error::new(
-            c.span(),
-            "short parameter should be an ascii printable",
-        ))
-    } else {
-        Ok(c)
-    }
-}
-
-pub enum OptionTag {
-    Long(SpannedValue<String>),
-    Short(SpannedValue<char>),
-    LongShort(SpannedValue<String>, SpannedValue<char>),
-}
-
-impl OptionTag {
-    pub fn long(&self) -> Option<SpannedValue<&str>> {
-        match *self {
-            OptionTag::Long(ref long) | OptionTag::LongShort(ref long, _) => {
-                Some(SpannedValue::new(long.as_str(), long.span()))
-            }
-            OptionTag::Short(_) => None,
-        }
-    }
-
-    pub fn short(&self) -> Option<SpannedValue<char>> {
-        match *self {
-            OptionTag::Short(short) | OptionTag::LongShort(_, short) => Some(short),
-            OptionTag::Long(_) => None,
-        }
-    }
-}
-
 /// Create an expression that applies an incoming `argument` to a given parameter
 /// by calling either `Parameter::initial_method` or `Parameter::follow_up_method`,
 /// depending on whether the field is present already. This expression's type
@@ -356,19 +111,20 @@ pub fn apply_arg_to_field(
     fields_ident: &Ident,
     argument_ident: &Ident,
     field_index: &Index,
+    parameter_trait: &Ident,
     initial_method: &Ident,
     follow_up_method: &Ident,
 ) -> impl ToTokens {
     quote! {
         match #fields_ident.#field_index {
-            ::core::option::Option::None => match ::debate::parameter::Parameter::#initial_method(#argument_ident) {
+            ::core::option::Option::None => match ::debate::parameter::#parameter_trait::#initial_method(#argument_ident) {
                 ::core::result::Result::Err(err) => ::core::result::Result::Err(err),
                 ::core::result::Result::Ok(value) => {
                     #fields_ident.#field_index = ::core::option::Option::Some(value);
                     ::core::result::Result::Ok(())
                 }
             }
-            ::core::option::Option::Some(ref mut old) => ::debate::parameter::Parameter::#follow_up_method(
+            ::core::option::Option::Some(ref mut old) => ::debate::parameter::#parameter_trait::#follow_up_method(
                 old,
                 argument
             ),
@@ -435,6 +191,7 @@ pub fn handle_flatten(
 pub fn visit_positional_arms_for_fields(
     fields_ident: &Ident,
     argument_ident: &Ident,
+    trait_ident: &Ident,
     arg_ident: &Ident,
     add_arg_ident: &Ident,
     fields: &[ParsedFieldInfo<'_>],
@@ -448,6 +205,7 @@ pub fn visit_positional_arms_for_fields(
                     fields_ident,
                     argument_ident,
                     &idx,
+                    trait_ident,
                     arg_ident,
                     add_arg_ident,
                 );
@@ -501,6 +259,7 @@ fn complete_option_body<'a>(
     fields: &'a [ParsedFieldInfo<'a>],
     make_scrutinee: impl Fn(&'a OptionFieldInfo<'a>) -> Option<Literal>,
 
+    trait_ident: &Ident,
     parameter_method: &Ident,
     add_parameter_method: &Ident,
 
@@ -518,6 +277,7 @@ fn complete_option_body<'a>(
                 fields_ident,
                 argument_ident,
                 &index,
+                trait_ident,
                 parameter_method,
                 add_parameter_method,
             );
@@ -571,6 +331,7 @@ pub fn complete_long_option_body(
     fields_ident: &Ident,
     argument_ident: &Ident,
     option_ident: &Ident,
+    parameter_ident: &Ident,
 
     fields: &[ParsedFieldInfo<'_>],
 ) -> TokenStream2 {
@@ -584,6 +345,7 @@ pub fn complete_long_option_body(
                 .long()
                 .map(|long| Literal::byte_string(long.as_bytes()))
         },
+        parameter_ident,
         &format_ident!("arg"),
         &format_ident!("add_arg"),
         &format_ident!("add_long_option"),
@@ -595,6 +357,7 @@ pub fn complete_long_body(
     fields_ident: &Ident,
     argument_ident: &Ident,
     option_ident: &Ident,
+    parameter_ident: &Ident,
 
     fields: &[ParsedFieldInfo<'_>],
 ) -> TokenStream2 {
@@ -608,6 +371,7 @@ pub fn complete_long_body(
                 .long()
                 .map(|long| Literal::byte_string(long.as_bytes()))
         },
+        parameter_ident,
         &format_ident!("present"),
         &format_ident!("add_present"),
         &format_ident!("add_long"),
@@ -619,6 +383,7 @@ pub fn complete_short_body(
     fields_ident: &Ident,
     argument_ident: &Ident,
     option_ident: &Ident,
+    parameter_ident: &Ident,
 
     fields: &[ParsedFieldInfo<'_>],
 ) -> TokenStream2 {
@@ -632,6 +397,7 @@ pub fn complete_short_body(
                 .short()
                 .map(|short| Literal::byte_character(*short as u8))
         },
+        parameter_ident,
         &format_ident!("present"),
         &format_ident!("add_present"),
         &format_ident!("add_short"),
