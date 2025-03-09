@@ -2,11 +2,10 @@ pub mod common;
 pub mod enumeration;
 pub mod structure;
 
-use itertools::Itertools;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::{format_ident, quote};
+use syn::Lifetime;
 use syn::{DeriveInput, Fields, Ident, spanned::Spanned as _};
-use syn::{Lifetime, parse_quote};
 
 use crate::generics::{AngleBracedLifetime, compute_generics};
 
