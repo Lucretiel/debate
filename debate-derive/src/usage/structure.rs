@@ -87,10 +87,10 @@ pub fn derive_usage_struct(
         ParsedFieldInfo::Flatten(FlattenFieldInfo { ty, ident, .. }) => {
             match ident.as_ref().map(|ident| ident.as_str()) {
                 Some(name) => quote! {
-                    receiver.group(#name, ::debate::help::UsageHelper::<#ty>)
+                    receiver.group(#name, ::debate::help::UsageHelper::<#ty>::new())
                 },
                 None => quote! {
-                    receiver.anonymous_group(::debate::help::UsageHelper::<#ty>)
+                    receiver.anonymous_group(::debate::help::UsageHelper::<#ty>::new())
                 },
             }
         }
