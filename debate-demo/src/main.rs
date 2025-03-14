@@ -5,14 +5,16 @@ use std::{path::PathBuf, str};
 use anyhow::Context;
 use debate::{
     from_args::FromArgs,
-    help::{self, ParameterUsage, ParameterValueKind, Repetition, Requirement},
+    help::{self, ParameterUsage, ParameterValueKind, Repetition, Requirement, Usage as _},
+    printers::DebugUsage,
 };
-use debate_derive::{FromArgs, Usage, Value};
+use debate_derive::{FromArgs, ParameterUsage, Usage, Value};
 use debate_parser::ArgumentsParser;
+use lazy_format::make_lazy_format;
 
 use crate::error::BuildError;
 
-#[derive(FromArgs, Debug)]
+#[derive(FromArgs, Usage, Debug)]
 #[debate(help, author)]
 struct Arguments {
     #[debate(short, long = "foo")]
@@ -51,18 +53,12 @@ struct Alphabet {
     direction: Option<Direction>,
 }
 
-#[derive(Debug, Clone, Copy, Value)]
+#[derive(Debug, Clone, Copy, Value, ParameterUsage)]
 enum Direction {
     Up,
     Down,
     Left,
     Right,
-}
-
-impl ParameterUsage for Direction {
-    const VALUE: ParameterValueKind = ParameterValueKind::OneOf(&["up", "down", "left", "right"]);
-    const REQUIREMENT: Requirement = Requirement::Mandatory;
-    const REPETITION: Repetition = Repetition::Single;
 }
 
 enum FlagChoice {
@@ -71,7 +67,7 @@ enum FlagChoice {
     OutFile(PathBuf),
 }
 
-#[derive(FromArgs, Debug)]
+#[derive(FromArgs, Usage, Debug)]
 #[debate(subcommand)]
 enum Subcommand {
     #[debate(fallback)]
@@ -91,6 +87,11 @@ fn main() -> anyhow::Result<()> {
     let args: Vec<Vec<u8>> = std::env::args_os()
         .map(|arg| arg.into_encoded_bytes())
         .collect();
+
+    println!(
+        "usage:\n{}",
+        make_lazy_format!(|fmt| Arguments::describe(&mut DebugUsage::new(fmt)))
+    );
 
     let args: Result<Arguments, BuildError> = Arguments::from_parser(ArgumentsParser::new(
         args.iter().skip(1).map(|arg| arg.as_slice()),

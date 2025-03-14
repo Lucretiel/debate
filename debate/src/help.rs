@@ -81,7 +81,7 @@ pub trait Receiver {
     fn subcommand(
         &mut self,
         command: &str,
-        description: &str,
+        description: Option<&str>,
         usage: UsageHelper<impl Usage>,
     ) -> Result<(), Self::Err> {
         Ok(())
@@ -127,14 +127,12 @@ pub struct UsageHelper<T> {
 }
 
 impl<T: Usage> UsageHelper<T> {
-    pub fn new() -> Self {
+    #[inline(always)]
+    #[must_use]
+    pub const fn new() -> Self {
         Self {
             phantom: PhantomData,
         }
-    }
-
-    pub fn typed<U: Usage>() -> UsageHelper<U> {
-        UsageHelper::new()
     }
 }
 
@@ -147,6 +145,7 @@ impl<T> Clone for UsageHelper<T> {
 }
 
 impl<T: Usage> Default for UsageHelper<T> {
+    #[inline(always)]
     fn default() -> Self {
         Self::new()
     }

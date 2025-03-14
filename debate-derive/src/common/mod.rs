@@ -1,3 +1,6 @@
+pub mod enumeration;
+pub mod value;
+
 use darling::{
     FromAttributes as _,
     util::{Override, SpannedValue},
@@ -131,7 +134,7 @@ impl FlattenFieldInfo<'_> {
 
 // TODO: compute short + long docs
 // TODO: rewrap
-fn compute_docs(attrs: &[Attribute]) -> syn::Result<String> {
+pub fn compute_docs(attrs: &[Attribute]) -> syn::Result<String> {
     attrs
         .iter()
         .filter_map(|attr| match attr.meta {

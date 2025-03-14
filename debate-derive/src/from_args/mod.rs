@@ -1,4 +1,4 @@
-pub mod common;
+mod common;
 pub mod enumeration;
 pub mod structure;
 

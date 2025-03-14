@@ -3,67 +3,14 @@ use itertools::Itertools;
 use proc_macro2::{Literal, TokenStream as TokenStream2};
 use quote::{ToTokens, format_ident, quote};
 use syn::{
-    DeriveInput, FieldsNamed, FieldsUnnamed, Generics, Ident, Token, Variant,
+    Data, DeriveInput, FieldsNamed, FieldsUnnamed, Generics, Ident, Lifetime, Token, Variant,
     punctuated::Punctuated, spanned::Spanned,
 };
 
-struct Fallback<'a> {
-    variant: &'a Ident,
-    field: Option<&'a Ident>,
-}
-struct AnalyzedEnum<'a> {
-    variants: Vec<(String, &'a Ident)>,
-    fallback: Option<Fallback<'a>>,
-}
-
-impl<'a> AnalyzedEnum<'a> {
-    pub fn from_variants(variants: impl IntoIterator<Item = &'a Variant>) -> syn::Result<Self> {
-        let mut fallback = None;
-        let mut collected = Vec::new();
-
-        for variant in variants {
-            match variant.fields {
-                syn::Fields::Unit => {
-                    // TODO: rename attribute
-                    collected.push((variant.ident.to_string().to_kebab_case(), &variant.ident));
-                }
-                syn::Fields::Unnamed(FieldsUnnamed {
-                    unnamed: ref fields,
-                    ..
-                })
-                | syn::Fields::Named(FieldsNamed {
-                    named: ref fields, ..
-                }) => match fields.iter().exactly_one() {
-                    Ok(field) => match fallback {
-                        Some(_) => {
-                            return Err(syn::Error::new(
-                                variant.span(),
-                                "error: more than one fallback variant",
-                            ));
-                        }
-                        None => {
-                            fallback = Some(Fallback {
-                                variant: &variant.ident,
-                                field: field.ident.as_ref(),
-                            })
-                        }
-                    },
-                    Err(_) => {
-                        return Err(syn::Error::new(
-                            variant.span(),
-                            "error: variant with more than one field",
-                        ));
-                    }
-                },
-            }
-        }
-
-        Ok(AnalyzedEnum {
-            variants: collected,
-            fallback,
-        })
-    }
-}
+use crate::{
+    common::value::{AnalyzedEnum, Fallback},
+    generics::{AngleBracedLifetime, compute_generics},
+};
 
 fn unit_arms<'a>(
     variants: impl Iterator<Item = (&'a str, &'a Ident)>,
@@ -114,8 +61,9 @@ fn fallback_arm(
 
 fn derive_value_enum(
     ident: &Ident,
-    generics: &Generics,
     variants: &Punctuated<Variant, Token![,]>,
+    lifetime: &Lifetime,
+    type_lifetime: Option<&AngleBracedLifetime>,
 ) -> syn::Result<TokenStream2> {
     let analyzed = AnalyzedEnum::from_variants(variants)?;
 
@@ -128,7 +76,7 @@ fn derive_value_enum(
         Literal::byte_string(rename.as_bytes())
     });
 
-    let unit_str_arms = unit_arms(normalized_unit_variants, |rename| Literal::string(rename));
+    let unit_str_arms = unit_arms(normalized_unit_variants, Literal::string);
 
     let from_arg_ident = format_ident!("from_arg");
     let from_arg_str_ident = format_ident!("from_arg_str");
@@ -151,9 +99,9 @@ fn derive_value_enum(
     );
 
     Ok(quote! {
-        impl<'arg> ::debate::parameter::Value<'arg> for #ident {
-            fn from_arg<E: ::debate::parameter::Error<'arg>>(
-                argument: ::debate_parser::Arg<'arg>,
+        impl<#lifetime> ::debate::parameter::Value<#lifetime> for #ident #type_lifetime {
+            fn from_arg<E: ::debate::parameter::Error<#lifetime>>(
+                argument: ::debate_parser::Arg<#lifetime>,
             ) -> Result<Self, E> {
                 match argument.bytes() {
                     #(#unit_byte_arms)*
@@ -161,7 +109,7 @@ fn derive_value_enum(
                 }
             }
 
-            fn from_arg_str<E: ::debate::parameter::Error<'arg>>(
+            fn from_arg_str<E: ::debate::parameter::Error<#lifetime>>(
                 argument: &str,
             ) -> Result<Self, E> {
                 match argument {
@@ -173,7 +121,12 @@ fn derive_value_enum(
     })
 }
 
-fn derive_value_newtype(ident: &Ident, field: Option<&Ident>) -> syn::Result<TokenStream2> {
+fn derive_value_newtype(
+    ident: &Ident,
+    field: Option<&Ident>,
+    lifetime: &Lifetime,
+    type_lifetime: Option<&AngleBracedLifetime>,
+) -> syn::Result<TokenStream2> {
     let struct_body = match field {
         Some(field) => quote! { { #field: value} },
         None => quote! { ( #field ) },
@@ -194,14 +147,14 @@ fn derive_value_newtype(ident: &Ident, field: Option<&Ident>) -> syn::Result<Tok
     let from_str_body = match_body(format_ident!("from_arg_str"));
 
     Ok(quote! {
-        impl<'arg> ::debate::parameter::Value<'arg> for #ident {
-            fn from_arg<E: ::debate::parameter::Error<'arg>>(
+        impl<#lifetime> ::debate::parameter::Value<#lifetime> for #ident #type_lifetime {
+            fn from_arg<E: ::debate::parameter::Error<#lifetime>>(
                 argument: ::debate_parser::Arg<'arg>,
             ) -> Result<Self, E> {
                 #from_arg_body
             }
 
-            fn from_arg_str<E: ::debate::parameter::Error<'arg>>(
+            fn from_arg_str<E: ::debate::parameter::Error<#lifetime>>(
                 argument: &str,
             ) -> Result<Self, E> {
                 #from_str_body
@@ -212,9 +165,10 @@ fn derive_value_newtype(ident: &Ident, field: Option<&Ident>) -> syn::Result<Tok
 
 pub fn derive_value_result(item: TokenStream2) -> syn::Result<TokenStream2> {
     let input: DeriveInput = syn::parse2(item)?;
+    let (lifetime, type_lifetime) = compute_generics(&input.generics)?;
 
     match input.data {
-        syn::Data::Struct(ref data) => {
+        Data::Struct(ref data) => {
             let field = data.fields.iter().exactly_one().map_err(|_| {
                 syn::Error::new(
                     input.span(),
@@ -222,12 +176,20 @@ pub fn derive_value_result(item: TokenStream2) -> syn::Result<TokenStream2> {
                 )
             })?;
 
-            derive_value_newtype(&input.ident, field.ident.as_ref())
+            derive_value_newtype(
+                &input.ident,
+                field.ident.as_ref(),
+                &lifetime,
+                type_lifetime.as_ref(),
+            )
         }
-        syn::Data::Enum(ref data) => {
-            derive_value_enum(&input.ident, &input.generics, &data.variants)
-        }
-        syn::Data::Union(_) => Err(syn::Error::new(
+        Data::Enum(ref data) => derive_value_enum(
+            &input.ident,
+            &data.variants,
+            &lifetime,
+            type_lifetime.as_ref(),
+        ),
+        Data::Union(_) => Err(syn::Error::new(
             input.span(),
             "can't derive `Value` on a union",
         )),
