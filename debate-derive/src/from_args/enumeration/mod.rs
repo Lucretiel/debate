@@ -2,7 +2,7 @@ mod subcommand;
 
 use darling::FromAttributes;
 use proc_macro2::TokenStream as TokenStream2;
-use syn::{Attribute, Generics, Ident, Lifetime, Token, Variant, punctuated::Punctuated};
+use syn::{Attribute, Ident, Lifetime, Token, Variant, punctuated::Punctuated};
 
 use crate::{common::enumeration::ValueEnumAttr, generics::AngleBracedLifetime};
 

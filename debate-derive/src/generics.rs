@@ -1,14 +1,7 @@
-use std::collections::HashSet;
-
 use itertools::Itertools;
-use proc_macro::TokenTree;
 use proc_macro2::{Punct, Span, TokenStream as TokenStream2, TokenTree as TokenTree2};
-use quote::{ToTokens, quote};
-use syn::{
-    AngleBracketedGenericArguments, AssocConst, AssocType, Expr, GenericArgument, GenericParam,
-    Generics, Ident, Lifetime, LifetimeParam, Type, TypeGroup, TypeParamBound, TypeParen, TypePtr,
-    TypeReference, TypeSlice, WherePredicate, parse_quote, spanned::Spanned,
-};
+use quote::ToTokens;
+use syn::{Generics, Lifetime, spanned::Spanned};
 
 // pub struct ComputedGenerics {
 //     pub impl_block_generics: TokenStream2,

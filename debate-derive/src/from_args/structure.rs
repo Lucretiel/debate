@@ -8,7 +8,7 @@ use lazy_format::lazy_format;
 use proc_macro2::{Span, TokenStream as TokenStream2};
 use quote::{format_ident, quote};
 use syn::Lifetime;
-use syn::{Attribute, Field, Generics, Ident, Token, punctuated::Punctuated};
+use syn::{Attribute, Field, Ident, Token, punctuated::Punctuated};
 
 use crate::common::ParsedFieldInfo;
 use crate::from_args::common::{
@@ -16,7 +16,7 @@ use crate::from_args::common::{
     struct_state_block_from_fields, struct_state_init_block_from_fields,
     visit_positional_arms_for_fields,
 };
-use crate::generics::{AngleBracedLifetime, compute_generics};
+use crate::generics::AngleBracedLifetime;
 
 fn detect_collision<T: Hash + Eq + Copy, M: Display>(
     known_tags: &mut HashMap<T, Span>,

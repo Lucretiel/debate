@@ -1,10 +1,8 @@
-use heck::ToKebabCase;
 use itertools::Itertools;
 use proc_macro2::{Literal, TokenStream as TokenStream2};
 use quote::{ToTokens, format_ident, quote};
 use syn::{
-    Data, DeriveInput, FieldsNamed, FieldsUnnamed, Generics, Ident, Lifetime, Token, Variant,
-    punctuated::Punctuated, spanned::Spanned,
+    Data, DeriveInput, Ident, Lifetime, Token, Variant, punctuated::Punctuated, spanned::Spanned,
 };
 
 use crate::{

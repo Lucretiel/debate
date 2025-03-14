@@ -1,6 +1,6 @@
 use proc_macro2::TokenStream as TokenStream2;
 use quote::{format_ident, quote};
-use syn::{Ident, Lifetime, Token, Variant, punctuated::Punctuated};
+use syn::{Ident, Token, Variant, punctuated::Punctuated};
 
 use crate::{
     common::enumeration::ParsedSubcommandInfo, generics::AngleBracedLifetime,

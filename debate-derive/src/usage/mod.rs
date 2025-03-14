@@ -4,11 +4,12 @@ pub mod structure;
 pub mod value;
 
 use proc_macro2::TokenStream as TokenStream2;
-
 use syn::{DeriveInput, spanned::Spanned as _};
 
-use self::{enumeration::subcommand::derive_usage_enum_subcommand, structure::derive_usage_struct};
 use crate::generics::compute_generics;
+
+use self::enumeration::derive_usage_enum;
+use self::structure::derive_usage_struct;
 
 pub fn derive_usage_result(item: TokenStream2) -> syn::Result<TokenStream2> {
     let input: DeriveInput = syn::parse2(item)?;
@@ -29,9 +30,12 @@ pub fn derive_usage_result(item: TokenStream2) -> syn::Result<TokenStream2> {
             },
             type_lifetime.as_ref(),
         ),
-        syn::Data::Enum(data) => {
-            derive_usage_enum_subcommand(&input.ident, &data.variants, type_lifetime.as_ref())
-        }
+        syn::Data::Enum(data) => derive_usage_enum(
+            &input.ident,
+            &data.variants,
+            type_lifetime.as_ref(),
+            &input.attrs,
+        ),
         syn::Data::Union(_) => Err(syn::Error::new(
             input.span(),
             "can't derive `FromArgs` on a union",
