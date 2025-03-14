@@ -70,7 +70,7 @@ impl build::Error for BuildError {
     }
 
     fn help_requested() -> Self {
-        todo!()
+        Self::HelpRequested
     }
 }
 
@@ -83,8 +83,9 @@ pub enum StateError {
     Unrecognized,
 }
 
-impl<'arg, A> state::Error<'arg, A> for StateError {
+impl<A> state::Error<'_, A> for StateError {
     type ParameterError = ParameterError;
+
     fn parameter(field: &'static str, error: Self::ParameterError) -> Self {
         Self::Parameter(field, error)
     }
