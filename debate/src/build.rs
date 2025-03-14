@@ -16,7 +16,9 @@ pub trait Error {
     /// We required a subcommand, but none was provided
     fn required_subcommand(expected: &'static [&'static str]) -> Self;
 
-    /// The user requested some kind of usage message with --help.
+    /// The user requested some kind of usage message with --help, and the
+    /// usage printer didn't gracefully exit the program. Typically this error
+    /// only occurs in unit tests.
     fn help_requested() -> Self;
 
     /// Something else went wrong
