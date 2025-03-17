@@ -7,10 +7,17 @@ use crate::common::{
     PositionalFieldInfo,
 };
 
+#[derive(Clone, Copy, Debug)]
+pub enum HelpOption {
+    Disabled,
+    Enabled,
+}
+
 /// Create a state block, in curlies. Used both for the struct state, and
 /// for separate enum variant states
 pub fn struct_state_block_from_fields<'a>(
     fields: impl IntoIterator<Item = &'a ParsedFieldInfo<'a>>,
+    help: HelpOption,
 ) -> impl ToTokens {
     {
         let field_state_types = fields
@@ -29,10 +36,18 @@ pub fn struct_state_block_from_fields<'a>(
                 },
             });
 
+        let help_field = match help {
+            HelpOption::Enabled => quote! {
+                help: ::core::option::Option<::debate::util::HelpRequest>,
+            },
+            HelpOption::Disabled => quote! {},
+        };
+
         quote! {
             {
                 position: u16,
                 phantom: ::core::marker::PhantomData<& 'arg ()>,
+                #help_field
                 fields: (#(#field_state_types,)*),
             }
         }
@@ -41,6 +56,7 @@ pub fn struct_state_block_from_fields<'a>(
 
 pub fn struct_state_init_block_from_fields<'a>(
     fields: impl IntoIterator<Item = &'a ParsedFieldInfo<'a>>,
+    help: HelpOption,
 ) -> impl ToTokens {
     let field_state_initializers = fields.into_iter().map(|info| match *info {
         ParsedFieldInfo::Positional(_) | ParsedFieldInfo::Option(_) => quote! {
@@ -51,16 +67,22 @@ pub fn struct_state_init_block_from_fields<'a>(
         },
     });
 
+    let help_field = match help {
+        HelpOption::Enabled => quote! { help: ::core::option::Option::None, },
+        HelpOption::Disabled => quote! {},
+    };
+
     quote! {
         {
             position: 0,
             phantom: ::core::marker::PhantomData,
+            #help_field
             fields: (#(#field_state_initializers,)*),
         }
     }
 }
 
-pub fn indexed_fields<'a>(
+fn indexed_fields<'a>(
     fields: &'a [ParsedFieldInfo<'a>],
 ) -> impl Iterator<Item = (Index, &'a ParsedFieldInfo<'a>)> {
     fields
@@ -69,7 +91,7 @@ pub fn indexed_fields<'a>(
         .map(|(index, field)| (Index::from(index), field))
 }
 
-pub fn option_fields<'a>(
+fn option_fields<'a>(
     fields: &'a [ParsedFieldInfo<'a>],
 ) -> impl Iterator<Item = (Index, &'a OptionFieldInfo<'a>)> {
     indexed_fields(fields).filter_map(|(index, field)| match field {
@@ -78,7 +100,7 @@ pub fn option_fields<'a>(
     })
 }
 
-pub fn flatten_fields<'a>(
+fn flatten_fields<'a>(
     fields: &'a [ParsedFieldInfo<'a>],
 ) -> impl Iterator<Item = (Index, &'a FlattenFieldInfo<'a>)> {
     indexed_fields(fields).filter_map(|(index, field)| match field {
@@ -87,7 +109,7 @@ pub fn flatten_fields<'a>(
     })
 }
 
-pub fn positional_flatten_fields<'a>(
+fn positional_flatten_fields<'a>(
     fields: &'a [ParsedFieldInfo<'a>],
 ) -> impl Iterator<
     Item = (

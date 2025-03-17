@@ -169,13 +169,16 @@ impl<T: Usage> UsageHelper<T> {
     }
 }
 
+// TODO: error implementation here
 pub struct HelpRequestedError;
 
-/// Entry point for the usage system. A `UsagePrinter` is passed in during
-/// argument parsing and allows the.
-///
-/// The methods on this trait can only possibly return an error. This is a hint
-/// that a typical `UsagePrinter` will actually print
+/**
+Entry point for the usage system. A `UsagePrinter` is passed in during argument
+parsing and allows the.
+
+The methods on this trait can only possibly return an error. This is a hint
+that a typical `UsagePrinter` will actually print
+*/
 pub trait UsagePrinter {
     fn print_long_usage(
         self,

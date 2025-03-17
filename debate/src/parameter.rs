@@ -5,6 +5,8 @@ use core::{
 
 use debate_parser::Arg;
 
+use crate::util::arg_as_str;
+
 /**
 A required [`Parameter`] was absent from the command-line arguments.
 
@@ -12,7 +14,9 @@ This type contains no data because a parameter type doesn't have any additional
 context about the field it's associated with. Generally a [`RequiredError`]
 will trigger a call to [`Error::required`][crate::from_args::Error::required],
 which includes more context.
- */
+*/
+
+// TODO: error implementation here
 #[derive(Debug, Clone, Copy)]
 pub struct RequiredError;
 
@@ -69,20 +73,27 @@ pub trait Parameter<'arg>: Sized {
     /**
     This parameter was absent from the command line.
 
-    Most types should return a [`RequiredError`] here, and allow defaults to
-    be handled by an [`Option`] or `#[debate(default)]`. However, there are
-    plenty of cases where a type has a sensible behavior if it doesn't appear
-    on the command line, such as a bool flag being false or a [`Vec`] being
-    empty
+    Most types should return a [`RequiredError`] here (the default behavior),
+    and allow defaults to be handled by an [`Option`] or `#[debate(default)]`.
+    However, there are plenty of cases where a type has a sensible behavior if
+    it doesn't appear on the command line, such as a bool flag being false or
+    a [`Vec`] being empty.
     */
-    fn absent() -> Result<Self, RequiredError>;
+    #[inline]
+    fn absent() -> Result<Self, RequiredError> {
+        Err(RequiredError)
+    }
 
     /**
     This parameter got an argument from the command line.
 
     Types that operate as flags (such as `--verbose`) should return an error
     in this case, because only options should accept arguments.
+
+    If you're implementing this method, it probably makes more sense to
+    implement [`PositionalParameter`] instead.
     */
+    #[inline]
     fn arg<E: Error<'arg>>(argument: Arg<'arg>) -> Result<Self, E> {
         Err(E::got_arg(argument))
     }
@@ -90,7 +101,7 @@ pub trait Parameter<'arg>: Sized {
     /**
     This parameter was present on the command line.
 
-    The parameter can choose to get an argument by calling `argument.take()`,
+    The parameter can choose to get an argument by calling `argument.with()`,
     if that's appropriate for this type. Flags like `--verbose` should not do
     this, whereas options like `--output-file ./foo.txt` should do this.
     */
@@ -122,13 +133,15 @@ pub trait PositionalParameter<'arg>: Sized {
     /**
     This parameter was absent from the command line.
 
-    Most types should return a [`RequiredError`] here, and allow defaults to
-    be handled by an [`Option`] or `#[debate(default)]`. However, there are
-    plenty of cases where a type has a sensible behavior if it doesn't appear
-    on the command line, such as a bool flag being false or a [`Vec`] being
-    empty
+    Most types should return a [`RequiredError`] here (the default behavior),
+    and allow defaults to be handled by an [`Option`] or `#[debate(default)]`.
+    However, there are plenty of cases where a type has a sensible behavior if
+    it doesn't appear on the command line, such as a bool flag being false or
+    a [`Vec`] being empty
     */
-    fn absent() -> Result<Self, RequiredError>;
+    fn absent() -> Result<Self, RequiredError> {
+        Err(RequiredError)
+    }
 
     /**
     This parameter got an argument from the command line.
@@ -178,18 +191,13 @@ impl<'arg, T: PositionalParameter<'arg>> Parameter<'arg> for T {
 /**
 Parameters that must appear exactly once and take an argument.
 
-Types that implement [`RawValue`] automatically implement [`Parameter`] such
-that they return an error if they are absent, don't receive an argument, or are
-present more than once. See also [`Value`] for the common case that your type
-needs to be parsed from a [`str`] instead of a byte slice.
+Types that implement [`Value`] automatically implement [`PositionalParameter`]
+and [`Parameter`] such that they return an error if they are absent, don't
+receive an argument, or are present more than once.
 */
 pub trait Value<'arg>: Sized {
     /// Parse a `Value` from an [`Arg`] given on the command line
-    fn from_arg<E: Error<'arg>>(arg: Arg<'arg>) -> Result<Self, E> {
-        Self::from_arg_str(str::from_utf8(arg.bytes()).map_err(|_| E::invalid_utf8(arg))?)
-    }
-
-    fn from_arg_str<E: Error<'arg>>(arg: &'arg str) -> Result<Self, E>;
+    fn from_arg<E: Error<'arg>>(arg: Arg<'arg>) -> Result<Self, E>;
 }
 
 impl<'arg, T> PositionalParameter<'arg> for T
@@ -197,13 +205,8 @@ where
     T: Value<'arg>,
 {
     #[inline]
-    fn absent() -> Result<Self, RequiredError> {
-        Err(RequiredError)
-    }
-
-    #[inline]
     fn arg<E: Error<'arg>>(argument: Arg<'arg>) -> Result<Self, E> {
-        T::from_arg(argument)
+        Value::from_arg(argument)
     }
 
     #[inline]
@@ -222,8 +225,8 @@ where
     T: ParsedValue,
     T::Err: Display,
 {
-    #[inline]
-    fn from_arg_str<E: Error<'arg>>(arg: &'arg str) -> Result<Self, E> {
+    fn from_arg<E: Error<'arg>>(arg: Arg<'arg>) -> Result<Self, E> {
+        let arg = arg_as_str(arg)?;
         arg.parse().map_err(|err| E::parse_error(arg, err))
     }
 }

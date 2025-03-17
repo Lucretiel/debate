@@ -1,8 +1,9 @@
-use core::fmt;
+use core::{fmt, str::from_utf8};
 
 use debate_parser::Arg;
 
 use crate::{
+    help,
     parameter::{self, ArgAccess, Parameter, RequiredError},
     state,
 };
@@ -76,7 +77,8 @@ where
 }
 
 /// A parameter that counts the number of times it appears on the command
-/// line.
+/// line. Enables things like increasing verbosity levels via `-v`, `-vv`,
+/// `-vvv`
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Count {
     pub count: u32,
@@ -87,16 +89,8 @@ impl<'arg> Parameter<'arg> for Count {
         Ok(Self { count: 0 })
     }
 
-    fn arg<E: parameter::Error<'arg>>(argument: Arg<'arg>) -> Result<Self, E> {
-        Err(E::got_arg(argument))
-    }
-
     fn present<E: parameter::Error<'arg>>(_arg: impl ArgAccess<'arg>) -> Result<Self, E> {
         Ok(Self { count: 1 })
-    }
-
-    fn add_arg<E: parameter::Error<'arg>>(&mut self, argument: Arg<'arg>) -> Result<(), E> {
-        Err(E::got_arg(argument))
     }
 
     fn add_present<E: parameter::Error<'arg>>(
@@ -106,8 +100,34 @@ impl<'arg> Parameter<'arg> for Count {
         self.count = self
             .count
             .checked_add(1)
-            .ok_or_else(|| E::custom("too many appearences (overflowed a u32)"))?;
+            .ok_or_else(|| E::custom("too many appearances (overflowed a u32)"))?;
 
         Ok(())
     }
+}
+
+impl help::ParameterUsage for Count {
+    const VALUE: help::ParameterValueKind = help::ParameterValueKind::Flag;
+    const REQUIREMENT: help::Requirement = help::Requirement::Optional;
+    const REPETITION: help::Repetition = help::Repetition::Multiple;
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HelpRequest {
+    /// There was a request for a succinct usage message, probably via `-h`
+    Succinct,
+
+    /// There was a request for a comprehensive usage message, probably
+    /// via `--help`
+    Full,
+}
+
+/// Input arguments are always raw byte slices; this function converts
+/// an argument to a string and handles returning the appropriate error
+/// in a `PositionalParameter` or `Value` implementation.
+pub fn arg_as_str<'arg, E>(arg: Arg<'arg>) -> Result<&'arg str, E>
+where
+    E: parameter::Error<'arg>,
+{
+    from_utf8(arg.bytes()).map_err(|_err| E::invalid_utf8(arg))
 }

@@ -46,13 +46,12 @@ pub enum FlattenOr<F, T> {
 
 #[derive(darling::FromAttributes, Debug)]
 #[darling(attributes(debate))]
-struct RawParsedAttr {
+struct RawParsedFieldAttr {
     long: Option<Override<SpannedValue<String>>>,
     short: Option<Override<SpannedValue<char>>>,
     default: Option<Override<Expr>>,
     placeholder: Option<SpannedValue<String>>,
     // clear = "no-verbose"
-    // placeholder = "VALUE"
     // TODO: add a parse step where `flatten` must not coexist with the other
     // variants. Consider switching from `darling` to `deluxe`, which apparently
     // handles this.
@@ -168,7 +167,7 @@ pub enum ParsedFieldInfo<'a> {
 
 impl<'a> ParsedFieldInfo<'a> {
     pub fn from_field(field: &'a Field) -> syn::Result<Self> {
-        let parsed = RawParsedAttr::from_attributes(&field.attrs)?;
+        let parsed = RawParsedFieldAttr::from_attributes(&field.attrs)?;
         let docs = compute_docs(&field.attrs)?;
 
         let ty = &field.ty;

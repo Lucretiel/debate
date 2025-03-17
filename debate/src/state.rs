@@ -8,6 +8,13 @@ pub struct SubcommandChain<'a> {
 }
 
 impl<'a> SubcommandChain<'a> {
+    pub const fn new(command: &'static str) -> SubcommandChain<'static> {
+        SubcommandChain {
+            command,
+            prev: None,
+        }
+    }
+
     pub fn for_each(&self, func: &mut impl FnMut(&'static str)) {
         if let Some(prev) = self.prev {
             prev.for_each(func);
@@ -15,7 +22,7 @@ impl<'a> SubcommandChain<'a> {
         func(self.command)
     }
 
-    pub fn chain(&'a self, command: &'static str) -> Self {
+    pub const fn chain(&'a self, command: &'static str) -> Self {
         Self {
             command,
             prev: Some(self),

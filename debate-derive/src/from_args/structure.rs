@@ -2,6 +2,7 @@ use std::collections::{HashMap, hash_map::Entry};
 use std::fmt::Display;
 use std::hash::Hash;
 
+use darling::FromAttributes;
 use darling::util::SpannedValue;
 use itertools::Itertools as _;
 use lazy_format::lazy_format;
@@ -12,8 +13,8 @@ use syn::{Attribute, Field, Ident, Token, punctuated::Punctuated};
 
 use crate::common::ParsedFieldInfo;
 use crate::from_args::common::{
-    complete_long_body, complete_long_option_body, complete_short_body, final_field_initializers,
-    struct_state_block_from_fields, struct_state_init_block_from_fields,
+    HelpOption, complete_long_body, complete_long_option_body, complete_short_body,
+    final_field_initializers, struct_state_block_from_fields, struct_state_init_block_from_fields,
     visit_positional_arms_for_fields,
 };
 use crate::generics::AngleBracedLifetime;
@@ -44,6 +45,22 @@ fn detect_collision<T: Hash + Eq + Copy, M: Display>(
     }
 }
 
+#[derive(darling::FromAttributes, Debug)]
+#[darling(attributes(debate))]
+struct RawParsedTypeAttr {
+    help: Option<()>,
+    // TODO: global long/short
+}
+
+impl RawParsedTypeAttr {
+    pub fn help_enabled(&self) -> HelpOption {
+        match self.help {
+            Some(()) => HelpOption::Enabled,
+            None => HelpOption::Disabled,
+        }
+    }
+}
+
 pub fn derive_args_struct(
     name: &Ident,
     fields: &Punctuated<Field, Token![,]>,
@@ -51,6 +68,8 @@ pub fn derive_args_struct(
     type_lifetime: Option<&AngleBracedLifetime>,
     attrs: &[Attribute],
 ) -> syn::Result<TokenStream2> {
+    let attr = RawParsedTypeAttr::from_attributes(attrs)?;
+
     let fields: Vec<ParsedFieldInfo> = fields
         .iter()
         .map(ParsedFieldInfo::from_field)
@@ -78,39 +97,103 @@ pub fn derive_args_struct(
     let parameter_ident = format_ident!("Parameter");
     let positional_parameter_ident = format_ident!("PositionalParameter");
 
-    Ok(super::from_args_impl(
-        name,
-        lifetime,
-        type_lifetime,
-        |state| {
-            let state_block = struct_state_block_from_fields(&fields);
-            let state_init_block = struct_state_init_block_from_fields(&fields);
+    let state_ident = format_ident!("__{name}State");
+    let argument = format_ident!("argument");
+    let option = format_ident!("option");
+    let state = format_ident!("state");
 
-            quote! {
-                #[doc(hidden)]
-                struct #state <#lifetime> #state_block
+    let state_block = struct_state_block_from_fields(&fields, attr.help_enabled());
+    let state_init_block = struct_state_init_block_from_fields(&fields, attr.help_enabled());
 
-                // Sadly we can't derive debug, because default is only implemented for
-                // tuples up to 12 elements.
-                impl<#lifetime> ::core::default::Default for #state <#lifetime>
-                {
-                    fn default() -> Self {
-                        Self #state_init_block
+    let visit_positional_arms = visit_positional_arms_for_fields(
+        &fields_ident,
+        &argument,
+        &positional_parameter_ident,
+        &arg_ident,
+        &add_arg_ident,
+        &fields,
+    );
+
+    let long_option_body =
+        complete_long_option_body(&fields_ident, &argument, &option, &parameter_ident, &fields);
+
+    let long_body =
+        complete_long_body(&fields_ident, &argument, &option, &parameter_ident, &fields);
+
+    let short_body =
+        complete_short_body(&fields_ident, &argument, &option, &parameter_ident, &fields);
+
+    let final_field_initializers = final_field_initializers(&fields_ident, &fields);
+
+    let build_with_printer = match attr.help_enabled() {
+        HelpOption::Disabled => quote! {},
+        HelpOption::Enabled => quote! {
+            fn build_with_printer<E>(state: Self::State, printer: impl ::debate::help::UsagePrinter) -> Result<Self,E>
+            where
+                E: ::debate::build::Error
+            {
+                let #fields_ident = state.fields;
+
+                match state.help {
+                    ::core::option::Option::None => ::core::result::Result::Ok(Self {
+                        #(#final_field_initializers,)*
+                    }),
+                    ::core::option::Option::Some(help) => {
+                        // TODO: subcommand stuff
+                        // TODO: fetch command from argv[0]
+                        // TODO: fetch command from attrs or type name
+                        // TODO: description from doc attributes
+                        let command = ::debate::state::SubcommandChain::new("FAKE-COMMAND");
+                        let description = "high level command description";
+                        match match help {
+                            ::debate::util::HelpRequest::Succinct => {
+                                ::debate::help::UsagePrinter::print_short_usage(
+                                    description,
+                                    &command,
+                                    ::debate::help::UsageHelper::<Self>::new(),
+                                )
+                            }
+                            ::debate::util::HelpRequest::Long => {
+                                ::debate::help::UsagePrinter::print_short_usage(
+                                    description,
+                                    &command,
+                                    ::debate::help::UsageHelper::<Self>::new(),
+                                )
+                            }
+                        } {
+                            ::core::result::Result::Err(::debate::help::HelpRequestedError) => {
+                                ::core::result::Result::Err(
+                                    ::debate::build::Error::help_requested()
+                                )
+                            }
+                        }
                     }
                 }
+
             }
         },
-        |argument| {
-            let visit_positional_arms = visit_positional_arms_for_fields(
-                &fields_ident,
-                argument,
-                &positional_parameter_ident,
-                &arg_ident,
-                &add_arg_ident,
-                &fields,
-            );
+    };
 
-            quote! {
+    Ok(quote! {
+        #[doc(hidden)]
+        struct #state_ident <#lifetime> #state_block
+
+        // Sadly we can't derive debug, because default is only implemented for
+        // tuples up to 12 elements.
+        impl<#lifetime> ::core::default::Default for #state_ident <#lifetime> {
+            fn default() -> Self {
+                Self #state_init_block
+            }
+        }
+
+        impl<#lifetime> ::debate::state::State<#lifetime> for #state_ident <#lifetime> {
+            fn add_positional<E>(
+                &mut self,
+                #argument: ::debate_parser::Arg<#lifetime>
+            ) -> ::core::result::Result<(), E>
+            where
+                E: ::debate::state::Error<#lifetime, ()>
+            {
                 let #fields_ident = &mut self.fields;
                 let position = &mut self.position;
 
@@ -120,53 +203,71 @@ pub fn derive_args_struct(
                     ::debate::state::Error::unrecognized(())
                 )
             }
-        },
-        |option, argument| {
-            let body = complete_long_option_body(
-                &fields_ident,
-                argument,
-                option,
-                &parameter_ident,
-                &fields,
-            );
 
-            quote! {
+            fn add_long_option<E>(
+                &mut self,
+                option: ::debate_parser::Arg<#lifetime>,
+                argument: ::debate_parser::Arg<#lifetime>
+            ) -> ::core::result::Result<(), E>
+            where
+                E: ::debate::state::Error<#lifetime, ()>
+            {
                 let fields = &mut self.fields;
 
-                #body
+                #long_option_body
             }
-        },
-        |option, argument| {
-            let body =
-                complete_long_body(&fields_ident, argument, option, &parameter_ident, &fields);
 
-            quote! {
+            fn add_long<A, E>(
+                &mut self,
+                option: ::debate_parser::Arg<#lifetime>,
+                argument: A
+            ) -> ::core::result::Result<(), E>
+            where
+                A: ::debate::parameter::ArgAccess<#lifetime>,
+                E: ::debate::state::Error<#lifetime, A>
+            {
                 let fields = &mut self.fields;
 
-                #body
+                #long_body
             }
-        },
-        |option, argument| {
-            let body =
-                complete_short_body(&fields_ident, argument, option, &parameter_ident, &fields);
 
-            quote! {
+            fn add_short<A, E>(
+                &mut self,
+                option: u8,
+                argument: A
+            ) -> ::core::result::Result<(), E>
+            where
+                A: ::debate::parameter::ArgAccess<#lifetime>,
+                E: ::debate::state::Error<#lifetime, A>
+            {
                 let fields = &mut self.fields;
 
-                #body
+                #short_body
             }
-        },
-        |state| {
-            let final_field_initializers = final_field_initializers(&fields_ident, &fields);
+        }
 
-            // TODO: support for tuple structs here
-            quote! {
+        impl<#lifetime> ::debate::build::BuildFromArgs<#lifetime> for #name #type_lifetime {
+            type State = #state_ident <#lifetime>;
+
+            fn build<E>(state: Self::State) -> ::core::result::Result<Self, E>
+            where
+                E: ::debate::build::Error
+            {
                 let #fields_ident = #state.fields;
 
                 ::core::result::Result::Ok(Self {
                     #(#final_field_initializers,)*
                 })
             }
-        },
-    ))
+
+            fn build_with_printer<E>(state: Self::State, printer: impl ::debate::help::UsagePrinter) -> Result<Self,E>
+            where
+                E: ::debate::build::Error
+            {
+                let #fields_ident = #state.fields;
+
+
+            }
+        }
+    })
 }
