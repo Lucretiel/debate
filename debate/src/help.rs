@@ -185,14 +185,14 @@ pub trait UsagePrinter {
         description: &str,
         command: &SubcommandChain<'_>,
         usage: UsageHelper<impl Usage>,
-    ) -> Result<Infallible, HelpRequestedError>;
+    ) 
 
     fn print_short_usage(
         self,
         description: &str,
         command: &SubcommandChain<'_>,
         usage: UsageHelper<impl Usage>,
-    ) -> Result<Infallible, HelpRequestedError>;
+    )
 }
 
 // TODO: consider a separate PositionalUsage trait?

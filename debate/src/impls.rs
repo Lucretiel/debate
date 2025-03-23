@@ -5,6 +5,7 @@ use crate::parameter::{
     ArgAccess, Error as ParameterError, Parameter, ParsedValue, PositionalParameter, RequiredError,
     Value,
 };
+use crate::util::arg_as_str;
 
 macro_rules! from_str {
     ($(
@@ -39,8 +40,8 @@ from_str! {
 
 impl<'arg> Value<'arg> for &'arg str {
     #[inline]
-    fn from_arg_str<E: ParameterError<'arg>>(arg: &'arg str) -> Result<Self, E> {
-        Ok(arg)
+    fn from_arg<E: ParameterError<'arg>>(arg: Arg<'arg>) -> Result<Self, E> {
+        arg_as_str(arg)
     }
 }
 
@@ -53,8 +54,8 @@ impl ParameterUsage for &str {
 #[cfg(feature = "std")]
 impl<'arg> Value<'arg> for &'arg std::path::Path {
     #[inline]
-    fn from_arg_str<E: ParameterError<'arg>>(arg: &'arg str) -> Result<Self, E> {
-        Ok(std::path::Path::new(arg))
+    fn from_arg<E: ParameterError<'arg>>(arg: Arg<'arg>) -> Result<Self, E> {
+        arg_as_str(arg).map(std::path::Path::new)
     }
 }
 
@@ -72,18 +73,8 @@ impl<'arg> Parameter<'arg> for bool {
     }
 
     #[inline]
-    fn arg<E: ParameterError<'arg>>(arg: Arg<'arg>) -> Result<Self, E> {
-        Err(E::got_arg(arg))
-    }
-
-    #[inline]
     fn present<E: ParameterError<'arg>>(_arg: impl ArgAccess<'arg>) -> Result<Self, E> {
         Ok(true)
-    }
-
-    #[inline]
-    fn add_arg<E: ParameterError<'arg>>(&mut self, _arg: Arg<'arg>) -> Result<(), E> {
-        Err(E::got_additional_instance())
     }
 
     #[inline]
@@ -102,10 +93,6 @@ impl ParameterUsage for bool {
 }
 
 impl<'arg> Parameter<'arg> for () {
-    fn absent() -> Result<Self, RequiredError> {
-        Err(RequiredError)
-    }
-
     fn present<E: ParameterError<'arg>>(_arg: impl ArgAccess<'arg>) -> Result<Self, E> {
         Ok(())
     }

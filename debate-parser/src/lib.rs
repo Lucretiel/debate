@@ -24,12 +24,37 @@ An [`Arg`] internally is just a byte slice, since that's what the OS gives us.
 Callers can manually turn it into a [`str`] with [`from_utf8`][core::str::from_utf8],
 and from there parse it however they need.
 */
-#[derive(Clone, Copy)]
+// TODO: replace with `struct Arg([u8])` and use `&Arg`
+#[derive(Clone, Copy, Eq, Hash)]
 pub struct Arg<'arg>(&'arg [u8]);
 
 impl<'arg> Arg<'arg> {
     pub fn bytes(&self) -> &'arg [u8] {
         self.0
+    }
+}
+
+impl PartialEq<Arg<'_>> for Arg<'_> {
+    fn eq(&self, other: &Arg<'_>) -> bool {
+        self.0 == other.0
+    }
+}
+
+impl PartialEq<[u8]> for Arg<'_> {
+    fn eq(&self, other: &[u8]) -> bool {
+        self.0 == other
+    }
+}
+
+impl PartialEq<&[u8]> for Arg<'_> {
+    fn eq(&self, other: &&[u8]) -> bool {
+        self.0 == *other
+    }
+}
+
+impl PartialEq<str> for Arg<'_> {
+    fn eq(&self, other: &str) -> bool {
+        self.0 == other.as_bytes()
     }
 }
 
@@ -243,8 +268,8 @@ where
     }
 }
 
-/// ArgAccess implementation that gets the next argument from the list.
-/// Handles logic around `--` PositionalOnly parameters.
+/// ArgAccess implementation that gets the value of an argument as the next
+/// whole argument from the input. Handles logic around `--`.
 struct StandardArgAccess<'a, 'arg, I> {
     parent: &'a mut ArgumentsParser<'arg, I>,
 }

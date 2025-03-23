@@ -3,7 +3,9 @@ use core::fmt::Display;
 use crate::{help::UsagePrinter, state};
 
 /// Errors that can occur while converting the parsed arguments into the final
-/// structure
+/// structure. Generally these failures are related to the absence of required
+/// arguments; errors that are specific to a particular parameter or incoming
+/// argument are handled earlier.
 pub trait Error {
     /// A required field wasn't present among the command line arguments. If
     /// the field is a flag or an option, its long and short CLI names are also
@@ -39,15 +41,7 @@ grant compatibility with delegating argument parsing with `#[debate(flatten)]`.
 pub trait BuildFromArgs<'arg>: Sized {
     type State: state::State<'arg>;
 
-    fn build<E>(state: Self::State) -> Result<Self, E>
+    fn build<E>(state: Self::State, printer: impl UsagePrinter) -> Result<Self, E>
     where
         E: Error;
-
-    #[expect(unused_variables)]
-    fn build_with_printer<E>(state: Self::State, printer: impl UsagePrinter) -> Result<Self, E>
-    where
-        E: Error,
-    {
-        Self::build(state)
-    }
 }
