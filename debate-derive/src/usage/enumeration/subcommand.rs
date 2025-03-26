@@ -48,7 +48,10 @@ pub fn derive_usage_enum_subcommand(
             where
                 R: ::debate::help::Receiver
             {
-                #(#subcommand_calls?;)*
+                #(match (#subcommand_calls) {
+                    Ok(()) => {},
+                    Err(err) => return Err(err),
+                })*
                 Ok(())
             }
         }

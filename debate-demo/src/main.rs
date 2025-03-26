@@ -67,7 +67,7 @@ enum FlagChoice {
     OutFile(PathBuf),
 }
 
-#[derive(FromArgs, Usage, Debug)]
+#[derive(FromArgs, Debug)]
 #[debate(subcommand)]
 enum Subcommand {
     #[debate(fallback)]
