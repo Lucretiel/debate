@@ -146,7 +146,7 @@ pub fn derive_args_struct(
                     let command = ::debate::state::SubcommandChain::new("FAKE-COMMAND");
                     let description = "high level command description";
                     // Note that calling `print_short_usage` or
-                    // `print_long_usage` 
+                    // `print_long_usage`
                     match match help {
                         ::debate::util::HelpRequest::Succinct => {
                             ::debate::help::UsagePrinter::print_short_usage(
@@ -173,9 +173,6 @@ pub fn derive_args_struct(
             }
         },
     };
-
-    // Wrap the build body in the function signature
-    let build_body = quote! {};
 
     Ok(quote! {
         #[doc(hidden)]
@@ -215,7 +212,7 @@ pub fn derive_args_struct(
             where
                 E: ::debate::state::Error<#lifetime, ()>
             {
-                let fields = &mut self.fields;
+                let #fields_ident = &mut self.fields;
 
                 #long_option_body
             }
@@ -229,7 +226,7 @@ pub fn derive_args_struct(
                 A: ::debate::parameter::ArgAccess<#lifetime>,
                 E: ::debate::state::Error<#lifetime, A>
             {
-                let fields = &mut self.fields;
+                let #fields_ident = &mut self.fields;
 
                 #long_body
             }
@@ -243,7 +240,7 @@ pub fn derive_args_struct(
                 A: ::debate::parameter::ArgAccess<#lifetime>,
                 E: ::debate::state::Error<#lifetime, A>
             {
-                let fields = &mut self.fields;
+                let #fields_ident = &mut self.fields;
 
                 #short_body
             }
