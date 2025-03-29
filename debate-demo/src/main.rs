@@ -7,6 +7,7 @@ use debate::{
     from_args::FromArgs,
     help::{self, ParameterUsage, ParameterValueKind, Repetition, Requirement, Usage as _},
     printers::DebugUsage,
+    util::EmptyPrinter,
 };
 use debate_derive::{FromArgs, ParameterUsage, Usage, Value};
 use debate_parser::ArgumentsParser;
@@ -15,7 +16,7 @@ use lazy_format::make_lazy_format;
 use crate::error::BuildError;
 
 #[derive(FromArgs, Usage, Debug)]
-#[debate(help, author)]
+#[debate(help)]
 struct Arguments {
     #[debate(short, long = "foo")]
     path: PathBuf,
@@ -67,7 +68,7 @@ enum FlagChoice {
     OutFile(PathBuf),
 }
 
-#[derive(FromArgs, Debug)]
+#[derive(FromArgs, Usage, Debug)]
 #[debate(subcommand)]
 enum Subcommand {
     #[debate(fallback)]

@@ -1,6 +1,6 @@
 use core::fmt::Display;
 
-use crate::{help::UsagePrinter, state};
+use crate::{help::UsagePrinter, state, util::HelpRequest};
 
 /// Errors that can occur while converting the parsed arguments into the final
 /// structure. Generally these failures are related to the absence of required
@@ -21,7 +21,7 @@ pub trait Error {
     /// The user requested some kind of usage message with --help, and the
     /// usage printer didn't gracefully exit the program. Typically this error
     /// only occurs in unit tests.
-    fn help_requested() -> Self;
+    fn help_requested(request: HelpRequest) -> Self;
 
     /// Something else went wrong
     fn custom(msg: impl Display) -> Self;
@@ -41,7 +41,7 @@ grant compatibility with delegating argument parsing with `#[debate(flatten)]`.
 pub trait BuildFromArgs<'arg>: Sized {
     type State: state::State<'arg>;
 
-    fn build<E>(state: Self::State, printer: impl UsagePrinter) -> Result<Self, E>
+    fn build<E>(state: Self::State) -> Result<Self, E>
     where
         E: Error;
 }

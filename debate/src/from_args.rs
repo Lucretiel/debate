@@ -2,7 +2,7 @@ use core::marker::PhantomData;
 
 use debate_parser::{Arg, ArgumentsParser};
 
-use crate::{build, parameter, state};
+use crate::{build, help::UsagePrinter, parameter, state, util::HelpRequest};
 
 /// A type that can be parsed from command line arguments
 pub trait FromArgs<'arg>: Sized {
@@ -31,6 +31,79 @@ pub trait Error<'arg> {
 
     /// There was an error handling a `-s` short argument
     fn short<A>(option: u8, error: Self::StateError<A>) -> Self;
+}
+
+/// Helper type to track that help was requested
+enum HelpRequested<E> {
+    Error(E),
+    Help(HelpRequest),
+}
+
+impl<E> HelpRequested<E> {
+    pub fn map_error<T>(self, op: impl FnOnce(E) -> T) -> HelpRequested<T> {
+        match self {
+            Self::Error(error) => HelpRequested::Error(op(error)),
+            Self::Help(request) => HelpRequested::Help(request),
+        }
+    }
+}
+
+impl<'arg, A, E> state::Error<'arg, A> for HelpRequested<E>
+where
+    E: state::Error<'arg, A>,
+{
+    type ParameterError = E::ParameterError;
+
+    fn parameter(field: &'static str, error: Self::ParameterError) -> Self {
+        Self::Error(E::parameter(field, error))
+    }
+
+    fn unrecognized(argument: A) -> Self {
+        Self::Error(E::unrecognized(argument))
+    }
+
+    fn flattened(field: &'static str, error: Self) -> Self {
+        error.map_error(|error| E::flattened(field, error))
+    }
+
+    fn unknown_subcommand(expected: &'static [&'static str]) -> Self {
+        Self::Error(E::unknown_subcommand(expected))
+    }
+
+    fn wrong_subcommand_for_argument(subcommand: &str, allowed: &[&'static str]) -> Self {
+        Self::Error(E::wrong_subcommand_for_argument(subcommand, allowed))
+    }
+
+    fn help_requested(request: HelpRequest) -> Self {
+        Self::Help(request)
+    }
+}
+
+impl<'arg, E> Error<'arg> for HelpRequested<E>
+where
+    E: Error<'arg>,
+{
+    type StateError<A> = HelpRequested<E::StateError<A>>;
+
+    fn positional(argument: Arg<'arg>, error: Self::StateError<()>) -> Self {
+        error.map_error(|error| E::positional(argument, error))
+    }
+
+    fn long_with_argument(
+        option: Arg<'arg>,
+        argument: Arg<'arg>,
+        error: Self::StateError<()>,
+    ) -> Self {
+        error.map_error(|error| E::long_with_argument(option, argument, error))
+    }
+
+    fn long<A>(option: Arg<'arg>, error: Self::StateError<A>) -> Self {
+        error.map_error(|error| E::long(option, error))
+    }
+
+    fn short<A>(option: u8, error: Self::StateError<A>) -> Self {
+        error.map_error(|error| E::short(option, error))
+    }
 }
 
 impl<'arg, T> FromArgs<'arg> for T

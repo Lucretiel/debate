@@ -3,7 +3,7 @@ use core::{fmt, str::from_utf8};
 use debate_parser::Arg;
 
 use crate::{
-    help,
+    help::{self, UsagePrinter},
     parameter::{self, ArgAccess, Parameter, RequiredError},
     state,
 };
@@ -74,6 +74,10 @@ where
     fn wrong_subcommand_for_argument(subcommand: &str, allowed: &[&'static str]) -> Self {
         Self::Error(E::wrong_subcommand_for_argument(subcommand, allowed))
     }
+
+    fn help_requested(req: HelpRequest) -> Self {
+        Self::Error(E::help_requested(req))
+    }
 }
 
 /// A parameter that counts the number of times it appears on the command
@@ -130,4 +134,26 @@ where
     E: parameter::Error<'arg>,
 {
     from_utf8(arg.bytes()).map_err(|_err| E::invalid_utf8(arg))
+}
+
+pub struct EmptyPrinter;
+
+impl UsagePrinter for EmptyPrinter {
+    #[inline(always)]
+    fn print_long_usage(
+        self,
+        _description: &str,
+        _command: &state::SubcommandChain<'_>,
+        _usage: help::UsageHelper<impl help::Usage>,
+    ) {
+    }
+
+    #[inline(always)]
+    fn print_short_usage(
+        self,
+        _description: &str,
+        _command: &state::SubcommandChain<'_>,
+        _usage: help::UsageHelper<impl help::Usage>,
+    ) {
+    }
 }

@@ -1,6 +1,6 @@
 use debate_parser::Arg;
 
-use crate::parameter;
+use crate::{parameter, util::HelpRequest};
 
 pub struct SubcommandChain<'a> {
     command: &'static str,
@@ -91,4 +91,9 @@ pub trait Error<'arg, Arg>: Sized {
     /// subcommand. The current subcommand, along with the list of subcommands
     /// that accept this option, are given
     fn wrong_subcommand_for_argument(subcommand: &str, allowed: &[&'static str]) -> Self;
+
+    /// This was a request for a usage message. This error doesn't need to
+    /// interrupt argument parsing, since it can be useful to have a complete
+    /// state object to print more contextually useful usage messages.
+    fn help_requested(request: HelpRequest) -> Self;
 }

@@ -1,45 +1,16 @@
-use std::{collections::HashMap, hash::Hash};
-
 use proc_macro2::{Literal, TokenStream as TokenStream2};
 use quote::{format_ident, quote};
 use syn::{Ident, Lifetime, Token, Variant, punctuated::Punctuated};
 
 use crate::{
-    common::{
-        OptionTag, ParsedFieldInfo,
-        enumeration::{Fallback, ParsedSubcommandInfo, ParsedSubcommandVariant, VariantMode},
-    },
-    from_args::{
-        common::{
-            HelpOption, complete_long_body, complete_long_option_body, complete_short_body,
-            final_field_initializers, struct_state_block_from_fields,
-            struct_state_init_block_from_fields, visit_positional_arms_for_fields,
-        },
-        from_args_impl,
+    common::enumeration::{Fallback, ParsedSubcommandInfo, VariantMode},
+    from_args::common::{
+        HelpOption, complete_long_body, complete_long_option_body, complete_short_body,
+        final_field_initializers, struct_state_block_from_fields,
+        struct_state_init_block_from_fields, visit_positional_arms_for_fields,
     },
     generics::AngleBracedLifetime,
 };
-
-/// Compute a mapping from tags (such as --field or -f) to commands that are
-/// known to use them.
-fn compute_recognition_set<'a, T: Hash + Eq>(
-    variants: impl IntoIterator<Item = &'a ParsedSubcommandVariant<'a>>,
-    get_tag: impl Fn(&'a OptionTag) -> Option<T>,
-) -> HashMap<T, Vec<&'a str>> {
-    let mut set: HashMap<T, Vec<&str>> = HashMap::new();
-
-    for variant in variants {
-        for field in &variant.fields {
-            if let ParsedFieldInfo::Option(field) = field {
-                if let Some(tag) = get_tag(&field.tags) {
-                    set.entry(tag).or_default().push(&variant.command);
-                }
-            }
-        }
-    }
-
-    set
-}
 
 pub fn derive_args_enum_subcommand(
     name: &Ident,
@@ -56,7 +27,6 @@ pub fn derive_args_enum_subcommand(
 
     let argument = format_ident!("argument");
     let option = format_ident!("option");
-    let state = format_ident!("state");
 
     let parsed_variants = ParsedSubcommandInfo::from_variants(variants)?;
 
@@ -71,23 +41,6 @@ pub fn derive_args_enum_subcommand(
         quote! {
             #variant_ident #variant_state_body
         }
-    });
-
-    let all_option_fields = parsed_variants
-        .variants
-        .iter()
-        .flat_map(|variant| &variant.fields)
-        .filter_map(|field| match field {
-            ParsedFieldInfo::Option(field) => Some(field),
-            ParsedFieldInfo::Positional(_) | ParsedFieldInfo::Flatten(_) => None,
-        });
-
-    let long_option_commands = compute_recognition_set(&parsed_variants.variants, |tags| {
-        tags.long().as_deref().copied()
-    });
-
-    let short_option_commands = compute_recognition_set(&parsed_variants.variants, |tags| {
-        tags.short().as_deref().copied()
     });
 
     let all_commands = parsed_variants
@@ -182,50 +135,39 @@ pub fn derive_args_enum_subcommand(
         }
     });
 
-    Ok({
-        let build_body = (|state| {
-            let fallback_body = match parsed_variants.fallback {
-                Fallback::Explicit(ident) => quote! { Self :: #ident },
-                Fallback::Internal(_) => quote! {
-                    return ::core::result::Result::Err(
-                        ::debate::build::Error::required_subcommand(
-                            #all_commands_slice,
-                        )
-                    )
-                },
-            };
-
-            let variant_match_arms = parsed_variants.variants.iter().map(|variant| {
-                let variant_ident = variant.ident.raw();
-                let field_initializers = final_field_initializers(&fields_ident, &variant.fields);
-
-                let variant_body = match variant.mode {
-                    VariantMode::Unit => quote! {},
-                    VariantMode::Tuple => quote! {
-                        ( #(#field_initializers,)* )
-                    },
-                    VariantMode::Struct => quote! {
-                        { #(#field_initializers,)* }
-                    },
-                };
-
-                quote! {
-                    Self :: State :: #variant_ident { #fields_ident, ..} => (
-                        Self :: #variant_ident #variant_body
-                    )
-                }
-            });
-
-            quote! {
-                ::core::result::Result::Ok(
-                    match #state {
-                        Self :: State :: #fallback_ident => #fallback_body,
-                        #(#variant_match_arms,)*
-                    }
+    let build_body_fallback = match parsed_variants.fallback {
+        Fallback::Explicit(ident) => quote! { Self :: #ident },
+        Fallback::Internal(_) => quote! {
+            return ::core::result::Result::Err(
+                ::debate::build::Error::required_subcommand(
+                    #all_commands_slice,
                 )
-            }
-        })(&state);
+            )
+        },
+    };
 
+    let build_body_variant_arms = parsed_variants.variants.iter().map(|variant| {
+        let variant_ident = variant.ident.raw();
+        let field_initializers = final_field_initializers(&fields_ident, &variant.fields);
+
+        let variant_body = match variant.mode {
+            VariantMode::Unit => quote! {},
+            VariantMode::Tuple => quote! {
+                ( #(#field_initializers,)* )
+            },
+            VariantMode::Struct => quote! {
+                { #(#field_initializers,)* }
+            },
+        };
+
+        quote! {
+            Self :: State :: #variant_ident { #fields_ident, ..} => (
+                Self :: #variant_ident #variant_body
+            )
+        }
+    });
+
+    Ok({
         quote! {
             #[doc(hidden)]
             #[derive(::core::default::Default)]
@@ -321,11 +263,16 @@ pub fn derive_args_enum_subcommand(
             impl<#lifetime> ::debate::build::BuildFromArgs<#lifetime> for #name #type_lifetime {
                 type State = #state_ident <#lifetime>;
 
-                fn build<E>(state: Self::State) -> ::core::result::Result<Self, E>
+                fn build<E>(state: Self::State) -> Result<Self,E>
                 where
                     E: ::debate::build::Error
                 {
-                    #build_body
+                    ::core::result::Result::Ok(
+                        match state {
+                            Self :: State :: #fallback_ident => #build_body_fallback,
+                            #(#build_body_variant_arms,)*
+                        }
+                    )
                 }
             }
         }

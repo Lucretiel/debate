@@ -74,25 +74,13 @@ fn derive_value_enum(
         Literal::byte_string(rename.as_bytes())
     });
 
-    let unit_str_arms = unit_arms(normalized_unit_variants, Literal::string);
-
     let from_arg_ident = format_ident!("from_arg");
-    let from_arg_str_ident = format_ident!("from_arg_str");
-
     let byte_parse_error_ident = format_ident!("byte_parse_error");
-    let str_parse_error_ident = format_ident!("parse_error");
 
     let byte_fallback_arm = fallback_arm(
         analyzed.fallback.as_ref(),
         &from_arg_ident,
         &byte_parse_error_ident,
-        "invalid value",
-    );
-
-    let str_fallback_arm = fallback_arm(
-        analyzed.fallback.as_ref(),
-        &from_arg_str_ident,
-        &str_parse_error_ident,
         "invalid value",
     );
 
@@ -104,15 +92,6 @@ fn derive_value_enum(
                 match argument.bytes() {
                     #(#unit_byte_arms)*
                     #byte_fallback_arm
-                }
-            }
-
-            fn from_arg_str<E: ::debate::parameter::Error<#lifetime>>(
-                argument: &str,
-            ) -> Result<Self, E> {
-                match argument {
-                    #(#unit_str_arms)*
-                    #str_fallback_arm
                 }
             }
         }

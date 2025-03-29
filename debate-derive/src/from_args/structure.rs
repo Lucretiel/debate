@@ -76,6 +76,7 @@ pub fn derive_args_struct(
         .try_collect()?;
 
     // Collision detection
+    // TODO: move collision detection to ParsedFieldInfo::from_field
     {
         let mut long_tags = HashMap::new();
         let mut short_tags = HashMap::new();
@@ -100,7 +101,6 @@ pub fn derive_args_struct(
     let state_ident = format_ident!("__{name}State");
     let argument = format_ident!("argument");
     let option = format_ident!("option");
-    let state = format_ident!("state");
 
     let state_block = struct_state_block_from_fields(&fields, attr.help_enabled());
     let state_init_block = struct_state_init_block_from_fields(&fields, attr.help_enabled());
@@ -124,55 +124,6 @@ pub fn derive_args_struct(
         complete_short_body(&fields_ident, &argument, &option, &parameter_ident, &fields);
 
     let final_field_initializers = final_field_initializers(&fields_ident, &fields);
-
-    // Core build body, constructing `self`
-    let build_body = quote! {
-        ::core::result::Result::Ok(Self {
-            #(#final_field_initializers,)*
-        })*
-    };
-
-    // Build body with additional logic for handling `--help`
-    let build_body = match attr.help_enabled() {
-        HelpOption::Disabled => build_body,
-        HelpOption::Enabled => quote! {
-            match state.help {
-                ::core::option::Option::None => #build_body,
-                ::core::option::Option::Some(help) => {
-                    // TODO: subcommand stuff
-                    // TODO: fetch command from argv[0]
-                    // TODO: fetch command from attrs or type name
-                    // TODO: description from doc attributes
-                    let command = ::debate::state::SubcommandChain::new("FAKE-COMMAND");
-                    let description = "high level command description";
-                    // Note that calling `print_short_usage` or
-                    // `print_long_usage`
-                    match match help {
-                        ::debate::util::HelpRequest::Succinct => {
-                            ::debate::help::UsagePrinter::print_short_usage(
-                                description,
-                                &command,
-                                ::debate::help::UsageHelper::<Self>::new(),
-                            )
-                        }
-                        ::debate::util::HelpRequest::Long => {
-                            ::debate::help::UsagePrinter::print_short_usage(
-                                description,
-                                &command,
-                                ::debate::help::UsageHelper::<Self>::new(),
-                            )
-                        }
-                    } {
-                        ::core::result::Result::Err(::debate::help::HelpRequestedError) => {
-                            ::core::result::Result::Err(
-                                ::debate::build::Error::help_requested()
-                            )
-                        }
-                    }
-                }
-            }
-        },
-    };
 
     Ok(quote! {
         #[doc(hidden)]
@@ -249,13 +200,15 @@ pub fn derive_args_struct(
         impl<#lifetime> ::debate::build::BuildFromArgs<#lifetime> for #name #type_lifetime {
             type State = #state_ident <#lifetime>;
 
-            fn build<E>(state: Self::State, printer: impl ::debate::help::UsagePrinter) -> Result<Self,E>
+            fn build<E>(state: Self::State) -> Result<Self,E>
             where
                 E: ::debate::build::Error
             {
                 let #fields_ident = state.fields;
 
-                #build_body
+                ::core::result::Result::Ok(Self {
+                    #(#final_field_initializers,)*
+                })
             }
         }
     })

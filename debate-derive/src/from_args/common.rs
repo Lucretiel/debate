@@ -507,7 +507,7 @@ pub fn final_field_initializers(
 
                 let expr = quote! {
                     match ::debate::build::BuildFromArgs::build(
-                        #fields_ident.#idx
+                        #fields_ident.#idx,
                     ) {
                         ::core::result::Result::Ok(value) => value,
                         ::core::result::Result::Err(err) => return (

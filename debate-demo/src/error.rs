@@ -108,6 +108,10 @@ impl<A> state::Error<'_, A> for StateError {
     fn wrong_subcommand_for_argument(subcommand: &str, allowed: &[&'static str]) -> Self {
         todo!()
     }
+
+    fn help_requested(req: debate::util::HelpRequest) -> Self {
+        todo!()
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
