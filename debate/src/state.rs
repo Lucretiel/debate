@@ -1,6 +1,6 @@
 use debate_parser::Arg;
 
-use crate::{parameter, util::HelpRequest};
+use crate::{help::HelpRequest, parameter};
 
 pub struct SubcommandChain<'a> {
     command: &'static str,
@@ -33,15 +33,15 @@ impl<'a> SubcommandChain<'a> {
 /// The state associated with a [`BuildFromArgs`] type that is in the middle
 /// of being parsed
 pub trait State<'arg>: Default {
-    fn add_positional<E>(&mut self, argument: Arg<'arg>) -> Result<(), E>
+    fn add_positional<E>(&mut self, argument: &'arg Arg) -> Result<(), E>
     where
         E: Error<'arg, ()>;
 
-    fn add_long_option<E>(&mut self, option: Arg<'arg>, argument: Arg<'arg>) -> Result<(), E>
+    fn add_long_option<E>(&mut self, option: &'arg Arg, argument: &'arg Arg) -> Result<(), E>
     where
         E: Error<'arg, ()>;
 
-    fn add_long<A, E>(&mut self, option: Arg<'arg>, argument: A) -> Result<(), E>
+    fn add_long<A, E>(&mut self, option: &'arg Arg, argument: A) -> Result<(), E>
     where
         A: parameter::ArgAccess<'arg>,
         E: Error<'arg, A>;
@@ -69,7 +69,9 @@ pub trait State<'arg>: Default {
 pub trait Error<'arg, Arg>: Sized {
     type ParameterError: parameter::Error<'arg>;
 
-    /// A parameter type returned an error
+    /// A parameter type returned an error. This means that the argument was
+    /// recognized and matched to a specific field, but something went wrong
+    /// during parsing.
     fn parameter(field: &'static str, error: Self::ParameterError) -> Self;
 
     /// An argument was unrecognized. In this case, the Argument can be

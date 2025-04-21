@@ -29,6 +29,7 @@ pub fn derive_usage_result(item: TokenStream2) -> syn::Result<TokenStream2> {
                 }
             },
             type_lifetime.as_ref(),
+            &input.attrs,
         ),
         syn::Data::Enum(data) => derive_usage_enum(
             &input.ident,

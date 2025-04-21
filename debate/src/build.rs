@@ -1,6 +1,6 @@
 use core::fmt::Display;
 
-use crate::{help::UsagePrinter, state, util::HelpRequest};
+use crate::state;
 
 /// Errors that can occur while converting the parsed arguments into the final
 /// structure. Generally these failures are related to the absence of required
@@ -17,11 +17,6 @@ pub trait Error {
 
     /// We required a subcommand, but none was provided
     fn required_subcommand(expected: &'static [&'static str]) -> Self;
-
-    /// The user requested some kind of usage message with --help, and the
-    /// usage printer didn't gracefully exit the program. Typically this error
-    /// only occurs in unit tests.
-    fn help_requested(request: HelpRequest) -> Self;
 
     /// Something else went wrong
     fn custom(msg: impl Display) -> Self;

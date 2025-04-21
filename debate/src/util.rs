@@ -3,7 +3,7 @@ use core::{fmt, str::from_utf8};
 use debate_parser::Arg;
 
 use crate::{
-    help::{self, UsagePrinter},
+    help::{self, HelpRequest},
     parameter::{self, ArgAccess, Parameter, RequiredError},
     state,
 };
@@ -21,7 +21,7 @@ where
         Self::Error(E::needs_arg())
     }
 
-    fn got_arg(arg: Arg<'arg>) -> Self {
+    fn got_arg(arg: &'arg Arg) -> Self {
         Self::Error(E::got_arg(arg))
     }
 
@@ -29,7 +29,7 @@ where
         Self::Unrecognized(())
     }
 
-    fn invalid_utf8(arg: Arg<'arg>) -> Self {
+    fn invalid_utf8(arg: &'arg Arg) -> Self {
         Self::Error(E::invalid_utf8(arg))
     }
 
@@ -37,7 +37,7 @@ where
         Self::Error(E::parse_error(arg, msg))
     }
 
-    fn byte_parse_error(arg: Arg<'arg>, msg: impl fmt::Display) -> Self {
+    fn byte_parse_error(arg: &'arg Arg, msg: impl fmt::Display) -> Self {
         Self::Error(E::byte_parse_error(arg, msg))
     }
 
@@ -116,44 +116,12 @@ impl help::ParameterUsage for Count {
     const REPETITION: help::Repetition = help::Repetition::Multiple;
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum HelpRequest {
-    /// There was a request for a succinct usage message, probably via `-h`
-    Succinct,
-
-    /// There was a request for a comprehensive usage message, probably
-    /// via `--help`
-    Full,
-}
-
 /// Input arguments are always raw byte slices; this function converts
 /// an argument to a string and handles returning the appropriate error
 /// in a `PositionalParameter` or `Value` implementation.
-pub fn arg_as_str<'arg, E>(arg: Arg<'arg>) -> Result<&'arg str, E>
+pub fn arg_as_str<'arg, E>(arg: &'arg Arg) -> Result<&'arg str, E>
 where
     E: parameter::Error<'arg>,
 {
     from_utf8(arg.bytes()).map_err(|_err| E::invalid_utf8(arg))
-}
-
-pub struct EmptyPrinter;
-
-impl UsagePrinter for EmptyPrinter {
-    #[inline(always)]
-    fn print_long_usage(
-        self,
-        _description: &str,
-        _command: &state::SubcommandChain<'_>,
-        _usage: help::UsageHelper<impl help::Usage>,
-    ) {
-    }
-
-    #[inline(always)]
-    fn print_short_usage(
-        self,
-        _description: &str,
-        _command: &state::SubcommandChain<'_>,
-        _usage: help::UsageHelper<impl help::Usage>,
-    ) {
-    }
 }

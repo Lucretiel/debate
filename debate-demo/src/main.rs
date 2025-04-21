@@ -1,14 +1,9 @@
 mod error;
 
-use std::{path::PathBuf, str};
+use std::path::PathBuf;
 
 use anyhow::Context;
-use debate::{
-    from_args::FromArgs,
-    help::{self, ParameterUsage, ParameterValueKind, Repetition, Requirement, Usage as _},
-    printers::DebugUsage,
-    util::EmptyPrinter,
-};
+use debate::{from_args::FromArgs, help::Usage as _, printers::DebugUsage};
 use debate_derive::{FromArgs, ParameterUsage, Usage, Value};
 use debate_parser::ArgumentsParser;
 use lazy_format::make_lazy_format;
@@ -50,6 +45,8 @@ struct Alphabet {
     #[debate(long, short, default)]
     gamma: u32,
 
+    /// The direction you
+    /// Want to go
     #[debate(long)]
     direction: Option<Direction>,
 }
@@ -85,6 +82,10 @@ enum Subcommand {
 }
 
 fn main() -> anyhow::Result<()> {
+    fn main() {
+        println!("HELLO")
+    }
+
     let args: Vec<Vec<u8>> = std::env::args_os()
         .map(|arg| arg.into_encoded_bytes())
         .collect();

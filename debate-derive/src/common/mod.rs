@@ -44,6 +44,7 @@ pub enum FlattenOr<F, T> {
     Normal(T),
 }
 
+/// Attributes for a field
 #[derive(darling::FromAttributes, Debug)]
 #[darling(attributes(debate))]
 struct RawParsedFieldAttr {
@@ -52,6 +53,8 @@ struct RawParsedFieldAttr {
     default: Option<Override<Expr>>,
     placeholder: Option<SpannedValue<String>>,
     // clear = "no-verbose"
+    // overridable
+
     // TODO: add a parse step where `flatten` must not coexist with the other
     // variants. Consider switching from `darling` to `deluxe`, which apparently
     // handles this.
@@ -74,16 +77,13 @@ impl FieldDefault {
     }
 }
 
-pub enum OptionTag {
-    Long(SpannedValue<String>),
-    Short(SpannedValue<char>),
-    LongShort {
-        long: SpannedValue<String>,
-        short: SpannedValue<char>,
-    },
+pub enum OptionTag<Long, Short> {
+    Long(Long),
+    Short(Short),
+    LongShort { long: Long, short: Short },
 }
 
-impl OptionTag {
+impl OptionTag<SpannedValue<String>, SpannedValue<char>> {
     pub fn long(&self) -> Option<SpannedValue<&str>> {
         match *self {
             OptionTag::Long(ref long) | OptionTag::LongShort { ref long, .. } => {
@@ -97,6 +97,18 @@ impl OptionTag {
         match *self {
             OptionTag::Short(short) | OptionTag::LongShort { short, .. } => Some(short),
             OptionTag::Long(_) => None,
+        }
+    }
+
+    // Shed the spanned value stuff if we don't need it
+    pub fn simplify(&self) -> OptionTag<&str, char> {
+        match self {
+            OptionTag::Long(long) => OptionTag::Long(long.as_str()),
+            OptionTag::Short(short) => OptionTag::Short(**short),
+            OptionTag::LongShort { long, short } => OptionTag::LongShort {
+                long: long.as_str(),
+                short: **short,
+            },
         }
     }
 }
@@ -115,7 +127,7 @@ pub struct OptionFieldInfo<'a> {
     pub ty: &'a Type,
     pub default: FieldDefault,
     pub docs: String,
-    pub tags: OptionTag,
+    pub tags: OptionTag<SpannedValue<String>, SpannedValue<char>>,
 }
 
 pub struct FlattenFieldInfo<'a> {
@@ -318,5 +330,47 @@ fn compute_placeholder(
         ))
     } else {
         Ok(placeholder)
+    }
+}
+
+/// Attributes for a type. In the future this may split into separate types for
+///
+#[derive(darling::FromAttributes, Debug)]
+#[darling(attributes(debate))]
+pub struct RawParsedTypeAttr {
+    help: Option<()>,
+    // TODO: global long/short
+}
+
+impl RawParsedTypeAttr {
+    pub fn help_option(&self) -> HelpOption<'_> {
+        HelpOption {
+            long: self.help.map(|()| "help"),
+            short: self.help.map(|()| 'h'),
+        }
+    }
+}
+
+/// The set of flags that will signal a request for help
+pub struct HelpOption<'a> {
+    pub long: Option<&'a str>,
+    pub short: Option<char>,
+}
+
+impl<'a> HelpOption<'a> {
+    pub const fn new() -> Self {
+        Self {
+            long: None,
+            short: None,
+        }
+    }
+
+    pub const fn as_tags(&self) -> Option<OptionTag<&'a str, char>> {
+        match (self.long, self.short) {
+            (None, None) => None,
+            (Some(long), None) => Some(OptionTag::Long(long)),
+            (None, Some(short)) => Some(OptionTag::Short(short)),
+            (Some(long), Some(short)) => Some(OptionTag::LongShort { long, short }),
+        }
     }
 }

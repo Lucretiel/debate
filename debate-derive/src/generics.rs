@@ -189,6 +189,9 @@ impl ToTokens for AngleBracedLifetime {
     }
 }
 
+/// Helper for computing the lifetime generics for an impl block. Most `debate`
+/// impl blocks want an `'arg` lifetime, and this lifetime should match
+/// any lifetime that exists on the type already.
 pub fn compute_generics(
     generics: &Generics,
 ) -> syn::Result<(Lifetime, Option<AngleBracedLifetime>)> {

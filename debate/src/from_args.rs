@@ -2,7 +2,7 @@ use core::marker::PhantomData;
 
 use debate_parser::{Arg, ArgumentsParser};
 
-use crate::{build, help::UsagePrinter, parameter, state, util::HelpRequest};
+use crate::{build, help::HelpRequest, parameter, state};
 
 /// A type that can be parsed from command line arguments
 pub trait FromArgs<'arg>: Sized {
@@ -10,6 +10,10 @@ pub trait FromArgs<'arg>: Sized {
     where
         I: Iterator<Item = &'arg [u8]>,
         E: Error<'arg> + build::Error;
+
+    fn from_parser_with_usage(args: ArgumentsParser<'arg, I>, printer: ()) -> Self
+    where
+        I: Iterator<Item = &'arg [u8]>;
 }
 
 /// Errors that can occur while handling incoming arguments
@@ -17,17 +21,17 @@ pub trait Error<'arg> {
     type StateError<A>: state::Error<'arg, A>;
 
     /// There was an error handling a positional argument
-    fn positional(argument: Arg<'arg>, error: Self::StateError<()>) -> Self;
+    fn positional(argument: &'arg Arg, error: Self::StateError<()>) -> Self;
 
     /// There was an error handling a `--long=argument` argument
     fn long_with_argument(
-        option: Arg<'arg>,
-        argument: Arg<'arg>,
+        option: &'arg Arg,
+        argument: &'arg Arg,
         error: Self::StateError<()>,
     ) -> Self;
 
     /// There was an error handling a `--long` long argument
-    fn long<A>(option: Arg<'arg>, error: Self::StateError<A>) -> Self;
+    fn long<A>(option: &'arg Arg, error: Self::StateError<A>) -> Self;
 
     /// There was an error handling a `-s` short argument
     fn short<A>(option: u8, error: Self::StateError<A>) -> Self;
@@ -85,19 +89,19 @@ where
 {
     type StateError<A> = HelpRequested<E::StateError<A>>;
 
-    fn positional(argument: Arg<'arg>, error: Self::StateError<()>) -> Self {
+    fn positional(argument: &'arg Arg, error: Self::StateError<()>) -> Self {
         error.map_error(|error| E::positional(argument, error))
     }
 
     fn long_with_argument(
-        option: Arg<'arg>,
-        argument: Arg<'arg>,
+        option: &'arg Arg,
+        argument: &'arg Arg,
         error: Self::StateError<()>,
     ) -> Self {
         error.map_error(|error| E::long_with_argument(option, argument, error))
     }
 
-    fn long<A>(option: Arg<'arg>, error: Self::StateError<A>) -> Self {
+    fn long<A>(option: &'arg Arg, error: Self::StateError<A>) -> Self {
         error.map_error(|error| E::long(option, error))
     }
 
@@ -124,7 +128,7 @@ where
             A: debate_parser::ArgAccess<'arg>,
         {
             #[inline]
-            fn with<T, E>(self, op: impl FnOnce(Arg<'arg>) -> Result<T, E>) -> Result<T, E>
+            fn with<T, E>(self, op: impl FnOnce(&'arg Arg) -> Result<T, E>) -> Result<T, E>
             where
                 E: parameter::Error<'arg>,
             {
@@ -144,13 +148,13 @@ where
         {
             type Value = Result<(), E>;
 
-            fn visit_positional(self, argument: Arg<'arg>) -> Self::Value {
+            fn visit_positional(self, argument: &'arg Arg) -> Self::Value {
                 self.state
                     .add_positional(argument)
                     .map_err(|error| E::positional(argument, error))
             }
 
-            fn visit_long_option(self, option: Arg<'arg>, argument: Arg<'arg>) -> Self::Value {
+            fn visit_long_option(self, option: &'arg Arg, argument: &'arg Arg) -> Self::Value {
                 self.state
                     .add_long_option(option, argument)
                     .map_err(|error| E::long_with_argument(option, argument, error))
@@ -158,7 +162,7 @@ where
 
             fn visit_long(
                 self,
-                option: Arg<'arg>,
+                option: &'arg Arg,
                 arg: impl debate_parser::ArgAccess<'arg>,
             ) -> Self::Value {
                 self.state

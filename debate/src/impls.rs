@@ -1,3 +1,10 @@
+/*!
+Implementations of the [`parameter`][crate::parameter] traits for various
+primitive and standard library types
+ */
+
+use core::hash::Hash;
+
 use debate_parser::Arg;
 
 use crate::help::{ParameterUsage, ParameterValueKind, Repetition, Requirement};
@@ -30,17 +37,25 @@ from_str! {
     u8 u16 u32 u64 u128
     i8 i16 i32 i64 i128
     f32 f64
+    char
 
     #[cfg(feature="std")]
     std::string::String,
 
     #[cfg(feature="std")]
     std::path::PathBuf,
+
+    core::net::Ipv4Addr,
+    core::net::Ipv6Addr,
+    core::net::IpAddr,
+    core::net::SocketAddrV4,
+    core::net::SocketAddrV6,
+    core::net::SocketAddr,
 }
 
 impl<'arg> Value<'arg> for &'arg str {
     #[inline]
-    fn from_arg<E: ParameterError<'arg>>(arg: Arg<'arg>) -> Result<Self, E> {
+    fn from_arg<E: ParameterError<'arg>>(arg: &'arg Arg) -> Result<Self, E> {
         arg_as_str(arg)
     }
 }
@@ -54,7 +69,7 @@ impl ParameterUsage for &str {
 #[cfg(feature = "std")]
 impl<'arg> Value<'arg> for &'arg std::path::Path {
     #[inline]
-    fn from_arg<E: ParameterError<'arg>>(arg: Arg<'arg>) -> Result<Self, E> {
+    fn from_arg<E: ParameterError<'arg>>(arg: &'arg Arg) -> Result<Self, E> {
         arg_as_str(arg).map(std::path::Path::new)
     }
 }
@@ -121,12 +136,12 @@ where
     }
 
     #[inline]
-    fn arg<E: ParameterError<'arg>>(argument: Arg<'arg>) -> Result<Self, E> {
+    fn arg<E: ParameterError<'arg>>(argument: &'arg Arg) -> Result<Self, E> {
         T::arg(argument).map(Some)
     }
 
     #[inline]
-    fn add_arg<E: ParameterError<'arg>>(&mut self, _arg: Arg<'arg>) -> Result<(), E> {
+    fn add_arg<E: ParameterError<'arg>>(&mut self, _arg: &'arg Arg) -> Result<(), E> {
         Err(E::got_additional_instance())
     }
 }
@@ -139,33 +154,50 @@ impl<T: ParameterUsage> ParameterUsage for Option<T> {
 
 // We assume that collections all need the std feature. We can always relax
 // this requirement later.
+macro_rules! collections {
+    (
+        $($type:ident $(:: $path:ident)* [T $(: $($bounds:tt)+)?] .$insert:ident),+ $(,)?
+    ) => {
+        $(
+            #[cfg(feature = "std")]
+            impl<'arg, T> PositionalParameter<'arg> for std:: $type $(::$path)* <T>
+            where
+                T: Value<'arg> $(+ $($bounds)+)?,
+            {
+                #[inline]
+                fn absent() -> Result<Self, RequiredError> {
+                    Ok(Self::new())
+                }
 
-#[cfg(feature = "std")]
-impl<'arg, T> PositionalParameter<'arg> for std::vec::Vec<T>
-where
-    T: Value<'arg>,
-{
-    #[inline]
-    fn absent() -> Result<Self, RequiredError> {
-        Ok(std::vec::Vec::new())
-    }
+                #[inline]
+                fn arg<E: ParameterError<'arg>>(argument: &'arg Arg) -> Result<Self, E> {
+                    T::from_arg(argument).map(|value| Self::from([value]))
+                }
 
-    #[inline]
-    fn arg<E: ParameterError<'arg>>(argument: Arg<'arg>) -> Result<Self, E> {
-        T::from_arg(argument).map(|value| std::vec::Vec::from([value]))
-    }
+                #[inline]
+                fn add_arg<E: ParameterError<'arg>>(&mut self, argument: &'arg Arg) -> Result<(), E> {
+                    T::from_arg(argument).map(|value| {
+                        self.$insert(value);
+                    })
+                }
+            }
 
-    #[inline]
-    fn add_arg<E: ParameterError<'arg>>(&mut self, argument: Arg<'arg>) -> Result<(), E> {
-        T::from_arg(argument).map(|value| {
-            self.push(value);
-        })
+            #[cfg(feature = "std")]
+            impl<T: ParameterUsage> ParameterUsage for std:: $type $(::$path)* <T> {
+                const VALUE: ParameterValueKind = T::VALUE;
+                const REQUIREMENT: Requirement = Requirement::Optional;
+                const REPETITION: Repetition = Repetition::Multiple;
+            }
+
+        )+
     }
 }
 
-#[cfg(feature = "std")]
-impl<T: ParameterUsage> ParameterUsage for std::vec::Vec<T> {
-    const VALUE: ParameterValueKind = T::VALUE;
-    const REQUIREMENT: Requirement = Requirement::Optional;
-    const REPETITION: Repetition = Repetition::Multiple;
+collections! {
+    vec::Vec[T] .push,
+    collections::BTreeSet[T: Ord] .insert,
+    collections::BinaryHeap[T: Ord] .push,
+    collections::HashSet[T: Eq + Hash] .insert,
+    collections::LinkedList[T] .push_back,
+    collections::VecDeque[T] .push_back,
 }

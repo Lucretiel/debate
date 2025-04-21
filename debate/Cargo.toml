@@ -7,8 +7,11 @@ edition = "2024"
 debate-parser = { path = "../debate-parser", version = "0.1.0" }
 indent_write = "2.2.0"
 joinery = "3.1.0"
-lazy_format = "2.0.3"
 textwrap = "0.16.1"
+
+# TODO: use a feature gate for usage functionality, since it brings in a lot
+# of otherwise unnecessary dependencies related to text formatting and
+# terminal coloring
 
 [features]
 default = ["std"]

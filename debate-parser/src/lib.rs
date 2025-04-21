@@ -6,96 +6,14 @@ between flags, options, and positionals, that sort of thing. No type handling
 happens here. Usually this is too low level to use directly.
 */
 
+mod arg;
 mod populated_slice;
 
-use ::core::fmt::{self, Debug, Write};
+use ::core::fmt::Debug;
 
 use populated_slice::PopulatedSlice;
 
-/**
-A single, raw argument passed in from the command line.
-
-This type is used in two ways: to indicate long command line options, and to
-indicate arguments themselves. For instance, given
-`--target foo --path=bar input.txt`, `target`, `foo`, `path`, `bar`, and
-`input.txt` would all be passed as [`Arg`] values to the relevant functions.
-
-An [`Arg`] internally is just a byte slice, since that's what the OS gives us.
-Callers can manually turn it into a [`str`] with [`from_utf8`][core::str::from_utf8],
-and from there parse it however they need.
-*/
-// TODO: replace with `struct Arg([u8])` and use `&Arg`
-#[derive(Clone, Copy, Eq, Hash)]
-pub struct Arg<'arg>(&'arg [u8]);
-
-impl<'arg> Arg<'arg> {
-    pub fn bytes(&self) -> &'arg [u8] {
-        self.0
-    }
-}
-
-impl PartialEq<Arg<'_>> for Arg<'_> {
-    fn eq(&self, other: &Arg<'_>) -> bool {
-        self.0 == other.0
-    }
-}
-
-impl PartialEq<[u8]> for Arg<'_> {
-    fn eq(&self, other: &[u8]) -> bool {
-        self.0 == other
-    }
-}
-
-impl PartialEq<&[u8]> for Arg<'_> {
-    fn eq(&self, other: &&[u8]) -> bool {
-        self.0 == *other
-    }
-}
-
-impl PartialEq<str> for Arg<'_> {
-    fn eq(&self, other: &str) -> bool {
-        self.0 == other.as_bytes()
-    }
-}
-
-/**
-Debug-print an arg. This implementation does its best to treat the arg as a
-string, but includes non-utf-8 bytes in their hex representation as needed.
- */
-impl Debug for Arg<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fn write_bytes(f: &mut fmt::Formatter<'_>, bytes: &[u8]) -> fmt::Result {
-            f.write_char('[')?;
-
-            let mut bytes = bytes.iter().copied();
-
-            if let Some(b) = bytes.next() {
-                write!(f, "{b:#x}")?;
-                bytes.try_for_each(|b| write!(f, ",{b:#x}"))?;
-            }
-
-            f.write_char(']')
-        }
-
-        self.0.utf8_chunks().enumerate().try_for_each(|(i, chunk)| {
-            if i > 0 {
-                write!(f, "..")?
-            }
-
-            let s = chunk.valid();
-            let b = chunk.invalid();
-
-            match (s, b) {
-                (s, b"") => write!(f, "{s:?}"),
-                ("", b) => write_bytes(f, b),
-                (s, b) => {
-                    write!(f, "{s:?}..")?;
-                    write_bytes(f, b)
-                }
-            }
-        })
-    }
-}
+pub use crate::arg::Arg;
 
 /**
 The [`ArgumentsParser`] type operates by passing arguments it finds into a
@@ -105,14 +23,14 @@ pub trait Visitor<'arg> {
     type Value;
 
     /// A positional parameter.
-    fn visit_positional(self, argument: Arg<'arg>) -> Self::Value;
+    fn visit_positional(self, argument: &'arg Arg) -> Self::Value;
 
     /// A long option that definitely has an argument, because it was given
     /// as `--option=argument`
-    fn visit_long_option(self, option: Arg<'arg>, argument: Arg<'arg>) -> Self::Value;
+    fn visit_long_option(self, option: &'arg Arg, argument: &'arg Arg) -> Self::Value;
 
     /// A long option or flag, such as `--option`
-    fn visit_long(self, option: Arg<'arg>, arg: impl ArgAccess<'arg>) -> Self::Value;
+    fn visit_long(self, option: &'arg Arg, arg: impl ArgAccess<'arg>) -> Self::Value;
 
     /// A long option or flag, such as `-o`
     fn visit_short(self, option: u8, arg: impl ArgAccess<'arg>) -> Self::Value;
@@ -140,7 +58,7 @@ pub trait ArgAccess<'arg>: Sized {
     if there are known to only be positional parameters remaining (because
     a raw `--` was parsed at some point).
     */
-    fn take(self) -> Option<Arg<'arg>>;
+    fn take(self) -> Option<&'arg Arg>;
 }
 
 #[derive(Debug, Clone)]
@@ -166,6 +84,10 @@ refers to this borrowed command line data.
 pub struct ArgumentsParser<'arg, I> {
     state: State<'arg>,
     args: I,
+}
+
+pub fn parser<A: AsRef<[u8]>>(args: &[A]) -> ArgumentsParser<'_, impl Iterator<Item = &[u8]>> {
+    ArgumentsParser::new(args.iter().map(|arg| arg.as_ref()))
 }
 
 impl<'arg, I> ArgumentsParser<'arg, I>
@@ -199,7 +121,7 @@ where
         self.state = State::PositionalOnly;
         self.args
             .next()
-            .map(Arg)
+            .map(Arg::new)
             .map(|arg| visitor.visit_positional(arg))
     }
 
@@ -251,15 +173,15 @@ where
                 argument => Some(match argument {
                     [b'-', b'-', option @ ..] => match split_once(option, b'=') {
                         Some((option, argument)) => {
-                            visitor.visit_long_option(Arg(option), Arg(argument))
+                            visitor.visit_long_option(Arg::new(option), Arg::new(argument))
                         }
-                        None => visitor.visit_long(Arg(option), self.standard_arg()),
+                        None => visitor.visit_long(Arg::new(option), self.standard_arg()),
                     },
                     [b'-', short @ ..] => match PopulatedSlice::new(short) {
-                        None => visitor.visit_positional(Arg(b"-")),
+                        None => visitor.visit_positional(Arg::new(b"-")),
                         Some(short) => self.handle_short_argument(short, visitor),
                     },
-                    positional => visitor.visit_positional(Arg(positional)),
+                    positional => visitor.visit_positional(Arg::new(positional)),
                 }),
             },
             State::PositionalOnly => self.positional_only_arg(visitor),
@@ -278,32 +200,32 @@ impl<'arg, I> ArgAccess<'arg> for StandardArgAccess<'_, 'arg, I>
 where
     I: Iterator<Item = &'arg [u8]>,
 {
-    fn take(self) -> Option<Arg<'arg>> {
+    fn take(self) -> Option<&'arg Arg> {
         match self.parent.args.next()? {
             b"--" if !matches!(self.parent.state, State::PositionalOnly) => {
                 self.parent.state = State::PositionalOnly;
                 None
             }
-            arg => Some(Arg(arg)),
+            arg => Some(Arg::new(arg)),
         }
     }
 }
 
 /// ArgAccess implementation that gets the remainder of a short argument.
-/// Handles things like `-ovalue`, which is equivelent to `-o value`.
+/// Handles things like `-ovalue`, which is equivalent to `-o value`.
 struct ShortArgAccess<'a, 'arg> {
     short: &'arg [u8],
     state: &'a mut State<'arg>,
 }
 
 impl<'arg> ArgAccess<'arg> for ShortArgAccess<'_, 'arg> {
-    fn take(self) -> Option<Arg<'arg>> {
+    fn take(self) -> Option<&'arg Arg> {
         debug_assert!(
             matches!(*self.state, State::ShortInProgress(short) if short.get() == self.short)
         );
 
         *self.state = State::Ready;
-        Some(Arg(self.short))
+        Some(Arg::new(self.short))
     }
 }
 

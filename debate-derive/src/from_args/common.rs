@@ -1,4 +1,4 @@
-use proc_macro2::{Literal, TokenStream as TokenStream2};
+use proc_macro2::{Literal, Span, TokenStream as TokenStream2};
 use quote::{ToTokens, format_ident, quote};
 use syn::{Ident, Index};
 
@@ -7,17 +7,15 @@ use crate::common::{
     PositionalFieldInfo,
 };
 
-#[derive(Clone, Copy, Debug)]
-pub enum HelpOption {
-    Disabled,
-    Enabled,
+enum HelpMode {
+    Succinct,
+    Full,
 }
 
 /// Create a state block, in curlies. Used both for the struct state, and
 /// for separate enum variant states
 pub fn struct_state_block_from_fields<'a>(
     fields: impl IntoIterator<Item = &'a ParsedFieldInfo<'a>>,
-    help: HelpOption,
 ) -> impl ToTokens {
     {
         let field_state_types = fields
@@ -36,18 +34,10 @@ pub fn struct_state_block_from_fields<'a>(
                 },
             });
 
-        let help_field = match help {
-            HelpOption::Enabled => quote! {
-                help: ::core::option::Option<::debate::util::HelpRequest>,
-            },
-            HelpOption::Disabled => quote! {},
-        };
-
         quote! {
             {
                 position: u16,
                 phantom: ::core::marker::PhantomData<& 'arg ()>,
-                #help_field
                 fields: (#(#field_state_types,)*),
             }
         }
@@ -56,7 +46,6 @@ pub fn struct_state_block_from_fields<'a>(
 
 pub fn struct_state_init_block_from_fields<'a>(
     fields: impl IntoIterator<Item = &'a ParsedFieldInfo<'a>>,
-    help: HelpOption,
 ) -> impl ToTokens {
     let field_state_initializers = fields.into_iter().map(|info| match *info {
         ParsedFieldInfo::Positional(_) | ParsedFieldInfo::Option(_) => quote! {
@@ -67,16 +56,10 @@ pub fn struct_state_init_block_from_fields<'a>(
         },
     });
 
-    let help_field = match help {
-        HelpOption::Enabled => quote! { help: ::core::option::Option::None, },
-        HelpOption::Disabled => quote! {},
-    };
-
     quote! {
         {
             position: 0,
             phantom: ::core::marker::PhantomData,
-            #help_field
             fields: (#(#field_state_initializers,)*),
         }
     }
@@ -272,6 +255,8 @@ pub fn visit_positional_arms_for_fields(
     })
 }
 
+/// Shared logic for creating the match block that handles options of all
+/// kinds.
 #[expect(clippy::too_many_arguments)]
 fn complete_option_body<'a>(
     fields_ident: &Ident,
@@ -279,6 +264,7 @@ fn complete_option_body<'a>(
     option_expr: impl ToTokens,
 
     fields: &'a [ParsedFieldInfo<'a>],
+    help: Option<(Literal, HelpMode)>,
     make_scrutinee: impl Fn(&'a OptionFieldInfo<'a>) -> Option<Literal>,
 
     trait_ident: &Ident,
@@ -288,6 +274,23 @@ fn complete_option_body<'a>(
     flatten_state_method: &Ident,
     flatten_rebind_argument: impl ToTokens,
 ) -> TokenStream2 {
+    let help_arm = help.map(|(help, mode)| {
+        let mode = match mode {
+            HelpMode::Succinct => "Succinct",
+            HelpMode::Full => "Full",
+        };
+
+        let mode = Ident::new(mode, Span::mixed_site());
+
+        quote! {
+            #help => ::core::result::Result::Err(
+                ::debate::state::Error::help_requested(
+                    ::debate::help::HelpRequest:: #mode
+                )
+            ),
+        }
+    });
+
     let local_arms = option_fields(fields)
         .filter_map(move |(index, field)| {
             make_scrutinee(field).map(|scrutinee| (field, scrutinee, index))
@@ -335,6 +338,7 @@ fn complete_option_body<'a>(
 
     quote! {
         match (#option_expr) {
+            #help_arm
             #(#local_arms)*
             _ => {
                 #(#flatten_arms)*
@@ -356,12 +360,14 @@ pub fn complete_long_option_body(
     parameter_ident: &Ident,
 
     fields: &[ParsedFieldInfo<'_>],
+    help: Option<&str>,
 ) -> TokenStream2 {
     complete_option_body(
         fields_ident,
         argument_ident,
         quote! { #option_ident.bytes() },
         fields,
+        help.map(|long| (Literal::byte_string(long.as_bytes()), HelpMode::Full)),
         |info| {
             info.tags
                 .long()
@@ -382,12 +388,14 @@ pub fn complete_long_body(
     parameter_ident: &Ident,
 
     fields: &[ParsedFieldInfo<'_>],
+    help: Option<&str>,
 ) -> TokenStream2 {
     complete_option_body(
         fields_ident,
         argument_ident,
         quote! { #option_ident.bytes() },
         fields,
+        help.map(|long| (Literal::byte_string(long.as_bytes()), HelpMode::Full)),
         |info| {
             info.tags
                 .long()
@@ -408,12 +416,14 @@ pub fn complete_short_body(
     parameter_ident: &Ident,
 
     fields: &[ParsedFieldInfo<'_>],
+    help: Option<char>,
 ) -> TokenStream2 {
     complete_option_body(
         fields_ident,
         argument_ident,
         option_ident,
         fields,
+        help.map(|short| (Literal::byte_character(short as u8), HelpMode::Succinct)),
         |info| {
             info.tags
                 .short()

@@ -26,27 +26,27 @@ pub trait Error<'arg> {
     fn needs_arg() -> Self;
 
     /// The argument must NOT have a value, and got one
-    fn got_arg(argument: Arg<'arg>) -> Self;
+    fn got_arg(argument: &'arg Arg) -> Self;
 
     /// The argument appeared more times than expected on the command line
     fn got_additional_instance() -> Self;
 
     /// The argument wasn't valid UTF-8 and should be
-    fn invalid_utf8(argument: Arg<'arg>) -> Self;
+    fn invalid_utf8(argument: &'arg Arg) -> Self;
 
     /// The argument was valid UTF-8, but it failed to parse into an instance
     /// of the type
     fn parse_error(argument: &str, message: impl Display) -> Self;
 
     /// The argument failed to parse into an instance of the type.
-    fn byte_parse_error(argument: Arg<'arg>, message: impl Display) -> Self;
+    fn byte_parse_error(argument: &'arg Arg, message: impl Display) -> Self;
 
     /// Something else went wrong
     fn custom(message: impl Display) -> Self;
 }
 
 pub trait ArgAccess<'arg> {
-    fn with<T, E>(self, op: impl FnOnce(Arg<'arg>) -> Result<T, E>) -> Result<T, E>
+    fn with<T, E>(self, op: impl FnOnce(&'arg Arg) -> Result<T, E>) -> Result<T, E>
     where
         E: Error<'arg>;
 }
@@ -60,14 +60,15 @@ type of argument (option vs flag vs positional). It is the "type" part of the
 command line argument, responsible for requesting arguments (if appropriate)
 and parsing them into the underlying type.
 
-Generally a type should have a consistent behavior; that is, it should either
-ALWAYS or NEVER accept arguments. This ensures that the parse behavior is as
-consistent as possible, with no weird ambiguities about options vs arguments.
+Generally a type should have a consistent behavior with regard to taking values;
+that is, it should either ALWAYS or NEVER accept arguments. This ensures that
+the parse behavior is as consistent as possible, with no weird ambiguities
+about options vs arguments.
 
-For most types it makes more sense to implement [`Value`] or [`RawValue`]
-instead of [`Parameter`]. A type should only implement [`Parameter`] if it
-wants to act as a flag that takes no arguments, or it wants to customize its
-behavior if it appears less than or more than once on the command line.
+This is the lowest-level parameter trait, with the broadest range of
+capabilities; usually it makes more sense to implement [`Value`] (for types
+that take a value and appear exactly once) or [`PositionalParameter`] (for
+types that take an argument, but may appear 0 or more times).
 */
 pub trait Parameter<'arg>: Sized {
     /**
@@ -91,10 +92,10 @@ pub trait Parameter<'arg>: Sized {
     in this case, because only options should accept arguments.
 
     If you're implementing this method, it probably makes more sense to
-    implement [`PositionalParameter`] instead.
+    implement [`PositionalParameter`] instead of [`Parameter`].
     */
     #[inline]
-    fn arg<E: Error<'arg>>(argument: Arg<'arg>) -> Result<Self, E> {
+    fn arg<E: Error<'arg>>(argument: &'arg Arg) -> Result<Self, E> {
         Err(E::got_arg(argument))
     }
 
@@ -114,7 +115,7 @@ pub trait Parameter<'arg>: Sized {
     Most parameters should return an error here. However, some types (like
     counters and [`Vec`]) can collect more than one instance together.
     */
-    fn add_arg<E: Error<'arg>>(&mut self, argument: Arg<'arg>) -> Result<(), E> {
+    fn add_arg<E: Error<'arg>>(&mut self, argument: &'arg Arg) -> Result<(), E> {
         Err(E::got_arg(argument))
     }
 
@@ -128,7 +129,13 @@ pub trait Parameter<'arg>: Sized {
 }
 
 /// A parameter that can be used as a positional parameter (as opposed to a
-/// --option), which means that it MUST take an argument.
+/// --option), which means that it MUST take an argument. A positional
+/// parameter may appear 0 or more times on the command line (depending on its
+/// specific implementation); for types that should appear exactly once (like
+/// integers and strings), you should implement [`Value`] instead.
+///
+/// Types that implement [`PositionalParameter`] automatically implement
+/// [`Parameter`].
 pub trait PositionalParameter<'arg>: Sized {
     /**
     This parameter was absent from the command line.
@@ -136,8 +143,7 @@ pub trait PositionalParameter<'arg>: Sized {
     Most types should return a [`RequiredError`] here (the default behavior),
     and allow defaults to be handled by an [`Option`] or `#[debate(default)]`.
     However, there are plenty of cases where a type has a sensible behavior if
-    it doesn't appear on the command line, such as a bool flag being false or
-    a [`Vec`] being empty
+    it doesn't appear on the command line, as a `Vec` being empty.
     */
     fn absent() -> Result<Self, RequiredError> {
         Err(RequiredError)
@@ -146,7 +152,7 @@ pub trait PositionalParameter<'arg>: Sized {
     /**
     This parameter got an argument from the command line.
     */
-    fn arg<E: Error<'arg>>(argument: Arg<'arg>) -> Result<Self, E>;
+    fn arg<E: Error<'arg>>(argument: &'arg Arg) -> Result<Self, E>;
 
     /**
     This parameter appeared more than once on the command line, with an
@@ -155,7 +161,7 @@ pub trait PositionalParameter<'arg>: Sized {
     Most parameters should return an error here. However, some types (like
     counters and [`Vec`]) can collect more than one instance together.
     */
-    fn add_arg<E: Error<'arg>>(&mut self, argument: Arg<'arg>) -> Result<(), E>;
+    fn add_arg<E: Error<'arg>>(&mut self, argument: &'arg Arg) -> Result<(), E>;
 }
 
 impl<'arg, T: PositionalParameter<'arg>> Parameter<'arg> for T {
@@ -165,7 +171,7 @@ impl<'arg, T: PositionalParameter<'arg>> Parameter<'arg> for T {
     }
 
     #[inline]
-    fn arg<E: Error<'arg>>(argument: Arg<'arg>) -> Result<Self, E> {
+    fn arg<E: Error<'arg>>(argument: &'arg Arg) -> Result<Self, E> {
         PositionalParameter::arg(argument)
     }
 
@@ -175,7 +181,7 @@ impl<'arg, T: PositionalParameter<'arg>> Parameter<'arg> for T {
     }
 
     #[inline]
-    fn add_arg<E: Error<'arg>>(&mut self, argument: Arg<'arg>) -> Result<(), E> {
+    fn add_arg<E: Error<'arg>>(&mut self, argument: &'arg Arg) -> Result<(), E> {
         PositionalParameter::add_arg(self, argument)
     }
 
@@ -197,7 +203,7 @@ receive an argument, or are present more than once.
 */
 pub trait Value<'arg>: Sized {
     /// Parse a `Value` from an [`Arg`] given on the command line
-    fn from_arg<E: Error<'arg>>(arg: Arg<'arg>) -> Result<Self, E>;
+    fn from_arg<E: Error<'arg>>(arg: &'arg Arg) -> Result<Self, E>;
 }
 
 impl<'arg, T> PositionalParameter<'arg> for T
@@ -205,19 +211,50 @@ where
     T: Value<'arg>,
 {
     #[inline]
-    fn arg<E: Error<'arg>>(argument: Arg<'arg>) -> Result<Self, E> {
+    fn arg<E: Error<'arg>>(argument: &'arg Arg) -> Result<Self, E> {
         Value::from_arg(argument)
     }
 
     #[inline]
-    fn add_arg<E: Error<'arg>>(&mut self, _arg: Arg<'arg>) -> Result<(), E> {
+    fn add_arg<E: Error<'arg>>(&mut self, _arg: &'arg Arg) -> Result<(), E> {
         Err(E::got_additional_instance())
     }
 }
 
-/// For types with a [`FromStr`] implementation, [`ParsedValue`] automatically
-/// gives them a [`Parameter`] implementation so that they can be used as
-/// command line argument.
+/**
+For types with a [`FromStr`] implementation, [`ParsedValue`] automatically
+gives them a [`Parameter`] implementation so that they can be used as
+command line argument.
+
+# Example
+
+```
+use debate::parameter::{Parameter, ParsedValue};
+
+struct ColonPair {
+    left: String,
+    right: String,
+}
+
+impl FromStr for ColonPair {
+    type Err = String;
+
+    fn from_str(input: &str) -> Result<Self, String> {
+        input
+            .split_once(":")
+            .map(|(left, right)| Self {
+                left: left.to_owned(),
+                right: right.to_owned(),
+            })
+            .ok_or_else(|| "input didn't have a colon".to_owned())
+    }
+}
+
+impl ParsedValue for ColonPair {}
+
+// TODO: write an assertion. This needs an implementation of parameter::Error.
+```
+*/
 pub trait ParsedValue: FromStr {}
 
 impl<'arg, T> Value<'arg> for T
@@ -225,7 +262,7 @@ where
     T: ParsedValue,
     T::Err: Display,
 {
-    fn from_arg<E: Error<'arg>>(arg: Arg<'arg>) -> Result<Self, E> {
+    fn from_arg<E: Error<'arg>>(arg: &'arg Arg) -> Result<Self, E> {
         let arg = arg_as_str(arg)?;
         arg.parse().map_err(|err| E::parse_error(arg, err))
     }

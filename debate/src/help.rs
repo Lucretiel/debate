@@ -1,19 +1,16 @@
-use core::{convert::Infallible, marker::PhantomData};
+use core::marker::PhantomData;
 
-use crate::state::SubcommandChain;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HelpRequest {
+    /// There was a request for a succinct usage message, probably via `-h`
+    Succinct,
 
-#[derive(Debug, Clone, Copy)]
-pub enum Requirement {
-    Optional,
-    Mandatory,
+    /// There was a request for a comprehensive usage message, probably
+    /// via `--help`
+    Full,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub enum Repetition {
-    Single,
-    Multiple,
-}
-
+/// Description of a single value accepted as an argument (positional or option)
 #[derive(Debug, Clone, Copy)]
 pub struct ValueParameter<'a> {
     /// The name of the argument itself. Typically capitalized.
@@ -25,6 +22,8 @@ pub struct ValueParameter<'a> {
     pub values: Option<&'a [&'a str]>,
 }
 
+/// The set of tags that identify a particular option or tag
+/// (`-short`, `--long0`)
 #[derive(Debug, Clone, Copy)]
 pub enum Tags<'a> {
     Long { long: &'a str },
@@ -110,6 +109,9 @@ pub trait Receiver {
     }
 }
 
+/// `trait` for argument parsers that can describe themselves for the purpose
+/// of printing a usage message.
+#[diagnostic::on_unimplemented(message = "TEST MESSAGE", label = "LABEL")]
 pub trait Usage {
     fn describe<R>(receiver: &mut R) -> Result<(), R::Err>
     where
@@ -122,6 +124,13 @@ pub trait Usage {
         Self::describe(receiver)
     }
 }
+
+/// Type-wrapper for a type that implements `Usage`. `Usage`'s functions are
+/// all static, rather than instance methods, so the `UsageHelper` allows
+/// a `Usage` type to be passed as a "value" to the methods in [`Receiver`],
+/// simplifying call sites.
+///
+/// I might get rid of this, we'll see.
 pub struct UsageHelper<T> {
     phantom: PhantomData<T>,
 }
@@ -172,41 +181,34 @@ impl<T: Usage> UsageHelper<T> {
 // TODO: error implementation here
 pub struct HelpRequestedError;
 
-/**
-Entry point for the usage system. A `UsagePrinter` is passed in during argument
-parsing and allows the.
-
-The methods on this trait can only possibly return an error. This is a hint
-that a typical `UsagePrinter` will actually print
-*/
-pub trait UsagePrinter {
-    fn print_long_usage(
-        self,
-        description: &str,
-        command: &SubcommandChain<'_>,
-        usage: UsageHelper<impl Usage>,
-    );
-
-    fn print_short_usage(
-        self,
-        description: &str,
-        command: &SubcommandChain<'_>,
-        usage: UsageHelper<impl Usage>,
-    );
-}
-
 // TODO: consider a separate PositionalUsage trait?
 
+/// Information for a specific parameter. This should be derived or implemented
+/// on any type that implements [`Parameter`][crate::parameter::Parameter],
+/// so that it can be described correctly in usage messages.
 pub trait ParameterUsage {
+    /// The nature of the value this takes as an argument, if any.
     const VALUE: ParameterValueKind;
+
+    /// Whether or not this parameter must appear at least once.
     const REQUIREMENT: Requirement;
+
+    /// Whether or not this parameter may appear more than once.
     const REPETITION: Repetition;
 }
 
+/// Description of the nature of the value(s) a parameter takes as arguments
+/// on the command line, if any.
 #[derive(Debug, Clone, Copy)]
 pub enum ParameterValueKind {
+    /// This parameter behaves like a flake; it doesn't take any arguments
     Flag,
+
+    /// This parameter takes arguments
     Value,
+
+    /// This parameter takes arguments, which should be one of these specific
+    /// values
     OneOf(&'static [&'static str]),
 }
 
@@ -237,4 +239,16 @@ impl ParameterValueKind {
             }),
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Requirement {
+    Optional,
+    Mandatory,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Repetition {
+    Single,
+    Multiple,
 }

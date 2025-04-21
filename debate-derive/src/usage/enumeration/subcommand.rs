@@ -3,7 +3,8 @@ use quote::{format_ident, quote};
 use syn::{Ident, Token, Variant, punctuated::Punctuated};
 
 use crate::{
-    common::enumeration::ParsedSubcommandInfo, generics::AngleBracedLifetime,
+    common::{HelpOption, enumeration::ParsedSubcommandInfo},
+    generics::AngleBracedLifetime,
     usage::common::struct_usage_implementation,
 };
 
@@ -21,7 +22,8 @@ pub fn derive_usage_enum_subcommand(
         let subcommand_name = variant.command.as_str();
         let description = variant.docs.as_str();
 
-        let usage_for_subcommand = struct_usage_implementation(ident, &variant.fields, None);
+        let usage_for_subcommand =
+            struct_usage_implementation(ident, &variant.fields, HelpOption::new(), None);
 
         quote! {
             #receiver . subcommand(

@@ -8,6 +8,3 @@ memchr = { version = "2.7.4", default-features = false }
 
 [features]
 std = ["memchr/std"]
-
-[dev-dependencies]
-lazy_format = "2.0.3"

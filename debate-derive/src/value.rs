@@ -87,7 +87,7 @@ fn derive_value_enum(
     Ok(quote! {
         impl<#lifetime> ::debate::parameter::Value<#lifetime> for #ident #type_lifetime {
             fn from_arg<E: ::debate::parameter::Error<#lifetime>>(
-                argument: ::debate_parser::Arg<#lifetime>,
+                argument: & #lifetime ::debate_parser::Arg,
             ) -> Result<Self, E> {
                 match argument.bytes() {
                     #(#unit_byte_arms)*
@@ -103,41 +103,26 @@ fn derive_value_newtype(
     field: Option<&Ident>,
     lifetime: &Lifetime,
     type_lifetime: Option<&AngleBracedLifetime>,
-) -> syn::Result<TokenStream2> {
+) -> TokenStream2 {
     let struct_body = match field {
         Some(field) => quote! { { #field: value} },
-        None => quote! { ( #field ) },
+        None => quote! { ( value ) },
     };
 
-    let match_body = |method| {
-        quote! {
-            match ::debate::parameter::Value::#method(argument) {
-                ::core::result::Result::Ok(value) => ::core::result::Result::Ok(
-                    Self #struct_body
-                ),
-                ::core::result::Result::Err(err) => ::core::result::Result::Err(err),
-            }
-        }
-    };
-
-    let from_arg_body = match_body(format_ident!("from_arg"));
-    let from_str_body = match_body(format_ident!("from_arg_str"));
-
-    Ok(quote! {
+    quote! {
         impl<#lifetime> ::debate::parameter::Value<#lifetime> for #ident #type_lifetime {
             fn from_arg<E: ::debate::parameter::Error<#lifetime>>(
-                argument: ::debate_parser::Arg<'arg>,
+                argument: & #lifetime ::debate_parser::Arg,
             ) -> Result<Self, E> {
-                #from_arg_body
-            }
-
-            fn from_arg_str<E: ::debate::parameter::Error<#lifetime>>(
-                argument: &str,
-            ) -> Result<Self, E> {
-                #from_str_body
+                match ::debate::parameter::Value::from_arg(argument) {
+                    ::core::result::Result::Ok(value) => ::core::result::Result::Ok(
+                        Self #struct_body
+                    ),
+                    ::core::result::Result::Err(err) => ::core::result::Result::Err(err),
+                }
             }
         }
-    })
+    }
 }
 
 pub fn derive_value_result(item: TokenStream2) -> syn::Result<TokenStream2> {
@@ -153,12 +138,12 @@ pub fn derive_value_result(item: TokenStream2) -> syn::Result<TokenStream2> {
                 )
             })?;
 
-            derive_value_newtype(
+            Ok(derive_value_newtype(
                 &input.ident,
                 field.ident.as_ref(),
                 &lifetime,
                 type_lifetime.as_ref(),
-            )
+            ))
         }
         Data::Enum(ref data) => derive_value_enum(
             &input.ident,

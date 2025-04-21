@@ -11,10 +11,10 @@ use quote::{format_ident, quote};
 use syn::Lifetime;
 use syn::{Attribute, Field, Ident, Token, punctuated::Punctuated};
 
-use crate::common::ParsedFieldInfo;
+use crate::common::{ParsedFieldInfo, RawParsedTypeAttr};
 use crate::from_args::common::{
-    HelpOption, complete_long_body, complete_long_option_body, complete_short_body,
-    final_field_initializers, struct_state_block_from_fields, struct_state_init_block_from_fields,
+    complete_long_body, complete_long_option_body, complete_short_body, final_field_initializers,
+    struct_state_block_from_fields, struct_state_init_block_from_fields,
     visit_positional_arms_for_fields,
 };
 use crate::generics::AngleBracedLifetime;
@@ -45,22 +45,6 @@ fn detect_collision<T: Hash + Eq + Copy, M: Display>(
     }
 }
 
-#[derive(darling::FromAttributes, Debug)]
-#[darling(attributes(debate))]
-struct RawParsedTypeAttr {
-    help: Option<()>,
-    // TODO: global long/short
-}
-
-impl RawParsedTypeAttr {
-    pub fn help_enabled(&self) -> HelpOption {
-        match self.help {
-            Some(()) => HelpOption::Enabled,
-            None => HelpOption::Disabled,
-        }
-    }
-}
-
 pub fn derive_args_struct(
     name: &Ident,
     fields: &Punctuated<Field, Token![,]>,
@@ -69,6 +53,7 @@ pub fn derive_args_struct(
     attrs: &[Attribute],
 ) -> syn::Result<TokenStream2> {
     let attr = RawParsedTypeAttr::from_attributes(attrs)?;
+    let help = attr.help_option();
 
     let fields: Vec<ParsedFieldInfo> = fields
         .iter()
@@ -77,6 +62,7 @@ pub fn derive_args_struct(
 
     // Collision detection
     // TODO: move collision detection to ParsedFieldInfo::from_field
+    // TODO: detect collisions with the help fields
     {
         let mut long_tags = HashMap::new();
         let mut short_tags = HashMap::new();
@@ -102,8 +88,8 @@ pub fn derive_args_struct(
     let argument = format_ident!("argument");
     let option = format_ident!("option");
 
-    let state_block = struct_state_block_from_fields(&fields, attr.help_enabled());
-    let state_init_block = struct_state_init_block_from_fields(&fields, attr.help_enabled());
+    let state_block = struct_state_block_from_fields(&fields);
+    let state_init_block = struct_state_init_block_from_fields(&fields);
 
     let visit_positional_arms = visit_positional_arms_for_fields(
         &fields_ident,
@@ -114,14 +100,32 @@ pub fn derive_args_struct(
         &fields,
     );
 
-    let long_option_body =
-        complete_long_option_body(&fields_ident, &argument, &option, &parameter_ident, &fields);
+    let long_option_body = complete_long_option_body(
+        &fields_ident,
+        &argument,
+        &option,
+        &parameter_ident,
+        &fields,
+        help.long,
+    );
 
-    let long_body =
-        complete_long_body(&fields_ident, &argument, &option, &parameter_ident, &fields);
+    let long_body = complete_long_body(
+        &fields_ident,
+        &argument,
+        &option,
+        &parameter_ident,
+        &fields,
+        help.long,
+    );
 
-    let short_body =
-        complete_short_body(&fields_ident, &argument, &option, &parameter_ident, &fields);
+    let short_body = complete_short_body(
+        &fields_ident,
+        &argument,
+        &option,
+        &parameter_ident,
+        &fields,
+        help.short,
+    );
 
     let final_field_initializers = final_field_initializers(&fields_ident, &fields);
 
@@ -140,7 +144,7 @@ pub fn derive_args_struct(
         impl<#lifetime> ::debate::state::State<#lifetime> for #state_ident <#lifetime> {
             fn add_positional<E>(
                 &mut self,
-                #argument: ::debate_parser::Arg<#lifetime>
+                #argument: & #lifetime ::debate_parser::Arg
             ) -> ::core::result::Result<(), E>
             where
                 E: ::debate::state::Error<#lifetime, ()>
@@ -157,8 +161,8 @@ pub fn derive_args_struct(
 
             fn add_long_option<E>(
                 &mut self,
-                option: ::debate_parser::Arg<#lifetime>,
-                argument: ::debate_parser::Arg<#lifetime>
+                option: & #lifetime ::debate_parser::Arg,
+                argument: & #lifetime ::debate_parser::Arg
             ) -> ::core::result::Result<(), E>
             where
                 E: ::debate::state::Error<#lifetime, ()>
@@ -170,7 +174,7 @@ pub fn derive_args_struct(
 
             fn add_long<A, E>(
                 &mut self,
-                option: ::debate_parser::Arg<#lifetime>,
+                option: & #lifetime ::debate_parser::Arg,
                 argument: A
             ) -> ::core::result::Result<(), E>
             where

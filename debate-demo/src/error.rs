@@ -28,7 +28,7 @@ pub enum BuildError {
 impl<'arg> from_args::Error<'arg> for BuildError {
     type StateError<A> = StateError;
 
-    fn positional(argument: Arg<'arg>, error: Self::StateError<()>) -> Self {
+    fn positional(argument: &'arg Arg, error: Self::StateError<()>) -> Self {
         Self::Positional(
             String::from_utf8_lossy(argument.bytes()).into_owned(),
             error,
@@ -36,14 +36,14 @@ impl<'arg> from_args::Error<'arg> for BuildError {
     }
 
     fn long_with_argument(
-        option: Arg<'arg>,
-        _argument: Arg<'arg>,
+        option: &'arg Arg,
+        _argument: &'arg Arg,
         error: Self::StateError<()>,
     ) -> Self {
         Self::long::<()>(option, error)
     }
 
-    fn long<A>(option: Arg<'arg>, error: Self::StateError<A>) -> Self {
+    fn long<A>(option: &'arg Arg, error: Self::StateError<A>) -> Self {
         Self::Long(String::from_utf8_lossy(option.bytes()).into_owned(), error)
     }
 
@@ -68,10 +68,6 @@ impl build::Error for BuildError {
     fn required_subcommand(expected: &'static [&'static str]) -> Self {
         Self::Subcommand
     }
-
-    fn help_requested() -> Self {
-        Self::HelpRequested
-    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -81,6 +77,9 @@ pub enum StateError {
 
     #[error("unrecognized argument")]
     Unrecognized,
+
+    #[error("Help Requested")]
+    Help,
 }
 
 impl<A> state::Error<'_, A> for StateError {
@@ -109,8 +108,8 @@ impl<A> state::Error<'_, A> for StateError {
         todo!()
     }
 
-    fn help_requested(req: debate::util::HelpRequest) -> Self {
-        todo!()
+    fn help_requested(req: debate::help::HelpRequest) -> Self {
+        Self::Help
     }
 }
 
@@ -142,7 +141,8 @@ impl<'arg> debate::parameter::Error<'arg> for ParameterError {
     fn needs_arg() -> Self {
         Self::NeedArg
     }
-    fn got_arg(arg: Arg<'arg>) -> Self {
+
+    fn got_arg(arg: &'arg Arg) -> Self {
         Self::GotArg(String::from_utf8_lossy(arg.bytes()).into_owned())
     }
 
@@ -150,7 +150,7 @@ impl<'arg> debate::parameter::Error<'arg> for ParameterError {
         Self::GotExtra
     }
 
-    fn invalid_utf8(_: Arg<'arg>) -> Self {
+    fn invalid_utf8(_: &'arg Arg) -> Self {
         Self::InvalidUtf8
     }
 
@@ -161,7 +161,7 @@ impl<'arg> debate::parameter::Error<'arg> for ParameterError {
         }
     }
 
-    fn byte_parse_error(_: Arg<'arg>, error: impl std::fmt::Display) -> Self {
+    fn byte_parse_error(_: &'arg Arg, error: impl std::fmt::Display) -> Self {
         Self::ByteParseError {
             error: error.to_string(),
         }

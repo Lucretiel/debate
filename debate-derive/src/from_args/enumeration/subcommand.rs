@@ -5,7 +5,7 @@ use syn::{Ident, Lifetime, Token, Variant, punctuated::Punctuated};
 use crate::{
     common::enumeration::{Fallback, ParsedSubcommandInfo, VariantMode},
     from_args::common::{
-        HelpOption, complete_long_body, complete_long_option_body, complete_short_body,
+        complete_long_body, complete_long_option_body, complete_short_body,
         final_field_initializers, struct_state_block_from_fields,
         struct_state_init_block_from_fields, visit_positional_arms_for_fields,
     },
@@ -35,8 +35,7 @@ pub fn derive_args_enum_subcommand(
     let state_ident = format_ident!("__{name}State");
     let state_variants = parsed_variants.variants.iter().map(|variant| {
         let variant_ident = variant.ident.raw();
-        let variant_state_body =
-            struct_state_block_from_fields(&variant.fields, HelpOption::Disabled);
+        let variant_state_body = struct_state_block_from_fields(&variant.fields);
 
         quote! {
             #variant_ident #variant_state_body
@@ -58,8 +57,7 @@ pub fn derive_args_enum_subcommand(
         let scrutinee = variant.command.as_bytes();
         let scrutinee = Literal::byte_string(scrutinee);
         let variant_ident = variant.ident.raw();
-        let variant_init_block =
-            struct_state_init_block_from_fields(&variant.fields, HelpOption::Disabled);
+        let variant_init_block = struct_state_init_block_from_fields(&variant.fields);
 
         quote! {
             #scrutinee => Self :: #variant_ident #variant_init_block
@@ -98,6 +96,7 @@ pub fn derive_args_enum_subcommand(
             &option,
             &parameter_ident,
             &variant.fields,
+            None,
         );
 
         quote! {
@@ -113,6 +112,7 @@ pub fn derive_args_enum_subcommand(
             &option,
             &parameter_ident,
             &variant.fields,
+            None,
         );
 
         quote! {
@@ -128,6 +128,7 @@ pub fn derive_args_enum_subcommand(
             &option,
             &parameter_ident,
             &variant.fields,
+            None,
         );
 
         quote! {
@@ -180,7 +181,7 @@ pub fn derive_args_enum_subcommand(
             impl<#lifetime> ::debate::state::State<#lifetime> for #state_ident <#lifetime> {
                 fn add_positional<E>(
                     &mut self,
-                    #argument: ::debate_parser::Arg<#lifetime>
+                    #argument: & #lifetime ::debate_parser::Arg
                 ) -> ::core::result::Result<(), E>
                 where
                     E: ::debate::state::Error<#lifetime, ()>
@@ -207,8 +208,8 @@ pub fn derive_args_enum_subcommand(
 
                 fn add_long_option<E>(
                     &mut self,
-                    option: ::debate_parser::Arg<#lifetime>,
-                    argument: ::debate_parser::Arg<#lifetime>
+                    option: & #lifetime ::debate_parser::Arg,
+                    argument: & #lifetime ::debate_parser::Arg
                 ) -> ::core::result::Result<(), E>
                 where
                     E: ::debate::state::Error<#lifetime, ()>
@@ -227,7 +228,7 @@ pub fn derive_args_enum_subcommand(
 
                 fn add_long<A, E>(
                     &mut self,
-                    option: ::debate_parser::Arg<#lifetime>,
+                    option: & #lifetime ::debate_parser::Arg,
                     argument: A
                 ) -> ::core::result::Result<(), E>
                 where
