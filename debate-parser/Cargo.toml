@@ -3,7 +3,7 @@ name = "debate-parser"
 version = "0.1.0"
 edition = "2024"
 
-readme = "README.md"
+readme = "../README.md"
 license = "MPL-2.0"
 description = "low-level no-std parser for command-line arguments"
 repository = "https://github.com/Lucretiel/debate"

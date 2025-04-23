@@ -3,6 +3,11 @@ name = "debate"
 version = "0.1.0"
 edition = "2024"
 
+readme = "../README.md"
+license = "MPL-2.0"
+description = "A principled, type-driven CLI parser. Debate is a more sensible way to handle (command-line) arguments."
+repository = "https://github.com/Lucretiel/debate"
+
 [dependencies]
 debate-parser = { path = "../debate-parser", version = "0.1.0" }
 indent_write = "2.2.0"
