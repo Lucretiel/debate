@@ -3,11 +3,9 @@ pub mod enumeration;
 pub mod structure;
 
 use proc_macro2::TokenStream as TokenStream2;
-use quote::{format_ident, quote};
-use syn::Lifetime;
-use syn::{DeriveInput, Fields, Ident, spanned::Spanned as _};
+use syn::{DeriveInput, Fields, spanned::Spanned as _};
 
-use crate::generics::{AngleBracedLifetime, compute_generics};
+use crate::generics::compute_generics;
 
 use self::enumeration::derive_args_enum;
 use self::structure::derive_args_struct;
