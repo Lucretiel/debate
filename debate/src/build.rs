@@ -19,7 +19,7 @@ pub trait Error {
     fn required_subcommand(expected: &'static [&'static str]) -> Self;
 
     /// Something else went wrong
-    fn custom(msg: impl Display) -> Self;
+    fn custom(message: impl Display) -> Self;
 }
 
 /**

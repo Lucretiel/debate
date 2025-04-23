@@ -1,14 +1,10 @@
-mod error;
-
 use std::path::PathBuf;
 
 use anyhow::Context;
-use debate::{from_args::FromArgs, help::Usage as _, printers::DebugUsage};
+use debate::{errors::BuildError, from_args::FromArgs, help::Usage as _, printers::DebugUsage};
 use debate_derive::{FromArgs, ParameterUsage, Usage, Value};
 use debate_parser::ArgumentsParser;
 use lazy_format::make_lazy_format;
-
-use crate::error::BuildError;
 
 #[derive(FromArgs, Usage, Debug)]
 #[debate(help)]
@@ -86,20 +82,15 @@ fn main() -> anyhow::Result<()> {
         println!("HELLO")
     }
 
-    let args: Vec<Vec<u8>> = std::env::args_os()
-        .map(|arg| arg.into_encoded_bytes())
-        .collect();
-
     println!(
         "usage:\n{}",
         make_lazy_format!(|fmt| Arguments::describe(&mut DebugUsage::new(fmt)))
     );
 
-    let args: Result<Arguments, BuildError> = Arguments::from_parser(ArgumentsParser::new(
-        args.iter().skip(1).map(|arg| arg.as_slice()),
-    ));
+    let args = debate::arguments::LoadedArguments::from_env();
+    let args: Result<Arguments, BuildError> = args.try_parse();
 
-    let args = args.context("error parsing CLI argument")?;
+    let args = args.expect("parse error");
 
     println!("{args:#?}");
 

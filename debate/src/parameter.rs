@@ -36,7 +36,7 @@ pub trait Error<'arg> {
 
     /// The argument was valid UTF-8, but it failed to parse into an instance
     /// of the type
-    fn parse_error(argument: &str, message: impl Display) -> Self;
+    fn parse_error(argument: &'arg str, message: impl Display) -> Self;
 
     /// The argument failed to parse into an instance of the type.
     fn byte_parse_error(argument: &'arg Arg, message: impl Display) -> Self;

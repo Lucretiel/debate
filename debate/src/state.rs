@@ -1,4 +1,4 @@
-use debate_parser::Arg;
+use debate_parser::{Arg, ArgumentsParser};
 
 use crate::{help::HelpRequest, parameter};
 
@@ -92,7 +92,10 @@ pub trait Error<'arg, Arg>: Sized {
     /// The option was recognized, but it isn't a valid for this particular
     /// subcommand. The current subcommand, along with the list of subcommands
     /// that accept this option, are given
-    fn wrong_subcommand_for_argument(subcommand: &str, allowed: &[&'static str]) -> Self;
+    fn wrong_subcommand_for_argument(
+        subcommand: &'static str,
+        allowed: &'static [&'static str],
+    ) -> Self;
 
     /// This was a request for a usage message. This error doesn't need to
     /// interrupt argument parsing, since it can be useful to have a complete

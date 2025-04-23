@@ -33,7 +33,7 @@ where
         Self::Error(E::invalid_utf8(arg))
     }
 
-    fn parse_error(arg: &str, msg: impl fmt::Display) -> Self {
+    fn parse_error(arg: &'arg str, msg: impl fmt::Display) -> Self {
         Self::Error(E::parse_error(arg, msg))
     }
 
@@ -71,7 +71,10 @@ where
         Self::Error(E::unknown_subcommand(expected))
     }
 
-    fn wrong_subcommand_for_argument(subcommand: &str, allowed: &[&'static str]) -> Self {
+    fn wrong_subcommand_for_argument(
+        subcommand: &'static str,
+        allowed: &'static [&'static str],
+    ) -> Self {
         Self::Error(E::wrong_subcommand_for_argument(subcommand, allowed))
     }
 

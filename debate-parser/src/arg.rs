@@ -1,4 +1,4 @@
-use core::mem;
+use core::{fmt, mem};
 
 /**
 A single, raw argument passed in from the command line.
@@ -13,7 +13,7 @@ Callers can manually turn it into a [`str`] with [`from_utf8`][core::str::from_u
 and from there parse it however they need.
 */
 // TODO: replace with `struct Arg([u8])` and use `&Arg`
-#[derive(Debug, Eq, PartialEq, Hash)]
+#[derive(Eq, PartialEq, Hash)]
 #[repr(transparent)]
 pub struct Arg([u8]);
 
@@ -24,7 +24,7 @@ impl Arg {
         unsafe { mem::transmute(bytes) }
     }
 
-    pub fn bytes(&self) -> &[u8] {
+    pub const fn bytes(&self) -> &[u8] {
         &self.0
     }
 }
@@ -44,5 +44,14 @@ impl PartialEq<&[u8]> for Arg {
 impl PartialEq<str> for Arg {
     fn eq(&self, other: &str) -> bool {
         self.0 == *other.as_bytes()
+    }
+}
+
+impl fmt::Debug for Arg {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match str::from_utf8(self.bytes()) {
+            Ok(s) => write!(f, "{:?}", s),
+            Err(_) => write!(f, "{:?}", &self.0),
+        }
     }
 }

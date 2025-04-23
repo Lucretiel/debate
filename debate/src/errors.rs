@@ -1,0 +1,405 @@
+use core::fmt::{self};
+
+use crate::{build, from_args, help::HelpRequest, parameter, state};
+
+/// A simple argument parsing error type that contains no data. Mostly used for
+/// testing and code examples.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct BasicError;
+
+impl fmt::Display for BasicError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "there was an error parsing command-line arguments")
+    }
+}
+
+impl core::error::Error for BasicError {}
+
+impl<'arg> parameter::Error<'arg> for BasicError {
+    #[inline(always)]
+    fn needs_arg() -> Self {
+        Self
+    }
+
+    #[inline(always)]
+    fn got_arg(_: &'arg debate_parser::Arg) -> Self {
+        Self
+    }
+
+    #[inline(always)]
+    fn got_additional_instance() -> Self {
+        Self
+    }
+
+    #[inline(always)]
+    fn invalid_utf8(_: &'arg debate_parser::Arg) -> Self {
+        Self
+    }
+
+    #[inline(always)]
+    fn parse_error(_: &str, _: impl core::fmt::Display) -> Self {
+        Self
+    }
+
+    #[inline(always)]
+    fn byte_parse_error(_: &'arg debate_parser::Arg, _: impl core::fmt::Display) -> Self {
+        Self
+    }
+
+    #[inline(always)]
+    fn custom(_: impl core::fmt::Display) -> Self {
+        Self
+    }
+}
+
+impl<'arg, A> state::Error<'arg, A> for BasicError {
+    type ParameterError = BasicError;
+
+    #[inline(always)]
+    fn parameter(_: &'static str, _: Self::ParameterError) -> Self {
+        Self
+    }
+
+    #[inline(always)]
+    fn unrecognized(_: A) -> Self {
+        Self
+    }
+
+    #[inline(always)]
+    fn flattened(_: &'static str, _: Self) -> Self {
+        Self
+    }
+
+    #[inline(always)]
+    fn unknown_subcommand(_: &'static [&'static str]) -> Self {
+        Self
+    }
+
+    #[inline(always)]
+    fn wrong_subcommand_for_argument(_: &str, _: &[&'static str]) -> Self {
+        Self
+    }
+
+    #[inline(always)]
+    fn help_requested(_: HelpRequest) -> Self {
+        Self
+    }
+}
+
+impl build::Error for BasicError {
+    #[inline(always)]
+    fn required(_: &'static str, _: Option<&'static str>, _: Option<char>) -> Self {
+        Self
+    }
+
+    #[inline(always)]
+    fn flattened(_: &'static str, _: Self) -> Self {
+        Self
+    }
+
+    #[inline(always)]
+    fn required_subcommand(_: &'static [&'static str]) -> Self {
+        Self
+    }
+
+    #[inline(always)]
+    fn custom(_: impl core::fmt::Display) -> Self {
+        Self
+    }
+}
+
+impl<'arg> from_args::Error<'arg> for BasicError {
+    type StateError<A> = BasicError;
+
+    #[inline(always)]
+    fn positional(_: &'arg debate_parser::Arg, _: Self) -> Self {
+        Self
+    }
+
+    #[inline(always)]
+    fn long_with_argument(
+        _: &'arg debate_parser::Arg,
+        _: &'arg debate_parser::Arg,
+        _: Self,
+    ) -> Self {
+        Self
+    }
+
+    #[inline(always)]
+    fn long<A>(_: &'arg debate_parser::Arg, _: Self) -> Self {
+        Self
+    }
+
+    #[inline(always)]
+    fn short<A>(_: u8, _: Self) -> Self {
+        Self
+    }
+
+    #[inline(always)]
+    fn and(self, _: Self) -> Self {
+        Self
+    }
+}
+
+#[cfg(feature = "std")]
+mod with_std {
+    #[cfg(feature = "std")]
+    use std::{
+        borrow::ToOwned,
+        boxed::Box,
+        fmt::Display,
+        string::{String, ToString},
+    };
+
+    use debate_parser::Arg;
+
+    use crate::{build, from_args, help::HelpRequest, parameter, state};
+
+    #[derive(Debug, Clone)]
+    pub enum ParameterError<'arg> {
+        NeedArgument,
+        FlagGotArgument(&'arg Arg),
+        GotAdditionalInstance,
+        ParseError { arg: &'arg Arg, message: String },
+        Custom { message: String },
+    }
+
+    impl<'arg> parameter::Error<'arg> for ParameterError<'arg> {
+        fn needs_arg() -> Self {
+            Self::NeedArgument
+        }
+
+        fn got_arg(argument: &'arg Arg) -> Self {
+            Self::FlagGotArgument(argument)
+        }
+
+        fn got_additional_instance() -> Self {
+            Self::GotAdditionalInstance
+        }
+
+        fn invalid_utf8(arg: &'arg Arg) -> Self {
+            Self::ParseError {
+                arg,
+                message: "argument wasn't valid utf-8".to_owned(),
+            }
+        }
+
+        fn parse_error(arg: &'arg str, message: impl Display) -> Self {
+            Self::ParseError {
+                arg: Arg::new(arg.as_bytes()),
+                message: message.to_string(),
+            }
+        }
+
+        fn byte_parse_error(arg: &'arg Arg, message: impl Display) -> Self {
+            Self::ParseError {
+                arg,
+                message: message.to_string(),
+            }
+        }
+
+        fn custom(message: impl Display) -> Self {
+            Self::Custom {
+                message: message.to_string(),
+            }
+        }
+    }
+
+    #[derive(Debug, Clone)]
+    pub enum StateError<'arg> {
+        Parameter {
+            field: &'static str,
+            error: ParameterError<'arg>,
+        },
+        Unrecognized,
+        Flattened {
+            field: &'static str,
+            error: Box<Self>,
+        },
+        UnknownSubcommand {
+            expected: &'static [&'static str],
+        },
+        WrongSubcommand {
+            subcommand: &'static str,
+            allowed: &'static [&'static str],
+        },
+        HelpRequested(HelpRequest),
+    }
+
+    impl StateError<'_> {
+        pub fn help_request(&self) -> Option<HelpRequest> {
+            match *self {
+                Self::HelpRequested(help) => Some(help),
+                Self::Flattened { ref error, .. } => error.help_request(),
+                _ => None,
+            }
+        }
+    }
+
+    impl<'arg, A> state::Error<'arg, A> for StateError<'arg> {
+        type ParameterError = ParameterError<'arg>;
+
+        fn parameter(field: &'static str, error: ParameterError<'arg>) -> Self {
+            Self::Parameter { field, error }
+        }
+
+        fn unrecognized(_: A) -> Self {
+            Self::Unrecognized
+        }
+
+        fn flattened(field: &'static str, error: Self) -> Self {
+            Self::Flattened {
+                field,
+                error: Box::new(error),
+            }
+        }
+
+        fn unknown_subcommand(expected: &'static [&'static str]) -> Self {
+            Self::UnknownSubcommand { expected }
+        }
+
+        fn wrong_subcommand_for_argument(
+            subcommand: &'static str,
+            allowed: &'static [&'static str],
+        ) -> Self {
+            Self::WrongSubcommand {
+                subcommand,
+                allowed,
+            }
+        }
+
+        fn help_requested(request: HelpRequest) -> Self {
+            Self::HelpRequested(request)
+        }
+    }
+
+    #[derive(Debug, Clone)]
+    pub enum ParameterSource<'arg> {
+        Positional {
+            arg: &'arg Arg,
+        },
+        Short {
+            option: u8,
+        },
+        Long {
+            option: &'arg Arg,
+            argument: Option<&'arg Arg>,
+        },
+    }
+
+    #[derive(Debug, Clone)]
+    pub enum BuildError<'arg> {
+        Arg {
+            source: ParameterSource<'arg>,
+            error: StateError<'arg>,
+        },
+        RequiredFieldAbsent {
+            field: &'static str,
+            long: Option<&'static str>,
+            short: Option<char>,
+        },
+        RequiredSubcommand {
+            expected: &'static [&'static str],
+        },
+        Flattened {
+            field: &'static str,
+            error: Box<Self>,
+        },
+        HelpRequested(HelpRequest),
+        Custom(String),
+    }
+
+    impl<'arg> BuildError<'arg> {
+        pub fn new_with_source(source: ParameterSource<'arg>, error: StateError<'arg>) -> Self {
+            match error {
+                StateError::HelpRequested(help) => Self::HelpRequested(help),
+                error => Self::Arg { source, error },
+            }
+        }
+
+        pub fn help_request(&self) -> Option<HelpRequest> {
+            match *self {
+                Self::HelpRequested(help) => Some(help),
+                Self::Flattened { ref error, .. } => error.help_request(),
+                Self::Arg { ref error, .. } => error.help_request(),
+                _ => None,
+            }
+        }
+
+        fn rank(&self) -> u16 {
+            // TODO: complete ranking of errors
+            0
+        }
+    }
+
+    impl<'arg> build::Error for BuildError<'arg> {
+        fn required(field: &'static str, long: Option<&'static str>, short: Option<char>) -> Self {
+            Self::RequiredFieldAbsent { field, long, short }
+        }
+
+        fn flattened(field: &'static str, error: Self) -> Self {
+            match error {
+                Self::HelpRequested(help) => Self::HelpRequested(help),
+                error => Self::Flattened {
+                    field,
+                    error: Box::new(error),
+                },
+            }
+        }
+
+        fn required_subcommand(expected: &'static [&'static str]) -> Self {
+            Self::RequiredSubcommand { expected }
+        }
+
+        fn custom(message: impl Display) -> Self {
+            Self::Custom(message.to_string())
+        }
+    }
+
+    impl<'arg> from_args::Error<'arg> for BuildError<'arg> {
+        type StateError<A> = StateError<'arg>;
+
+        fn positional(arg: &'arg Arg, error: StateError<'arg>) -> Self {
+            Self::new_with_source(ParameterSource::Positional { arg }, error)
+        }
+
+        fn long_with_argument(
+            option: &'arg Arg,
+            argument: &'arg Arg,
+            error: Self::StateError<()>,
+        ) -> Self {
+            Self::new_with_source(
+                ParameterSource::Long {
+                    option,
+                    argument: Some(argument),
+                },
+                error,
+            )
+        }
+
+        fn long<A>(option: &'arg Arg, error: StateError<'arg>) -> Self {
+            Self::new_with_source(
+                ParameterSource::Long {
+                    option,
+                    argument: None,
+                },
+                error,
+            )
+        }
+
+        fn short<A>(option: u8, error: StateError<'arg>) -> Self {
+            Self::new_with_source(ParameterSource::Short { option }, error)
+        }
+
+        fn and(self, error: Self) -> Self {
+            if self.rank() <= error.rank() {
+                self
+            } else {
+                error
+            }
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+pub use with_std::*;
