@@ -50,7 +50,6 @@ impl<'a> Tags<'a> {
 pub trait Receiver {
     type Err;
 
-    #[expect(unused_variables)]
     #[inline(always)]
     fn option(
         &mut self,
@@ -63,7 +62,6 @@ pub trait Receiver {
         Ok(())
     }
 
-    #[expect(unused_variables)]
     #[inline(always)]
     fn positional(
         &mut self,
@@ -75,7 +73,6 @@ pub trait Receiver {
         Ok(())
     }
 
-    #[expect(unused_variables)]
     #[inline(always)]
     fn subcommand(
         &mut self,
@@ -86,13 +83,11 @@ pub trait Receiver {
         Ok(())
     }
 
-    #[expect(unused_variables)]
     #[inline(always)]
     fn group(&mut self, name: &str, usage: UsageHelper<impl Usage>) -> Result<(), Self::Err> {
         Ok(())
     }
 
-    #[expect(unused_variables)]
     #[inline(always)]
     fn exclusive_group(
         &mut self,
@@ -102,7 +97,6 @@ pub trait Receiver {
         Ok(())
     }
 
-    #[expect(unused_variables)]
     #[inline(always)]
     fn anonymous_group(&mut self, usage: UsageHelper<impl Usage>) -> Result<(), Self::Err> {
         Ok(())
