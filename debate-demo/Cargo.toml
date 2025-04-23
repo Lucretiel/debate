@@ -3,6 +3,11 @@ name = "debate-demo"
 version = "0.1.0"
 edition = "2024"
 
+readme = "README.md"
+license = "MPL-2.0"
+description = "A principled, type-driven CLI parser. Debate is a more sensible way to handle (command-line) arguments."
+repository = "https://github.com/Lucretiel/debate"
+
 [dependencies]
 anyhow = "1.0.95"
 debate = { version = "0.1.0", path = "../debate" }
