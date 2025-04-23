@@ -3,7 +3,7 @@ name = "debate-derive"
 version = "0.1.0"
 edition = "2024"
 
-readme = "README.md"
+readme = "../README.md"
 license = "MPL-2.0"
 description = "derive macro for the `debate` CLI arguments parser"
 repository = "https://github.com/Lucretiel/debate"
