@@ -6,6 +6,9 @@ between flags, options, and positionals, that sort of thing. No type handling
 happens here. Usually this is too low level to use directly.
 */
 
+#[cfg(feature = "std")]
+extern crate std;
+
 mod arg;
 mod populated_slice;
 
@@ -107,6 +110,14 @@ where
             state: State::Ready,
             args: args.into_iter(),
         }
+    }
+
+    #[inline]
+    #[must_use]
+    pub fn new_from_slice(
+        slice: &[impl AsBytes],
+    ) -> ArgumentsParser<'_, impl Iterator<Item = &'_ [u8]>> {
+        ArgumentsParser::new(slice.iter().map(|arg| arg.as_bytes()))
     }
 
     /// Put `self` into a `PositionalOnly` state, then process a positional
@@ -231,4 +242,62 @@ impl<'arg> ArgAccess<'arg> for ShortArgAccess<'_, 'arg> {
 
 fn split_once(input: &[u8], delimiter: u8) -> Option<(&[u8], &[u8])> {
     memchr::memchr(delimiter, input).map(|i| (&input[..i], &input[i + 1..]))
+}
+
+/// Basically the same as `AsRef<u8>`, but we want it for OsString and OsStr,
+/// too.
+pub trait AsBytes {
+    fn as_bytes(&self) -> &[u8];
+}
+
+impl AsBytes for [u8] {
+    fn as_bytes(&self) -> &[u8] {
+        self
+    }
+}
+
+impl AsBytes for str {
+    fn as_bytes(&self) -> &[u8] {
+        self.as_bytes()
+    }
+}
+
+impl<T: AsBytes> AsBytes for &T {
+    fn as_bytes(&self) -> &[u8] {
+        T::as_bytes(*self)
+    }
+}
+
+#[cfg(feature = "std")]
+mod std_impls {
+    use super::*;
+
+    use std::{
+        ffi::{OsStr, OsString},
+        string::String,
+        vec::Vec,
+    };
+
+    impl AsBytes for Vec<u8> {
+        fn as_bytes(&self) -> &[u8] {
+            self.as_slice()
+        }
+    }
+
+    impl AsBytes for String {
+        fn as_bytes(&self) -> &[u8] {
+            self.as_bytes()
+        }
+    }
+
+    impl AsBytes for OsString {
+        fn as_bytes(&self) -> &[u8] {
+            self.as_encoded_bytes()
+        }
+    }
+    impl AsBytes for OsStr {
+        fn as_bytes(&self) -> &[u8] {
+            self.as_encoded_bytes()
+        }
+    }
 }

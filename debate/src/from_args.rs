@@ -2,7 +2,7 @@ use core::marker::PhantomData;
 
 use debate_parser::{Arg, ArgumentsParser};
 
-use crate::{build, help::HelpRequest, parameter, state};
+use crate::{build, parameter, state};
 
 /// A type that can be parsed from command line arguments
 pub trait FromArgs<'arg>: Sized {
