@@ -10,6 +10,28 @@ pub enum HelpRequest {
     Full,
 }
 
+/// A description of something, like a parameter or subcommand
+#[derive(Debug, Clone, Copy)]
+pub struct Description<'a> {
+    /// A succinct description of this thing, usually only a sentence long
+    pub short: &'a str,
+
+    /// A full description of this thing
+    pub long: &'a str,
+}
+
+impl<'a> Description<'a> {
+    /// Create a new description where the short and long text is the same
+    #[inline]
+    #[must_use]
+    pub const fn new(description: &'a str) -> Self {
+        Self {
+            short: description,
+            long: description,
+        }
+    }
+}
+
 /// Description of a single value accepted as an argument (positional or option)
 #[derive(Debug, Clone, Copy)]
 pub struct ValueParameter<'a> {
@@ -23,7 +45,7 @@ pub struct ValueParameter<'a> {
 }
 
 /// The set of tags that identify a particular option or tag
-/// (`-short`, `--long0`)
+/// (`-short`, `--long`)
 #[derive(Debug, Clone, Copy)]
 pub enum Tags<'a> {
     Long { long: &'a str },
@@ -32,14 +54,18 @@ pub enum Tags<'a> {
 }
 
 impl<'a> Tags<'a> {
-    pub fn long(&self) -> Option<&'a str> {
+    #[inline]
+    #[must_use]
+    pub const fn long(&self) -> Option<&'a str> {
         match self {
             Tags::Long { long } | Tags::LongShort { long, .. } => Some(long),
             Tags::Short { .. } => None,
         }
     }
 
-    pub fn short(&self) -> Option<char> {
+    #[inline]
+    #[must_use]
+    pub const fn short(&self) -> Option<char> {
         match self {
             Tags::Short { short } | Tags::LongShort { short, .. } => Some(*short),
             Tags::Long { .. } => None,
@@ -47,129 +73,80 @@ impl<'a> Tags<'a> {
     }
 }
 
-pub trait Receiver {
-    type Err;
-
-    #[inline(always)]
-    fn option(
-        &mut self,
-        tags: Tags<'_>,
-        argument: Option<ValueParameter<'_>>,
-        requirement: Requirement,
-        repetition: Repetition,
-        description: &str,
-    ) -> Result<(), Self::Err> {
-        Ok(())
-    }
-
-    #[inline(always)]
-    fn positional(
-        &mut self,
-        argument: ValueParameter<'_>,
-        requirement: Requirement,
-        repetition: Repetition,
-        description: &str,
-    ) -> Result<(), Self::Err> {
-        Ok(())
-    }
-
-    #[inline(always)]
-    fn subcommand(
-        &mut self,
-        command: &str,
-        description: Option<&str>,
-        usage: UsageHelper<impl Usage>,
-    ) -> Result<(), Self::Err> {
-        Ok(())
-    }
-
-    #[inline(always)]
-    fn group(&mut self, name: &str, usage: UsageHelper<impl Usage>) -> Result<(), Self::Err> {
-        Ok(())
-    }
-
-    #[inline(always)]
-    fn exclusive_group(
-        &mut self,
-        requirement: Requirement,
-        usage: UsageHelper<impl Usage>,
-    ) -> Result<(), Self::Err> {
-        Ok(())
-    }
-
-    #[inline(always)]
-    fn anonymous_group(&mut self, usage: UsageHelper<impl Usage>) -> Result<(), Self::Err> {
-        Ok(())
-    }
-}
-
-/// `trait` for argument parsers that can describe themselves for the purpose
-/// of printing a usage message.
-#[diagnostic::on_unimplemented(message = "TEST MESSAGE", label = "LABEL")]
 pub trait Usage {
-    fn describe<R>(receiver: &mut R) -> Result<(), R::Err>
-    where
-        R: Receiver;
+    /// The name of the command.
+    const NAME: &'static str;
 
-    fn describe_deduplicated<R>(receiver: &mut R) -> Result<(), R::Err>
-    where
-        R: Receiver,
-    {
-        Self::describe(receiver)
-    }
+    /// The top-level description of the whole command.
+    const DESCRIPTION: Description<'static>;
+
+    /// The items (parameters, subcommands, and so on) in this command.
+    const ITEMS: UsageItems<'static>;
 }
 
-/// Type-wrapper for a type that implements `Usage`. `Usage`'s functions are
-/// all static, rather than instance methods, so the `UsageHelper` allows
-/// a `Usage` type to be passed as a "value" to the methods in [`Receiver`],
-/// simplifying call sites.
-///
-/// I might get rid of this, we'll see.
-pub struct UsageHelper<T> {
-    phantom: PhantomData<T>,
+/// The set of items associated with a `Usage` implementation, or something
+/// similar.
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub enum UsageItems<'a> {
+    /// This `Usage` describes an ordinary set of parameters (flags and
+    /// positionals and so on)
+    Parameters { parameters: &'a [Parameter<'a>] },
+
+    /// This `Usage` describes a set of subcommands
+    Subcommands {
+        /// Indicates if a subcommand is required
+        requirement: Requirement,
+
+        /// The subcommands themselves
+        commands: &'a [Subcommand<'a>],
+    },
+
+    /// This usage describes mutually sets of flags, where exactly one set of
+    /// flags must be present
+    Exclusive {
+        /// The groups of flags. Each child slice here represents a mutually
+        /// exclusive separate group of flags.
+        groups: &'a [&'a [ParameterOption<'a>]],
+    },
 }
 
-impl<T: Usage> UsageHelper<T> {
-    #[inline(always)]
-    #[must_use]
-    pub const fn new() -> Self {
-        Self {
-            phantom: PhantomData,
-        }
-    }
+#[derive(Debug, Clone)]
+pub enum Parameter<'a> {
+    Option {
+        description: Description<'a>,
+        requirement: Requirement,
+        repetition: Repetition,
+        argument: Option<ValueParameter<'a>>,
+        tags: Tags<'a>,
+    },
+    Positional {
+        description: Description<'a>,
+        requirement: Requirement,
+        repetition: Repetition,
+        argument: ValueParameter<'a>,
+    },
+    Group {
+        name: Option<&'a str>,
+        description: Description<'a>,
+        contents: UsageItems<'a>,
+    },
 }
 
-impl<T> Copy for UsageHelper<T> {}
-
-impl<T> Clone for UsageHelper<T> {
-    fn clone(&self) -> Self {
-        *self
-    }
+#[derive(Debug, Clone)]
+pub struct ParameterOption<'a> {
+    pub description: Description<'a>,
+    pub requirement: Requirement,
+    pub repetition: Repetition,
+    pub argument: Option<ValueParameter<'a>>,
+    pub tags: Tags<'a>,
 }
 
-impl<T: Usage> Default for UsageHelper<T> {
-    #[inline(always)]
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl<T: Usage> UsageHelper<T> {
-    #[inline(always)]
-    pub fn describe<R>(self, receiver: &mut R) -> Result<(), R::Err>
-    where
-        R: Receiver,
-    {
-        T::describe(receiver)
-    }
-
-    #[inline(always)]
-    pub fn describe_deduplicated<R>(self, receiver: &mut R) -> Result<(), R::Err>
-    where
-        R: Receiver,
-    {
-        T::describe_deduplicated(receiver)
-    }
+#[derive(Debug, Clone)]
+pub struct Subcommand<'a> {
+    pub command: &'a str,
+    pub description: Description<'a>,
+    pub usage: &'a [Parameter<'a>],
 }
 
 // TODO: error implementation here
@@ -195,7 +172,7 @@ pub trait ParameterUsage {
 /// on the command line, if any.
 #[derive(Debug, Clone, Copy)]
 pub enum ParameterValueKind {
-    /// This parameter behaves like a flake; it doesn't take any arguments
+    /// This parameter behaves like a flag; it doesn't take any arguments
     Flag,
 
     /// This parameter takes arguments

@@ -2,7 +2,7 @@ use core::marker::PhantomData;
 
 use debate_parser::{Arg, ArgumentsParser};
 
-use crate::{build, parameter, state};
+use crate::{build, help::Usage, parameter, state};
 
 /// A type that can be parsed from command line arguments
 pub trait FromArgs<'arg>: Sized {
@@ -13,7 +13,9 @@ pub trait FromArgs<'arg>: Sized {
         E: Error<'arg> + build::Error;
 
     #[cfg(feature = "std")]
-    fn from_parser(arguments: ArgumentsParser<'arg, impl Iterator<Item = &'arg [u8]>>) -> Self;
+    fn from_parser(arguments: ArgumentsParser<'arg, impl Iterator<Item = &'arg [u8]>>) -> Self
+    where
+        Self: Usage;
 }
 
 /// Errors that can occur while handling incoming arguments
@@ -58,15 +60,17 @@ where
     }
 
     #[cfg(feature = "std")]
-    fn from_parser(arguments: ArgumentsParser<'arg, impl Iterator<Item = &'arg [u8]>>) -> Self {
-        use crate::errors;
+    fn from_parser(arguments: ArgumentsParser<'arg, impl Iterator<Item = &'arg [u8]>>) -> Self
+    where
+        Self: Usage,
+    {
+        // let mut state = T::State::default();
 
-        let mut state = T::State::default();
+        // load_state_from_parser(&mut state, arguments)
+        //     .unwrap_or_else(|err: errors::BuildError| todo!());
 
-        load_state_from_parser(&mut state, arguments)
-            .unwrap_or_else(|err: errors::BuildError| todo!());
-
-        Self::build(state).unwrap_or_else(|err: errors::BuildError| todo!())
+        // Self::build(state).unwrap_or_else(|err: errors::BuildError| todo!()
+        todo!()
     }
 }
 

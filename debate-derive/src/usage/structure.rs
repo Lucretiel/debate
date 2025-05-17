@@ -1,10 +1,11 @@
 use darling::FromAttributes;
+use heck::ToSnakeCase;
 use itertools::Itertools as _;
 use proc_macro2::TokenStream as TokenStream2;
-
+use quote::quote;
 use syn::{Attribute, Field, Ident, Token, punctuated::Punctuated};
 
-use super::common::struct_usage_implementation;
+use super::common::struct_usage_items;
 use crate::{
     common::{ParsedFieldInfo, RawParsedTypeAttr},
     generics::AngleBracedLifetime,
@@ -22,11 +23,17 @@ pub fn derive_usage_struct(
         .try_collect()?;
 
     let attrs = RawParsedTypeAttr::from_attributes(attrs)?;
+    let items = struct_usage_items(&fields, attrs.help_option());
+    let command_name = name.to_string().to_snake_case();
 
-    Ok(struct_usage_implementation(
-        name,
-        &fields,
-        attrs.help_option(),
-        lifetime,
-    ))
+    Ok(quote! {
+        impl #lifetime ::debate::help::Usage for #name #lifetime {
+            const NAME: &'static str = #command_name;
+            const DESCRIPTION: ::debate::help::Description<'static> =
+                ::debate::help::Description::new("TODO GLOBAL HELP");
+            const ITEMS: ::debate::help::UsageItems<'static> = ::debate::help::UsageItems::Parameters {
+                parameters: #items,
+            };
+        }
+    })
 }

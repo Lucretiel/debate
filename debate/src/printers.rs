@@ -26,7 +26,7 @@
 //     dest: &mut impl fmt::Write,
 //     usage: UsageHelper<impl Usage>,
 // ) -> fmt::Result {
-//     let mut presence = Presence::default();
+//     let mut presence = Pres ence::default();
 
 //     match usage.describe_deduplicated(&mut presence) {
 //         Ok(()) => {}
@@ -378,84 +378,3 @@
 //         print_group(&mut self.dest, name, usage)
 //     }
 // }
-
-use core::fmt;
-
-use indent_write::fmt::IndentWriter;
-
-use crate::help::Receiver;
-
-pub struct DebugUsage<T> {
-    dest: T,
-}
-
-impl<T: fmt::Write> DebugUsage<T> {
-    pub fn new(dest: T) -> Self {
-        Self { dest }
-    }
-
-    fn nest(&mut self) -> DebugUsage<IndentWriter<'static, &mut T>> {
-        DebugUsage::new(IndentWriter::new("    ", &mut self.dest))
-    }
-}
-
-impl<T: fmt::Write> Receiver for DebugUsage<T> {
-    type Err = fmt::Error;
-
-    fn option(
-        &mut self,
-        tags: crate::help::Tags<'_>,
-        argument: Option<crate::help::ValueParameter<'_>>,
-        requirement: crate::help::Requirement,
-        repetition: crate::help::Repetition,
-        description: &str,
-    ) -> Result<(), Self::Err> {
-        writeln!(self.dest, "option: {tags:?}, {argument:?}, {description:?}")
-    }
-
-    fn positional(
-        &mut self,
-        argument: crate::help::ValueParameter<'_>,
-        requirement: crate::help::Requirement,
-        repetition: crate::help::Repetition,
-        description: &str,
-    ) -> Result<(), Self::Err> {
-        writeln!(self.dest, "positional: {argument:?}, {description:?}")
-    }
-
-    fn subcommand(
-        &mut self,
-        command: &str,
-        description: Option<&str>,
-        usage: crate::help::UsageHelper<impl crate::help::Usage>,
-    ) -> Result<(), Self::Err> {
-        writeln!(self.dest, "subcommand {command}:")?;
-        usage.describe(&mut self.nest())
-    }
-
-    fn group(
-        &mut self,
-        name: &str,
-        usage: crate::help::UsageHelper<impl crate::help::Usage>,
-    ) -> Result<(), Self::Err> {
-        writeln!(self.dest, "named group {name}:")?;
-        usage.describe(&mut self.nest())
-    }
-
-    fn exclusive_group(
-        &mut self,
-        requirement: crate::help::Requirement,
-        usage: crate::help::UsageHelper<impl crate::help::Usage>,
-    ) -> Result<(), Self::Err> {
-        writeln!(self.dest, "exclusive group ({requirement:?})")?;
-        usage.describe(&mut self.nest())
-    }
-
-    fn anonymous_group(
-        &mut self,
-        usage: crate::help::UsageHelper<impl crate::help::Usage>,
-    ) -> Result<(), Self::Err> {
-        writeln!(self.dest, "anonymous group:")?;
-        usage.describe(&mut self.nest())
-    }
-}

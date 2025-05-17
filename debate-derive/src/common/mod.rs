@@ -334,7 +334,6 @@ fn compute_placeholder(
 }
 
 /// Attributes for a type. In the future this may split into separate types for
-///
 #[derive(darling::FromAttributes, Debug)]
 #[darling(attributes(debate))]
 pub struct RawParsedTypeAttr {
