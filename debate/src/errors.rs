@@ -5,17 +5,17 @@ use crate::{build, from_args, help::HelpRequest, parameter, state};
 /// A simple argument parsing error type that contains no data. Mostly used for
 /// testing and code examples.
 #[derive(Debug, Clone, Copy, Default)]
-pub struct BasicError;
+pub struct EmptyError;
 
-impl fmt::Display for BasicError {
+impl fmt::Display for EmptyError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "there was an error parsing command-line arguments")
     }
 }
 
-impl core::error::Error for BasicError {}
+impl core::error::Error for EmptyError {}
 
-impl<'arg> parameter::Error<'arg> for BasicError {
+impl<'arg> parameter::Error<'arg> for EmptyError {
     #[inline(always)]
     fn needs_arg() -> Self {
         Self
@@ -52,8 +52,8 @@ impl<'arg> parameter::Error<'arg> for BasicError {
     }
 }
 
-impl<'arg, A> state::Error<'arg, A> for BasicError {
-    type ParameterError = BasicError;
+impl<'arg, A> state::Error<'arg, A> for EmptyError {
+    type ParameterError = EmptyError;
 
     #[inline(always)]
     fn parameter(_: &'static str, _: Self::ParameterError) -> Self {
@@ -86,7 +86,7 @@ impl<'arg, A> state::Error<'arg, A> for BasicError {
     }
 }
 
-impl build::Error for BasicError {
+impl build::Error for EmptyError {
     #[inline(always)]
     fn required(_: &'static str, _: Option<&'static str>, _: Option<char>) -> Self {
         Self
@@ -108,8 +108,8 @@ impl build::Error for BasicError {
     }
 }
 
-impl<'arg> from_args::Error<'arg> for BasicError {
-    type StateError<A> = BasicError;
+impl<'arg> from_args::Error<'arg> for EmptyError {
+    type StateError<A> = EmptyError;
 
     #[inline(always)]
     fn positional(_: &'arg debate_parser::Arg, _: Self) -> Self {
@@ -143,7 +143,6 @@ impl<'arg> from_args::Error<'arg> for BasicError {
 
 #[cfg(feature = "std")]
 mod with_std {
-    #[cfg(feature = "std")]
     use std::{
         borrow::ToOwned,
         boxed::Box,
@@ -391,12 +390,8 @@ mod with_std {
             Self::new_with_source(ParameterSource::Short { option }, error)
         }
 
-        fn and(self, error: Self) -> Self {
-            if self.rank() <= error.rank() {
-                self
-            } else {
-                error
-            }
+        fn and(self, rhs: Self) -> Self {
+            if self.rank() <= rhs.rank() { self } else { rhs }
         }
     }
 }
