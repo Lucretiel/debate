@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use anyhow::Context;
-use debate::{errors::BuildError, from_args::FromArgs, help::Usage as _, printers::DebugUsage};
+use debate::{errors::BuildError, from_args::FromArgs, help::Usage as _};
 use debate_derive::{FromArgs, ParameterUsage, Usage, Value};
 use debate_parser::ArgumentsParser;
 use lazy_format::make_lazy_format;
@@ -82,10 +82,10 @@ fn main() -> anyhow::Result<()> {
         println!("HELLO")
     }
 
-    println!(
-        "usage:\n{}",
-        make_lazy_format!(|fmt| Arguments::describe(&mut DebugUsage::new(fmt)))
-    );
+    // println!(
+    //     "usage:\n{}",
+    //     make_lazy_format!(|fmt| Arguments::describe(&mut DebugUsage::new(fmt)))
+    // );
 
     let args = debate::arguments::LoadedArguments::from_env();
     let args: Result<Arguments, BuildError> = args.try_parse();

@@ -1,6 +1,6 @@
 use heck::ToSnakeCase;
 use proc_macro2::TokenStream as TokenStream2;
-use quote::{format_ident, quote};
+use quote::quote;
 use syn::{Ident, Token, Variant, punctuated::Punctuated};
 
 use crate::{
