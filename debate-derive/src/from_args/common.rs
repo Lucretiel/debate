@@ -444,6 +444,7 @@ pub fn final_field_initializers(
     struct NormalFieldInfo<'a> {
         long: Option<&'a str>,
         short: Option<char>,
+        placeholder: &'a str,
         ident: &'a IdentString<'a>,
         default: &'a FieldDefault,
     }
@@ -456,12 +457,14 @@ pub fn final_field_initializers(
                     ParsedFieldInfo::Positional(field) => FlattenOr::Normal(NormalFieldInfo {
                         long: None,
                         short: None,
+                        placeholder: &field.placeholder,
                         ident: &field.ident,
                         default: &field.default,
                     }),
                     ParsedFieldInfo::Option(field) => FlattenOr::Normal(NormalFieldInfo {
                         long: field.tags.long().as_deref().copied(),
                         short: field.tags.short().as_deref().copied(),
+                        placeholder: &field.placeholder,
                         ident: &field.ident,
                         default: &field.default,
                     }),
@@ -473,27 +476,38 @@ pub fn final_field_initializers(
             FlattenOr::Normal(field) => {
                 let ident = field.ident.raw();
                 let ident_str = field.ident.as_str();
+                let placeholder = field.placeholder;
 
-                let long = match field.long {
-                    Some(long) => quote! {::core::option::Option::Some(#long)},
-                    None => quote! {::core::option::Option::None},
-                };
-
+                // Technically we allocate too eagerly here. It reads better
+                // this way, imo, and we trust the optimizer to reorder a lot
+                // of this stuff so that (for example) the `let error` is only
+                // evaluated in the `FieldDefault::None` case.
                 let short = match field.short {
                     Some(short) => quote! {::core::option::Option::Some(#short)},
                     None => quote! {::core::option::Option::None},
+                };
+
+                let error = match (field.long, field.short) {
+                    (Some(long), _) => quote! {
+                        required_long( #ident_str, #long, #short )
+                    },
+                    (None, Some(short)) => quote! {
+                        required_short( #ident_str, #short )
+                    },
+                    (None, None) => quote! {
+                        required_positional( #ident_str, #placeholder )
+                    },
                 };
 
                 let default = match field.default {
                     FieldDefault::Expr(expr) => quote! { #expr },
                     FieldDefault::Trait => quote! { ::core::default::Default::default() },
                     FieldDefault::None => quote! {
-                    match ::debate::parameter::Parameter::absent() {
-                        ::core::result::Result::Ok(value) => value,
-                        ::core::result::Result::Err(::debate::parameter::RequiredError) =>
-                            return ::core::result::Result::Err(
-                                ::debate::build::Error::required(
-                                    #ident_str, #long, #short
+                        match ::debate::parameter::Parameter::absent() {
+                            ::core::result::Result::Ok(value) => value,
+                            ::core::result::Result::Err(::debate::parameter::RequiredError) => return (
+                                ::core::result::Result::Err(
+                                    ::debate::build::Error:: #error,
                                 )
                             ),
                         }

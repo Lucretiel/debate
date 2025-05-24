@@ -7,10 +7,15 @@ use crate::state;
 /// arguments; errors that are specific to a particular parameter or incoming
 /// argument are handled earlier.
 pub trait Error {
-    /// A required field wasn't present among the command line arguments. If
-    /// the field is a flag or an option, its long and short CLI names are also
-    /// provided
-    fn required(field: &'static str, long: Option<&'static str>, short: Option<char>) -> Self;
+    /// A required long option/flag wasn't present. If the field also includes
+    /// a short flag, it is included.
+    fn required_long(field: &'static str, long: &'static str, short: Option<char>) -> Self;
+
+    /// A required short option/flag field wasn't present.
+    fn required_short(field: &'static str, short: char) -> Self;
+
+    /// A required positional field wasn't present
+    fn required_positional(field: &'static str, placeholder: &'static str) -> Self;
 
     /// There was an error building a flattened field
     fn flattened(field: &'static str, error: Self) -> Self;

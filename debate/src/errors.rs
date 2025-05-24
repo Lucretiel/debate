@@ -88,7 +88,17 @@ impl<'arg, A> state::Error<'arg, A> for EmptyError {
 
 impl build::Error for EmptyError {
     #[inline(always)]
-    fn required(_: &'static str, _: Option<&'static str>, _: Option<char>) -> Self {
+    fn required_long(_field: &'static str, _long: &'static str, _short: Option<char>) -> Self {
+        Self
+    }
+
+    #[inline(always)]
+    fn required_short(_field: &'static str, _short: char) -> Self {
+        Self
+    }
+
+    #[inline(always)]
+    fn required_positional(_field: &'static str, _placeholder: &'static str) -> Self {
         Self
     }
 
@@ -233,6 +243,13 @@ mod with_std {
                 _ => None,
             }
         }
+
+        pub fn flatten(&self) -> &Self {
+            match *self {
+                Self::Flattened { ref error, .. } => error.flatten(),
+                ref this => this,
+            }
+        }
     }
 
     impl<'arg, A> state::Error<'arg, A> for StateError<'arg> {
@@ -287,6 +304,13 @@ mod with_std {
     }
 
     #[derive(Debug, Clone)]
+    pub enum FieldKind {
+        Long(&'static str),
+        Short(char),
+        Positional(&'static str),
+    }
+
+    #[derive(Debug, Clone)]
     pub enum BuildError<'arg> {
         Arg {
             source: ParameterSource<'arg>,
@@ -294,8 +318,7 @@ mod with_std {
         },
         RequiredFieldAbsent {
             field: &'static str,
-            long: Option<&'static str>,
-            short: Option<char>,
+            kind: FieldKind,
         },
         RequiredSubcommand {
             expected: &'static [&'static str],
@@ -304,24 +327,22 @@ mod with_std {
             field: &'static str,
             error: Box<Self>,
         },
-        HelpRequested(HelpRequest),
         Custom(String),
     }
 
     impl<'arg> BuildError<'arg> {
-        pub fn new_with_source(source: ParameterSource<'arg>, error: StateError<'arg>) -> Self {
-            match error {
-                StateError::HelpRequested(help) => Self::HelpRequested(help),
-                error => Self::Arg { source, error },
-            }
-        }
-
         pub fn help_request(&self) -> Option<HelpRequest> {
             match *self {
-                Self::HelpRequested(help) => Some(help),
                 Self::Flattened { ref error, .. } => error.help_request(),
                 Self::Arg { ref error, .. } => error.help_request(),
                 _ => None,
+            }
+        }
+
+        pub fn flatten(&self) -> &Self {
+            match *self {
+                Self::Flattened { ref error, .. } => error.flatten(),
+                ref this => this,
             }
         }
 
@@ -332,17 +353,31 @@ mod with_std {
     }
 
     impl<'arg> build::Error for BuildError<'arg> {
-        fn required(field: &'static str, long: Option<&'static str>, short: Option<char>) -> Self {
-            Self::RequiredFieldAbsent { field, long, short }
+        fn required_long(field: &'static str, long: &'static str, _short: Option<char>) -> Self {
+            Self::RequiredFieldAbsent {
+                field,
+                kind: FieldKind::Long(long),
+            }
+        }
+
+        fn required_short(field: &'static str, short: char) -> Self {
+            Self::RequiredFieldAbsent {
+                field,
+                kind: FieldKind::Short(short),
+            }
+        }
+
+        fn required_positional(field: &'static str, placeholder: &'static str) -> Self {
+            Self::RequiredFieldAbsent {
+                field,
+                kind: FieldKind::Positional(placeholder),
+            }
         }
 
         fn flattened(field: &'static str, error: Self) -> Self {
-            match error {
-                Self::HelpRequested(help) => Self::HelpRequested(help),
-                error => Self::Flattened {
-                    field,
-                    error: Box::new(error),
-                },
+            Self::Flattened {
+                field,
+                error: Box::new(error),
             }
         }
 
@@ -359,7 +394,10 @@ mod with_std {
         type StateError<A> = StateError<'arg>;
 
         fn positional(arg: &'arg Arg, error: StateError<'arg>) -> Self {
-            Self::new_with_source(ParameterSource::Positional { arg }, error)
+            Self::Arg {
+                source: ParameterSource::Positional { arg },
+                error,
+            }
         }
 
         fn long_with_argument(
@@ -367,27 +405,30 @@ mod with_std {
             argument: &'arg Arg,
             error: Self::StateError<()>,
         ) -> Self {
-            Self::new_with_source(
-                ParameterSource::Long {
+            Self::Arg {
+                source: ParameterSource::Long {
                     option,
                     argument: Some(argument),
                 },
                 error,
-            )
+            }
         }
 
         fn long<A>(option: &'arg Arg, error: StateError<'arg>) -> Self {
-            Self::new_with_source(
-                ParameterSource::Long {
+            Self::Arg {
+                source: ParameterSource::Long {
                     option,
                     argument: None,
                 },
                 error,
-            )
+            }
         }
 
         fn short<A>(option: u8, error: StateError<'arg>) -> Self {
-            Self::new_with_source(ParameterSource::Short { option }, error)
+            Self::Arg {
+                source: ParameterSource::Short { option },
+                error,
+            }
         }
 
         fn and(self, rhs: Self) -> Self {

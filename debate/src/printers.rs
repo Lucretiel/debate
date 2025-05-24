@@ -378,3 +378,59 @@
 //         print_group(&mut self.dest, name, usage)
 //     }
 // }
+
+#[cfg(feature = "std")]
+mod with_std {
+    use core::fmt::Display;
+    use std::io;
+
+    use crate::errors::{BuildError, FieldKind, ParameterError, ParameterSource, StateError};
+
+    pub fn printable_source(source: &ParameterSource) -> impl Display {
+
+    }
+
+    pub fn write_error(out: &mut impl io::Write, error: &BuildError) -> io::Result<()> {
+        match error.flatten() {
+            BuildError::Arg { source, error } => match error.flatten() {
+                StateError::Parameter { field, error } => match error {
+                    ParameterError::NeedArgument => todo!(),
+                    ParameterError::FlagGotArgument(arg) => todo!(),
+                    ParameterError::GotAdditionalInstance => todo!(),
+                    ParameterError::ParseError { arg, message } => todo!(),
+                    ParameterError::Custom { message } => todo!(),
+                }
+                StateError::Unrecognized => match source {
+                    ParameterSource::Positional { arg } => {
+                        write!(out, "unrecognized argument {arg:?}")
+                    }
+                    ParameterSource::Short { option } => {
+                        write!(out, "unrecognized option -{option}")
+                    }
+                    ParameterSource::Long { option, .. } => {
+                        write!(out, "unrecognized option --{option:?}")
+                    }
+                },
+                StateError::Flattened { .. } => panic!("error was flattened away"),
+                StateError::UnknownSubcommand { .. } => write!(out, "unrecognized subcommand <TODO: SOURCE>")
+                StateError::WrongSubcommand {
+                    subcommand,
+                    allowed,
+                } => todo!(),
+                StateError::HelpRequested(help_request) => todo!(),
+            },
+            BuildError::RequiredSubcommand { .. } => write!(out, "no subcommand given"),
+            BuildError::RequiredFieldAbsent { kind, .. } => match kind {
+                FieldKind::Long(long) => write! { out, "required option --{long} was omitted" },
+                FieldKind::Short(short) => write! {out, "required option -{short} was omitted" },
+                FieldKind::Positional(placeholder) => {
+                    write! { out, "required argument <{placeholder}> was omitted"}
+                }
+            },
+            BuildError::Flattened { .. } => panic!("error was flattened away"),
+            BuildError::Custom(message) => write!(out, "{message}"),
+        }
+    }
+}
+
+pub use with_std::*;
