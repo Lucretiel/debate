@@ -12,6 +12,7 @@ repository = "https://github.com/Lucretiel/debate"
 debate-parser = { path = "../debate-parser", version = "0.1.0" }
 indent_write = "2.2.0"
 joinery = "3.1.0"
+lazy_format = { version = "2.0.3", default-features = false }
 textwrap = "0.16.1"
 
 # TODO: use a feature gate for usage functionality, since it brings in a lot

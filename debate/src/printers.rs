@@ -381,43 +381,74 @@
 
 #[cfg(feature = "std")]
 mod with_std {
-    use core::fmt::Display;
-    use std::io;
+    use std::{fmt::Display, io};
 
-    use crate::errors::{BuildError, FieldKind, ParameterError, ParameterSource, StateError};
+    use lazy_format::lazy_format;
+
+    use crate::{
+        errors::{BuildError, FieldKind, ParameterError, ParameterSource, StateError},
+        help::{Parameter, Subcommand, UsageItems},
+        parameter,
+    };
 
     pub fn printable_source(source: &ParameterSource) -> impl Display {
-
+        // TODO: the `long` case is current quoted and shouldn't be
+        lazy_format! {
+            match (*source) {
+                ParameterSource::Positional { arg } => "argument {arg:?}",
+                ParameterSource::Short { option } => "option -{option}",
+                ParameterSource::Long { option, .. } => "option --{option:?}",
+            }
+        }
     }
 
     pub fn write_error(out: &mut impl io::Write, error: &BuildError) -> io::Result<()> {
         match error.flatten() {
             BuildError::Arg { source, error } => match error.flatten() {
-                StateError::Parameter { field, error } => match error {
-                    ParameterError::NeedArgument => todo!(),
-                    ParameterError::FlagGotArgument(arg) => todo!(),
-                    ParameterError::GotAdditionalInstance => todo!(),
-                    ParameterError::ParseError { arg, message } => todo!(),
-                    ParameterError::Custom { message } => todo!(),
-                }
-                StateError::Unrecognized => match source {
-                    ParameterSource::Positional { arg } => {
-                        write!(out, "unrecognized argument {arg:?}")
-                    }
-                    ParameterSource::Short { option } => {
-                        write!(out, "unrecognized option -{option}")
-                    }
-                    ParameterSource::Long { option, .. } => {
-                        write!(out, "unrecognized option --{option:?}")
-                    }
+                StateError::Parameter { error, .. } => match error {
+                    ParameterError::NeedArgument => write!(
+                        out,
+                        "{source} requires an argument",
+                        source = printable_source(source)
+                    ),
+                    ParameterError::FlagGotArgument(arg) => write!(
+                        out,
+                        "{source} is doesn't take an argument (got {arg:?})",
+                        source = printable_source(source),
+                    ),
+                    // TODO: this message assumes that, if this error occurs,
+                    // the argument is supposed to appear at most once.``
+                    ParameterError::GotAdditionalInstance => write!(
+                        out,
+                        "{source} appeared more than once",
+                        source = printable_source(source)
+                    ),
+                    ParameterError::ParseError { message, .. } => write!(
+                        out,
+                        "{source}: parse error: {message}",
+                        source = printable_source(source)
+                    ),
+                    ParameterError::Custom { message } => write!(
+                        out,
+                        "{source}: {message}",
+                        source = printable_source(source)
+                    ),
                 },
+                StateError::Unrecognized => write!(
+                    out,
+                    "unrecognized {source}",
+                    source = printable_source(source)
+                ),
                 StateError::Flattened { .. } => panic!("error was flattened away"),
-                StateError::UnknownSubcommand { .. } => write!(out, "unrecognized subcommand <TODO: SOURCE>")
-                StateError::WrongSubcommand {
-                    subcommand,
-                    allowed,
-                } => todo!(),
-                StateError::HelpRequested(help_request) => todo!(),
+                StateError::UnknownSubcommand { .. } => {
+                    write!(out, "unrecognized subcommand <TODO: SOURCE>")
+                }
+                StateError::WrongSubcommand { subcommand, .. } => write!(
+                    out,
+                    "{source} is not valid for subcommand {subcommand:?}",
+                    source = printable_source(source),
+                ),
+                StateError::HelpRequested(..) => write!(out, "usage message was requested"),
             },
             BuildError::RequiredSubcommand { .. } => write!(out, "no subcommand given"),
             BuildError::RequiredFieldAbsent { kind, .. } => match kind {
@@ -430,6 +461,37 @@ mod with_std {
             BuildError::Flattened { .. } => panic!("error was flattened away"),
             BuildError::Custom(message) => write!(out, "{message}"),
         }
+    }
+
+    fn discover_subcommand_usage<'a>(
+        command: &str,
+        items: &'a UsageItems<'a>,
+    ) -> Option<&'a Subcommand<'a>> {
+        match items {
+            UsageItems::Parameters { parameters } => parameters
+                .iter()
+                .filter_map(|parameter| match parameter {
+                    Parameter::Group { contents, .. } => Some(contents),
+                    _ => None,
+                })
+                .find_map(|group| discover_subcommand_usage(command, group)),
+            UsageItems::Subcommands { commands, .. } => {
+                commands.iter().find(|usage| usage.command == command)
+            }
+            UsageItems::Exclusive { .. } => None,
+        }
+    }
+
+    fn print_usage_items(out: &mut impl io::Write, items: &UsageItems<'_>) -> io::Result<()> {
+        
+    }
+
+    pub fn print_usage(
+        out: &mut impl io::Write,
+        command: &str,
+        description: &str,
+        items: &UsageItems<'_>,
+    ) -> io::Result<()> {
     }
 }
 

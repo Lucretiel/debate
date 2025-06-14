@@ -49,6 +49,7 @@ dependencies = [
  "debate-parser",
  "indent_write",
  "joinery",
+ "lazy_format",
  "textwrap",
 ]
 

@@ -64,12 +64,16 @@ where
     where
         Self: Usage,
     {
-        // let mut state = T::State::default();
+        use crate::errors::BuildError;
 
-        // load_state_from_parser(&mut state, arguments)
-        //     .unwrap_or_else(|err: errors::BuildError| todo!());
+        let mut state = T::State::default();
 
-        // Self::build(state).unwrap_or_else(|err: errors::BuildError| todo!()
+        let err: BuildError<'arg> = match load_state_from_parser(state, arguments) {
+            Err(err) => err,
+            Ok(()) => match T::build(state)
+        }
+        let result: Result<(), BuildError<'arg>> = load_state_from_parser(&mut state, arguments);
+
         todo!()
     }
 }
