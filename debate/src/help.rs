@@ -113,13 +113,7 @@ pub enum UsageItems<'a> {
 
 #[derive(Debug, Clone)]
 pub enum Parameter<'a> {
-    Option {
-        description: Description<'a>,
-        requirement: Requirement,
-        repetition: Repetition,
-        argument: Option<ValueParameter<'a>>,
-        tags: Tags<'a>,
-    },
+    Option(ParameterOption<'a>),
     Positional {
         description: Description<'a>,
         requirement: Requirement,
