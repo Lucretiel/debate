@@ -383,6 +383,7 @@
 mod with_std {
     use std::{fmt::Display, io};
 
+    use indent_write::io::IndentWriter;
     use lazy_format::lazy_format;
 
     use crate::{
@@ -482,16 +483,75 @@ mod with_std {
         }
     }
 
-    fn print_usage_items(out: &mut impl io::Write, items: &UsageItems<'_>) -> io::Result<()> {
-        
+    fn print_usage_items(out: &mut impl io::Write, items: &UsageItems<'_>) -> io::Result<()> {}
+
+    fn visit_positionals(items: &UsageItems<'_>, visitor: impl FnMut()) {
+        match *items {
+            UsageItems::Parameters { parameters } => {
+                parameters.iter().for_each(|parameter| match parameter {
+                    Parameter::Option(parameter_option) => {}
+                    Parameter::Positional {
+                        description,
+                        requirement,
+                        repetition,
+                        argument,
+                    } => todo!(),
+                    Parameter::Group {
+                        name,
+                        description,
+                        contents,
+                    } => todo!(),
+                });
+            }
+            UsageItems::Subcommands {
+                requirement,
+                commands,
+            } => todo!(),
+            UsageItems::Exclusive { groups } => todo!(),
+        }
     }
 
+    /*
+    Overall structure:
+
+    DESCRIPTION
+
+    USAGE:
+      command [OPTIONS] <ARG>
+
+    ARGUMENTS:
+      <ARG>
+
+    OPTIONS:
+      -f, --foo   asd
+          --help  asd
+      -g          asd
+
+     */
     pub fn print_usage(
         out: &mut impl io::Write,
         command: &str,
         description: &str,
         items: &UsageItems<'_>,
     ) -> io::Result<()> {
+        let description = description.trim_end();
+        write!(out, "{description}\n\n")?;
+
+        section(out, "Usage", |out| Ok(()))?;
+
+        Ok(())
+    }
+
+    fn section<O: io::Write, T>(
+        out: &mut O,
+        header: &str,
+        body: impl FnOnce(IndentWriter<&mut O>) -> io::Result<T>,
+    ) -> io::Result<T> {
+        writeln!(out, "{header}:")?;
+        let value = body(IndentWriter::new("  ", out))?;
+        writeln!(out)?;
+
+        Ok(value)
     }
 }
 

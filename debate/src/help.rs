@@ -121,8 +121,8 @@ pub enum Parameter<'a> {
         argument: ValueParameter<'a>,
     },
     Group {
-        name: Option<&'a str>,
         description: Description<'a>,
+        name: Option<&'a str>,
         contents: UsageItems<'a>,
     },
 }
