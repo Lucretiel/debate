@@ -1,4 +1,7 @@
-use std::ffi::{OsStr, OsString};
+use std::{
+    ffi::{OsStr, OsString},
+    vec::Vec,
+};
 
 use debate_parser::ArgumentsParser;
 
@@ -9,7 +12,7 @@ use crate::{
 
 #[derive(Debug, Clone)]
 pub struct LoadedArguments {
-    arguments: std::vec::Vec<OsString>,
+    arguments: Vec<OsString>,
 }
 
 impl LoadedArguments {
@@ -39,5 +42,12 @@ impl LoadedArguments {
         E: from_args::Error<'a> + build::Error,
     {
         T::try_from_parser(self.parser())
+    }
+
+    pub fn parse<'a, T>(&'a self) -> T
+    where
+        T: FromArgs<'a>,
+    {
+        todo!()
     }
 }

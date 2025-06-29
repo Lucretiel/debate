@@ -32,7 +32,7 @@ impl<'a> SubcommandChain<'a> {
 
 /// The state associated with a [`BuildFromArgs`] type that is in the middle
 /// of being parsed
-pub trait State<'arg>: Default {
+pub trait State<'arg> {
     fn add_positional<E>(&mut self, argument: &'arg Arg) -> Result<(), E>
     where
         E: Error<'arg, ()>;

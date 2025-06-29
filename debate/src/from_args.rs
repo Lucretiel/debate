@@ -68,13 +68,23 @@ where
 
         let mut state = T::State::default();
 
-        let err: BuildError<'arg> = match load_state_from_parser(state, arguments) {
-            Err(err) => err,
-            Ok(()) => match T::build(state)
-        }
-        let result: Result<(), BuildError<'arg>> = load_state_from_parser(&mut state, arguments);
+        let error: BuildError<'arg> = match load_state_from_parser(&mut state, arguments) {
+            Ok(()) => match Self::build(state) {
+                Ok(parsed) => return parsed,
+                Err(error) => error,
+            },
+            Err(error) => error,
+        };
 
-        todo!()
+        // TODO: if we have a subcommand, show help for that subcommand.
+        // Probably it's gonna make sense to use nested Errors to create a
+        // path to the relevant subcommand for looking up the usage in the
+        // UsageItems we have.
+        if let Some(help) = error.help_request() {
+            todo!("PRINT USAGE")
+        } else {
+            todo!("PRINT ERROR")
+        }
     }
 }
 

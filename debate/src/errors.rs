@@ -166,10 +166,19 @@ mod with_std {
 
     #[derive(Debug, Clone)]
     pub enum ParameterError<'arg> {
+        /// This parameter needs an argument and didn't get one
         NeedArgument,
+
+        /// This parameter is flag; it got an argument and didn't want one
         FlagGotArgument(&'arg Arg),
+
+        /// This parameter appeared more than once or too many times
         GotAdditionalInstance,
+
+        /// Failed to parse the argument
         ParseError { arg: &'arg Arg, message: String },
+
+        /// Something else went wrong
         Custom { message: String },
     }
 
@@ -214,6 +223,8 @@ mod with_std {
         }
     }
 
+    /// Errors that occur when parsing a single item from the command-line
+    /// arguments
     #[derive(Debug, Clone)]
     pub enum StateError<'arg> {
         Parameter {
@@ -221,10 +232,10 @@ mod with_std {
             error: ParameterError<'arg>,
         },
         Unrecognized,
-        Flattened {
-            field: &'static str,
-            error: Box<Self>,
-        },
+        // Flattened {
+        //     field: &'static str,
+        //     error: Box<Self>,
+        // },
         UnknownSubcommand {
             expected: &'static [&'static str],
         },
@@ -239,15 +250,7 @@ mod with_std {
         pub fn help_request(&self) -> Option<HelpRequest> {
             match *self {
                 Self::HelpRequested(help) => Some(help),
-                Self::Flattened { ref error, .. } => error.help_request(),
                 _ => None,
-            }
-        }
-
-        pub fn flatten(&self) -> &Self {
-            match *self {
-                Self::Flattened { ref error, .. } => error.flatten(),
-                ref this => this,
             }
         }
     }
@@ -263,11 +266,8 @@ mod with_std {
             Self::Unrecognized
         }
 
-        fn flattened(field: &'static str, error: Self) -> Self {
-            Self::Flattened {
-                field,
-                error: Box::new(error),
-            }
+        fn flattened(_field: &'static str, error: Self) -> Self {
+            error
         }
 
         fn unknown_subcommand(expected: &'static [&'static str]) -> Self {
@@ -310,6 +310,9 @@ mod with_std {
         Positional(&'static str),
     }
 
+    /// Errors  that occur after all command line arguments have been parsed,
+    /// when trying to assemble the final Args object. This is where things
+    /// like absent required fields are detected.
     #[derive(Debug, Clone)]
     pub enum BuildError<'arg> {
         Arg {
@@ -323,26 +326,18 @@ mod with_std {
         RequiredSubcommand {
             expected: &'static [&'static str],
         },
-        Flattened {
-            field: &'static str,
-            error: Box<Self>,
-        },
+        // Flattened {
+        //     field: &'static str,
+        //     error: Box<Self>,
+        // },
         Custom(String),
     }
 
     impl<'arg> BuildError<'arg> {
         pub fn help_request(&self) -> Option<HelpRequest> {
             match *self {
-                Self::Flattened { ref error, .. } => error.help_request(),
                 Self::Arg { ref error, .. } => error.help_request(),
                 _ => None,
-            }
-        }
-
-        pub fn flatten(&self) -> &Self {
-            match *self {
-                Self::Flattened { ref error, .. } => error.flatten(),
-                ref this => this,
             }
         }
 
@@ -374,11 +369,8 @@ mod with_std {
             }
         }
 
-        fn flattened(field: &'static str, error: Self) -> Self {
-            Self::Flattened {
-                field,
-                error: Box::new(error),
-            }
+        fn flattened(_field: &'static str, error: Self) -> Self {
+            error
         }
 
         fn required_subcommand(expected: &'static [&'static str]) -> Self {

@@ -381,7 +381,10 @@
 
 #[cfg(feature = "std")]
 mod with_std {
-    use std::{fmt::Display, io};
+    use std::{
+        fmt::Display,
+        io::{self, Write as _},
+    };
 
     use indent_write::io::IndentWriter;
     use lazy_format::lazy_format;
@@ -389,7 +392,6 @@ mod with_std {
     use crate::{
         errors::{BuildError, FieldKind, ParameterError, ParameterSource, StateError},
         help::{Parameter, Subcommand, UsageItems},
-        parameter,
     };
 
     pub fn printable_source(source: &ParameterSource) -> impl Display {
@@ -404,8 +406,8 @@ mod with_std {
     }
 
     pub fn write_error(out: &mut impl io::Write, error: &BuildError) -> io::Result<()> {
-        match error.flatten() {
-            BuildError::Arg { source, error } => match error.flatten() {
+        match error {
+            BuildError::Arg { source, error } => match error {
                 StateError::Parameter { error, .. } => match error {
                     ParameterError::NeedArgument => write!(
                         out,
@@ -440,7 +442,6 @@ mod with_std {
                     "unrecognized {source}",
                     source = printable_source(source)
                 ),
-                StateError::Flattened { .. } => panic!("error was flattened away"),
                 StateError::UnknownSubcommand { .. } => {
                     write!(out, "unrecognized subcommand <TODO: SOURCE>")
                 }
@@ -459,7 +460,6 @@ mod with_std {
                     write! { out, "required argument <{placeholder}> was omitted"}
                 }
             },
-            BuildError::Flattened { .. } => panic!("error was flattened away"),
             BuildError::Custom(message) => write!(out, "{message}"),
         }
     }
@@ -483,34 +483,6 @@ mod with_std {
         }
     }
 
-    fn print_usage_items(out: &mut impl io::Write, items: &UsageItems<'_>) -> io::Result<()> {}
-
-    fn visit_positionals(items: &UsageItems<'_>, visitor: impl FnMut()) {
-        match *items {
-            UsageItems::Parameters { parameters } => {
-                parameters.iter().for_each(|parameter| match parameter {
-                    Parameter::Option(parameter_option) => {}
-                    Parameter::Positional {
-                        description,
-                        requirement,
-                        repetition,
-                        argument,
-                    } => todo!(),
-                    Parameter::Group {
-                        name,
-                        description,
-                        contents,
-                    } => todo!(),
-                });
-            }
-            UsageItems::Subcommands {
-                requirement,
-                commands,
-            } => todo!(),
-            UsageItems::Exclusive { groups } => todo!(),
-        }
-    }
-
     /*
     Overall structure:
 
@@ -523,12 +495,15 @@ mod with_std {
       <ARG>
 
     OPTIONS:
-      -f, --foo   asd
+      -f, --foo <ARG>  asd
           --help  asd
       -g          asd
 
+    GROUP:
+      etc
+
      */
-    pub fn print_usage(
+    pub fn print_help(
         out: &mut impl io::Write,
         command: &str,
         description: &str,
@@ -537,7 +512,11 @@ mod with_std {
         let description = description.trim_end();
         write!(out, "{description}\n\n")?;
 
-        section(out, "Usage", |out| Ok(()))?;
+        section(out, "Usage", |mut out| {
+            writeln!(out, "{command} [OPTIONS] [ARGUMENTS]")
+        })?;
+        section(out, "Arguments", |_out| Ok(()))?;
+        section(out, "Options", |_out| Ok(()))?;
 
         Ok(())
     }

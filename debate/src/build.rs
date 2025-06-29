@@ -35,11 +35,11 @@ final type. Types that implement `BuildFromArgs` automatically implement
 
 If you are manually implementing [`FromArgs`], it usually makes sense to
 instead implement [`BuildFromArgs`]. It will take care of the looping logic
-and allow you to focus on individual argument handling, and this will also
-grant compatibility with delegating argument parsing with `#[debate(flatten)]`.
+and allow you to focus on individual argument handling, and will also grant
+compatibility with delegating argument parsing with `#[debate(flatten)]`.
 */
 pub trait BuildFromArgs<'arg>: Sized {
-    type State: state::State<'arg>;
+    type State: state::State<'arg> + Default;
 
     fn build<E>(state: Self::State) -> Result<Self, E>
     where
