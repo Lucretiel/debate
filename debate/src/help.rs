@@ -1,5 +1,3 @@
-use core::marker::PhantomData;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HelpRequest {
     /// There was a request for a succinct usage message, probably via `-h`
@@ -108,23 +106,17 @@ pub enum UsageItems<'a> {
         /// The groups of flags. Each child slice here represents a mutually
         /// exclusive separate group of flags.
         groups: &'a [&'a [ParameterOption<'a>]],
+
+        /// All of the flags recognized by the above groups, deduplicated.
+        options: &'a [ParameterOption<'a>],
     },
 }
 
 #[derive(Debug, Clone)]
 pub enum Parameter<'a> {
     Option(ParameterOption<'a>),
-    Positional {
-        description: Description<'a>,
-        requirement: Requirement,
-        repetition: Repetition,
-        argument: ValueParameter<'a>,
-    },
-    Group {
-        description: Description<'a>,
-        name: Option<&'a str>,
-        contents: UsageItems<'a>,
-    },
+    Positional(ParameterPositional<'a>),
+    Group(ParameterSubgroup<'a>),
 }
 
 #[derive(Debug, Clone)]
@@ -134,6 +126,21 @@ pub struct ParameterOption<'a> {
     pub repetition: Repetition,
     pub argument: Option<ValueParameter<'a>>,
     pub tags: Tags<'a>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ParameterPositional<'a> {
+    pub description: Description<'a>,
+    pub requirement: Requirement,
+    pub repetition: Repetition,
+    pub argument: ValueParameter<'a>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ParameterSubgroup<'a> {
+    pub description: Description<'a>,
+    pub name: Option<&'a str>,
+    pub contents: UsageItems<'a>,
 }
 
 #[derive(Debug, Clone)]

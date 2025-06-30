@@ -232,10 +232,10 @@ mod with_std {
             error: ParameterError<'arg>,
         },
         Unrecognized,
-        // Flattened {
-        //     field: &'static str,
-        //     error: Box<Self>,
-        // },
+        Flattened {
+            field: &'static str,
+            error: Box<Self>,
+        },
         UnknownSubcommand {
             expected: &'static [&'static str],
         },
@@ -250,6 +250,7 @@ mod with_std {
         pub fn help_request(&self) -> Option<HelpRequest> {
             match *self {
                 Self::HelpRequested(help) => Some(help),
+                Self::Flattened { ref error, .. } => error.help_request(),
                 _ => None,
             }
         }
@@ -266,8 +267,11 @@ mod with_std {
             Self::Unrecognized
         }
 
-        fn flattened(_field: &'static str, error: Self) -> Self {
-            error
+        fn flattened(field: &'static str, error: Self) -> Self {
+            Self::Flattened {
+                field,
+                error: Box::new(error),
+            }
         }
 
         fn unknown_subcommand(expected: &'static [&'static str]) -> Self {
@@ -326,10 +330,10 @@ mod with_std {
         RequiredSubcommand {
             expected: &'static [&'static str],
         },
-        // Flattened {
-        //     field: &'static str,
-        //     error: Box<Self>,
-        // },
+        Flattened {
+            field: &'static str,
+            error: Box<Self>,
+        },
         Custom(String),
     }
 
@@ -337,6 +341,7 @@ mod with_std {
         pub fn help_request(&self) -> Option<HelpRequest> {
             match *self {
                 Self::Arg { ref error, .. } => error.help_request(),
+                Self::Flattened { ref error, .. } => error.help_request(),
                 _ => None,
             }
         }
@@ -369,8 +374,11 @@ mod with_std {
             }
         }
 
-        fn flattened(_field: &'static str, error: Self) -> Self {
-            error
+        fn flattened(field: &'static str, error: Self) -> Self {
+            Self::Flattened {
+                field,
+                error: Box::new(error),
+            }
         }
 
         fn required_subcommand(expected: &'static [&'static str]) -> Self {

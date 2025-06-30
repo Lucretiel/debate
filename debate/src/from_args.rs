@@ -64,13 +64,19 @@ where
     where
         Self: Usage,
     {
-        use crate::errors::BuildError;
+        use crate::{errors::BuildError, printers};
+        use std::{
+            io::{Write, stderr, stdout},
+            process::exit,
+        };
 
         let mut state = T::State::default();
 
         let error: BuildError<'arg> = match load_state_from_parser(&mut state, arguments) {
             Ok(()) => match Self::build(state) {
                 Ok(parsed) => return parsed,
+                // TODO: We'll need a separate error-handling branch here,
+                // because the state was passed by-move at this point.
                 Err(error) => error,
             },
             Err(error) => error,
@@ -80,11 +86,27 @@ where
         // Probably it's gonna make sense to use nested Errors to create a
         // path to the relevant subcommand for looking up the usage in the
         // UsageItems we have.
-        if let Some(help) = error.help_request() {
-            todo!("PRINT USAGE")
+        let code = if let Some(_help) = error.help_request() {
+            printers::print_help(
+                &mut stdout().lock(),
+                Self::NAME,
+                Self::DESCRIPTION.long,
+                &Self::ITEMS,
+            )
+            .expect("i/o error");
+            0
         } else {
-            todo!("PRINT ERROR")
-        }
+            // TODO: Print a usage message. Find a way to make the usage message
+            // include just the error'd value, if any.
+            let mut stderr = stderr().lock();
+            printers::write_build_error(&mut stderr, &error)
+                .and_then(|()| writeln!(stderr))
+                .expect("i/o error");
+
+            1
+        };
+
+        exit(code);
     }
 }
 
