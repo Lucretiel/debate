@@ -11,7 +11,7 @@ mod with_std {
 
     use crate::{
         errors::{BuildError, FieldKind, ParameterError, ParameterSource, StateError},
-        help::{Parameter, Subcommand, UsageItems},
+        help::{Parameter, Repetition, Requirement, Subcommand, UsageItems},
         printers::visitors,
     };
 
@@ -153,10 +153,41 @@ mod with_std {
         let description = description.trim_end();
         write!(out, "{description}\n\n")?;
 
+        match items {
+            UsageItems::Parameters { parameters } => todo!(),
+            UsageItems::Subcommands { requirement, commands } => todo!(),
+            UsageItems::Exclusive { groups, options } => todo!(),
+        }
+
         section(out, "Usage", |mut out| {
             writeln!(out, "{command} [OPTIONS] [ARGUMENTS]")
         })?;
-        section(out, "Arguments", |_out| Ok(()))?;
+
+        let has_positionals = visitors::visit_positionals(items, &mut |_arg| Err(())).is_err();
+
+        if has_positionals {
+            section(out, "Arguments", |mut out| {
+                visitors::visit_positionals(items, &mut |positional| {
+                    let name = positional.argument.placeholder;
+
+                    let name = lazy_format! {match ((positional.requirement, positional.repetition)) {
+                        (Requirement::Optional, Repetition::Single) => "[{name}]",
+                        (Requirement::Mandatory, Repetition::Single) => "<{name}>",
+                        (Requirement::Optional, Repetition::Multiple) => "[{name}...]",
+                        (Requirement::Mandatory, Repetition::Multiple) => "<{name}>...",
+                    }};
+
+                    writeln!(out, "{name}")?;
+
+                    if !positional.description.long.is_empty() {
+                        let mut out = IndentWriter::new("  ", &mut out);
+                        writeln!(out, "{}", positional.description.long)?;
+                    }
+
+                    Ok(())
+                })
+            })?;
+        }
 
         let has_options = visitors::visit_options(items, &mut |_opt| Err(())).is_err();
 
@@ -206,9 +237,27 @@ mod with_std {
 mod visitors {
     use core::ops::ControlFlow;
 
-    use crate::help::{Parameter, ParameterOption, ParameterSubgroup, UsageItems};
+    use crate::help::{
+        Parameter, ParameterOption, ParameterPositional, ParameterSubgroup, UsageItems,
+    };
 
-    pub fn visit_positionals() {}
+    pub fn visit_positionals<'a, 'i, E>(
+        items: &'a UsageItems<'i>,
+        visitor: &mut impl FnMut(&'a ParameterPositional<'i>) -> Result<(), E>,
+    ) -> Result<(), E> {
+        match items {
+            UsageItems::Parameters { parameters } => {
+                parameters.iter().try_for_each(|parameter| match parameter {
+                    Parameter::Positional(arg) => visitor(arg),
+                    Parameter::Group(group) if group.name.is_none() => {
+                        visit_positionals(&group.contents, visitor)
+                    }
+                    Parameter::Option(_) | Parameter::Group(_) => Ok(()),
+                })
+            }
+            UsageItems::Exclusive { .. } | UsageItems::Subcommands { .. } => Ok(()),
+        }
+    }
 
     pub fn visit_options<'a, 'i, E>(
         items: &'a UsageItems<'i>,
@@ -221,7 +270,7 @@ mod visitors {
                     Parameter::Group(group) if group.name.is_none() => {
                         visit_options(&group.contents, visitor)
                     }
-                    Parameter::Positional { .. } | Parameter::Group { .. } => Ok(()),
+                    Parameter::Positional(_) | Parameter::Group(_) => Ok(()),
                 })
             }
             UsageItems::Subcommands { .. } => Ok(()),
