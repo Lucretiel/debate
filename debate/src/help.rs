@@ -10,6 +10,7 @@ pub enum HelpRequest {
     Full,
 }
 
+#[non_exhaustive]
 /// A description of something, like a parameter or subcommand
 #[derive(Debug, Clone, Copy)]
 pub struct Description<'a> {
@@ -30,30 +31,46 @@ impl<'a> Description<'a> {
             long: description,
         }
     }
+
+    #[inline]
+    #[must_use]
+    pub const fn get(&self, style: HelpRequest) -> &'a str {
+        match style {
+            HelpRequest::Succinct => self.short,
+            HelpRequest::Full => self.long,
+        }
+    }
 }
 
-/// Description of a single value accepted as an argument (positional or option)
+/// For a parameter that takes a value, this describes some aspects of that
+/// value.
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy)]
 pub struct ValueParameter<'a> {
-    /// The name of the argument itself. Typically capitalized.
+    /// The display name of the value itself. Typically capitalized.
     ///
     /// `[--option VALUE]`, the placeholder is `VALUE`
     pub placeholder: &'a str,
 
-    /// If given, the set of possible values that this argument can be.
+    /// If given, the set of possible values that this value can be.
     pub values: Option<&'a [&'a str]>,
 }
 
-/// The set of tags that identify a particular option or tag
-/// (`-short`, `--long`)
+/// The set of tags that identify a particular option (`-short`, `--long`)
 #[derive(Debug, Clone, Copy)]
 pub enum Tags<'a> {
+    /// This parameter uses only a long tag
     Long { long: &'a str },
+
+    /// This parameter uses only a short tag
     Short { short: char },
+
+    /// This parameter uses both a long and short tag
     LongShort { long: &'a str, short: char },
 }
 
 impl<'a> Tags<'a> {
+    /// Get the long tag, if any
     #[inline]
     #[must_use]
     pub const fn long(&self) -> Option<&'a str> {
@@ -63,6 +80,7 @@ impl<'a> Tags<'a> {
         }
     }
 
+    /// Get the short tag, if any
     #[inline]
     #[must_use]
     pub const fn short(&self) -> Option<char> {
@@ -73,11 +91,13 @@ impl<'a> Tags<'a> {
     }
 }
 
+/// A comprehensive description of the CLI parameters for a given `FromArgs`
+/// type. A type's `Usage` is used to create a `--help` usage message.
 pub trait Usage {
-    /// The name of the command.
+    /// The name of the command. Can be replaced with argv[0].
     const NAME: &'static str;
 
-    /// The top-level description of the whole command.
+    /// The top-level text description of the whole command.
     const DESCRIPTION: Description<'static>;
 
     /// The items (parameters, subcommands, and so on) in this command.
@@ -102,24 +122,37 @@ pub enum UsageItems<'a> {
         commands: &'a [Subcommand<'a>],
     },
 
-    /// This usage describes mutually sets of flags, where exactly one set of
-    /// flags must be present
+    /// This usage describes mutually sets of options, where exactly one set of
+    /// options must be present
     Exclusive {
-        /// The groups of flags. Each child slice here represents a mutually
+        /// The groups of options. Each child slice here represents a mutually
         /// exclusive separate group of flags.
         groups: &'a [&'a [ParameterOption<'a>]],
+
+        /// The complete set of options. Options may appear in more than one
+        /// group (so long as they're identical); so this list deduplicates
+        /// them.
+        all_options: &'a [ParameterOption<'a>],
     },
 }
 
+/// Usage information for a single parameter
 #[derive(Debug, Clone)]
 pub enum Parameter<'a> {
+    /// This parameter is a `--option`
     Option(ParameterOption<'a>),
+
+    /// This is a positional parameter
     Positional {
         description: Description<'a>,
         requirement: Requirement,
         repetition: Repetition,
         argument: ValueParameter<'a>,
     },
+
+    /// This is a group of additional usage items. It may be additional
+    /// parameters, or a subcommand, or anything else like that. Conceptually
+    /// it's a nested `FromArgs` object.
     Group {
         description: Description<'a>,
         name: Option<&'a str>,
@@ -127,6 +160,7 @@ pub enum Parameter<'a> {
     },
 }
 
+/// Details about a specific
 #[derive(Debug, Clone)]
 pub struct ParameterOption<'a> {
     pub description: Description<'a>,
@@ -166,14 +200,14 @@ pub trait ParameterUsage {
 /// on the command line, if any.
 #[derive(Debug, Clone, Copy)]
 pub enum ParameterValueKind {
-    /// This parameter behaves like a flag; it doesn't take any arguments
+    /// This parameter behaves like a flag; it doesn't take any arguments.
     Flag,
 
-    /// This parameter takes arguments
+    /// This parameter takes argument(s).
     Value,
 
     /// This parameter takes arguments, which should be one of these specific
-    /// values
+    /// values.
     OneOf(&'static [&'static str]),
 }
 

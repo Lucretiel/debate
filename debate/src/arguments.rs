@@ -8,6 +8,8 @@ use debate_parser::ArgumentsParser;
 use crate::{
     build,
     from_args::{self, FromArgs},
+    help::Usage,
+
 };
 
 #[derive(Debug, Clone)]
@@ -46,8 +48,8 @@ impl LoadedArguments {
 
     pub fn parse<'a, T>(&'a self) -> T
     where
-        T: FromArgs<'a>,
+        T: FromArgs<'a> + Usage,
     {
-        todo!()
+        T::from_parser(self.parser())
     }
 }

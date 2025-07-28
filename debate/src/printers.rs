@@ -386,19 +386,23 @@ mod with_std {
         io::{self, Write as _},
     };
 
+    use indent_write::indentable::Indentable as _;
     use indent_write::io::IndentWriter;
     use lazy_format::lazy_format;
 
     use crate::{
         errors::{BuildError, FieldKind, ParameterError, ParameterSource, StateError},
-        help::{Parameter, Subcommand, UsageItems},
+        help::{
+            Description, HelpRequest, Parameter, ParameterOption, Repetition, Requirement,
+            Subcommand, Tags, Usage, UsageItems, ValueParameter,
+        },
     };
 
     pub fn printable_source(source: &ParameterSource) -> impl Display {
         // TODO: the `long` case is current quoted and shouldn't be
         lazy_format! {
             match (*source) {
-                ParameterSource::Positional { arg } => "argument {arg:?}",
+                ParameterSource::Positional { arg } => "positional argument {arg:?}",
                 ParameterSource::Short { option } => "option -{option}",
                 ParameterSource::Long { option, .. } => "option --{option:?}",
             }
@@ -426,9 +430,9 @@ mod with_std {
                         "{source} appeared more than once",
                         source = printable_source(source)
                     ),
-                    ParameterError::ParseError { message, .. } => write!(
+                    ParameterError::ParseError { message, arg } => write!(
                         out,
-                        "{source}: parse error: {message}",
+                        "{source}: failed to parse {arg:?}: {message}",
                         source = printable_source(source)
                     ),
                     ParameterError::Custom { message } => write!(
@@ -495,7 +499,7 @@ mod with_std {
       <ARG>
 
     OPTIONS:
-      -f, --foo <ARG>  asd
+      -f, --foo <ARG>asd
           --help  asd
       -g          asd
 
@@ -512,16 +516,101 @@ mod with_std {
         let description = description.trim_end();
         write!(out, "{description}\n\n")?;
 
-        section(out, "Usage", |mut out| {
+        section(out, "Synopsis", |mut out| {
+            // TODO: fix
             writeln!(out, "{command} [OPTIONS] [ARGUMENTS]")
         })?;
-        section(out, "Arguments", |_out| Ok(()))?;
-        section(out, "Options", |_out| Ok(()))?;
 
-        Ok(())
+        // TODO: for ungrouped options and arguments at the top level, group
+        // them.
+
+        print_usage_items(out, items)
     }
 
-    fn section<O: io::Write, T>(
+    fn print_usage_items(
+        out: &mut (impl io::Write + ?Sized),
+        items: &UsageItems<'_>,
+    ) -> io::Result<()> {
+        match *items {
+            UsageItems::Parameters { parameters } => print_parameters(out, parameters),
+            UsageItems::Subcommands { commands, .. } => commands.iter().try_for_each(|command| {
+                describe(
+                    out,
+                    command.command,
+                    &command.description,
+                    HelpRequest::Full,
+                )
+            }),
+            UsageItems::Exclusive { .. } => {
+                todo!()
+            }
+        }
+    }
+
+    fn print_parameters<'a>(
+        out: &mut (impl io::Write + ?Sized),
+        parameters: impl IntoIterator<Item = &'a Parameter<'a>>,
+    ) -> io::Result<()> {
+        parameters
+            .into_iter()
+            .try_for_each(|parameter| match *parameter {
+                Parameter::Option(ParameterOption {
+                    ref description,
+                    ref argument,
+                    ref tags,
+                    ..
+                }) => {
+                    // TODO: find a way to express the repetition and
+                    // requirement for an option
+                    let tags = lazy_format!(match (*tags) {
+                        Tags::Short { short } => "-{short}",
+                        Tags::Long { long } => "    --{long}",
+                        Tags::LongShort { short, long } => "-{short}, --{long}",
+                    });
+
+                    let tags = lazy_format!(match (*argument) {
+                        None => "{tags}",
+                        Some(ValueParameter { placeholder, .. }) => "{tags} <{placeholder}>",
+                    });
+
+                    describe(out, tags, description, HelpRequest::Full)
+                }
+                Parameter::Positional {
+                    ref description,
+                    requirement,
+                    repetition,
+                    ref argument,
+                } => {
+                    let placeholder = argument.placeholder;
+
+                    let name = lazy_format!(match ((requirement, repetition)) {
+                        (Requirement::Mandatory, Repetition::Single) => "<{placeholder}>",
+                        (Requirement::Mandatory, Repetition::Multiple) => "<{placeholder}>...",
+                        (Requirement::Optional, Repetition::Single) => "[{placeholder}]",
+                        (Requirement::Optional, Repetition::Multiple) => "[{placeholder}...]",
+                    });
+
+                    describe(out, name, description, HelpRequest::Full)
+                }
+                Parameter::Group {
+                    description,
+                    name,
+                    ref contents,
+                } => match name {
+                    None => print_usage_items(out, contents),
+                    Some(name) => {
+                        section(out, name, |mut out| {
+                            // This is necessary to avoid an unbounded recursion of
+                            // nested types
+                            let out: &mut dyn io::Write = &mut out;
+                            print_usage_items(out, contents)
+                        })
+                    }
+                },
+            })
+    }
+
+    fn section<O: io::Write + ?Sized, T>(
         out: &mut O,
         header: &str,
         body: impl FnOnce(IndentWriter<&mut O>) -> io::Result<T>,
@@ -531,6 +620,23 @@ mod with_std {
         writeln!(out)?;
 
         Ok(value)
+    }
+
+    fn describe(
+        out: &mut (impl io::Write + ?Sized),
+        item: impl Display,
+        description: &Description<'_>,
+        style: HelpRequest,
+    ) -> io::Result<()> {
+        writeln!(out, "{item}")?;
+        let description = description.get(style).trim();
+
+        if !description.is_empty() {
+            let mut out = IndentWriter::new("      ", out);
+            writeln!(out, "{description}\n")?;
+        }
+
+        Ok(())
     }
 }
 

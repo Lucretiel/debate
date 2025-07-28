@@ -49,7 +49,7 @@ pub fn struct_usage_items(parsed_fields: &[ParsedFieldInfo<'_>], help: HelpOptio
             let docs = field.docs.as_str();
 
             quote! {
-                ::debate::help::Parameter::Option {
+                ::debate::help::Parameter::Option(::debate::help::ParameterOption {
                     description: ::debate::help::Description::new(#docs),
                     requirement: match #defaulted {
                         true => ::debate::help::Requirement::Optional,
@@ -59,7 +59,7 @@ pub fn struct_usage_items(parsed_fields: &[ParsedFieldInfo<'_>], help: HelpOptio
                     argument: <#ty as ::debate::help::ParameterUsage>::VALUE
                         .as_maybe_value_parameter(#placeholder),
                     tags: ::debate::help::Tags:: #tags,
-                }
+                })
             }
         }
         ParsedFieldInfo::Flatten(FlattenFieldInfo { ty, ident, docs }) => {
@@ -83,13 +83,13 @@ pub fn struct_usage_items(parsed_fields: &[ParsedFieldInfo<'_>], help: HelpOptio
         let tags = compute_usage_tags(&tags);
 
         quote! {
-            ::debate::help::Parameter::Option {
+            ::debate::help::Parameter::Option(::debate::help::ParameterOption {
                 description: ::debate::help::Description::new("Show usage information"),
                 requirement: ::debate::help::Requirement::Optional,
                 repetition: ::debate::help::Repetition::Single,
                 argument: ::core::option::Option::None,
                 tags: ::debate::help::Tags:: #tags,
-            },
+            }),
         }
     });
 

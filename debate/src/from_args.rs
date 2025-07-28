@@ -64,10 +64,15 @@ where
     where
         Self: Usage,
     {
+        use std::{io, process};
+
         use crate::errors::BuildError;
+        use crate::printers::{print_help, write_error};
 
         let mut state = T::State::default();
 
+        // TODO: this is going to need to be refactored later, because usage
+        // messages in some cases will make use of the state.
         let error: BuildError<'arg> = match load_state_from_parser(&mut state, arguments) {
             Ok(()) => match Self::build(state) {
                 Ok(parsed) => return parsed,
@@ -80,10 +85,20 @@ where
         // Probably it's gonna make sense to use nested Errors to create a
         // path to the relevant subcommand for looking up the usage in the
         // UsageItems we have.
-        if let Some(help) = error.help_request() {
-            todo!("PRINT USAGE")
+        if let Some(_) = error.help_request() {
+            use crate::printers::print_help;
+
+            print_help(
+                &mut io::stdout().lock(),
+                Self::NAME,
+                Self::DESCRIPTION.long,
+                &Self::ITEMS,
+            )
+            .unwrap();
+            process::exit(0);
         } else {
-            todo!("PRINT ERROR")
+            write_error(&mut io::stderr().lock(), &error).unwrap();
+            process::exit(1);
         }
     }
 }

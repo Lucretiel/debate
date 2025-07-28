@@ -6,7 +6,7 @@ use debate_derive::{FromArgs, ParameterUsage, Usage, Value};
 use debate_parser::ArgumentsParser;
 use lazy_format::make_lazy_format;
 
-#[derive(FromArgs, Debug)]
+#[derive(FromArgs, Usage, Debug)]
 #[debate(help)]
 struct Arguments {
     #[debate(short, long = "foo")]
@@ -30,7 +30,7 @@ struct Arguments {
     extra: Option<String>,
 }
 
-#[derive(FromArgs, Debug)]
+#[derive(FromArgs, Usage, Debug)]
 struct Alphabet {
     #[debate(long, short, default)]
     alpha: u32,
@@ -61,7 +61,7 @@ enum FlagChoice {
     OutFile(PathBuf),
 }
 
-#[derive(FromArgs, Debug)]
+#[derive(FromArgs, Usage, Debug)]
 #[debate(subcommand)]
 enum Subcommand {
     #[debate(fallback)]
@@ -78,14 +78,8 @@ enum Subcommand {
 }
 
 fn main() -> anyhow::Result<()> {
-    fn main() {
-        println!("HELLO")
-    }
-
     let args = debate::arguments::LoadedArguments::from_env();
-    let args: Result<Arguments, BuildError> = args.try_parse();
-
-    let args = args.expect("parse error");
+    let args: Arguments = args.parse();
 
     println!("{args:#?}");
 
