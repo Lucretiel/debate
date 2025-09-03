@@ -29,7 +29,7 @@ pub fn struct_usage_items(parsed_fields: &[ParsedFieldInfo<'_>], help: HelpOptio
             let docs = field.docs.as_str();
 
             quote! {
-                ::debate::help::Parameter::Positional {
+                ::debate::help::Parameter::Positional(::debate::help::ParameterPositional {
                     description: ::debate::help::Description::new(#docs),
                     requirement: match (#defaulted) {
                         true => ::debate::help::Requirement::Optional,
@@ -38,7 +38,7 @@ pub fn struct_usage_items(parsed_fields: &[ParsedFieldInfo<'_>], help: HelpOptio
                     repetition: <#ty as ::debate::help::ParameterUsage>::REPETITION,
                     argument: <#ty as ::debate::help::ParameterUsage>::VALUE
                         .as_value_parameter(#placeholder),
-                }
+                })
             }
         }
         ParsedFieldInfo::Option(field) => {
@@ -70,11 +70,11 @@ pub fn struct_usage_items(parsed_fields: &[ParsedFieldInfo<'_>], help: HelpOptio
             };
 
             quote! {
-                ::debate::help::Parameter::Group {
+                ::debate::help::Parameter::Group(::debate::help::ParameterSubgroup {
                     name: #name,
                     description: ::debate::help::Description::new(#docs),
                     contents: <#ty as ::debate::help::Usage>::ITEMS,
-                }
+                })
             }
         }
     });

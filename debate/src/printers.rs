@@ -393,8 +393,9 @@ mod with_std {
     use crate::{
         errors::{BuildError, FieldKind, ParameterError, ParameterSource, StateError},
         help::{
-            Description, HelpRequest, Parameter, ParameterOption, Repetition, Requirement,
-            Subcommand, Tags, Usage, UsageItems, ValueParameter,
+            Description, HelpRequest, Parameter, ParameterOption, ParameterPositional,
+            ParameterSubgroup, Repetition, Requirement, Subcommand, Tags, Usage, UsageItems,
+            ValueParameter,
         },
     };
 
@@ -409,53 +410,71 @@ mod with_std {
         }
     }
 
-    pub fn write_error(out: &mut impl io::Write, error: &BuildError) -> io::Result<()> {
+    pub fn write_parameter_error(
+        out: &mut impl io::Write,
+        source: &ParameterSource,
+        error: &ParameterError,
+    ) -> io::Result<()> {
         match error {
-            BuildError::Arg { source, error } => match error {
-                StateError::Parameter { error, .. } => match error {
-                    ParameterError::NeedArgument => write!(
-                        out,
-                        "{source} requires an argument",
-                        source = printable_source(source)
-                    ),
-                    ParameterError::FlagGotArgument(arg) => write!(
-                        out,
-                        "{source} is doesn't take an argument (got {arg:?})",
-                        source = printable_source(source),
-                    ),
-                    // TODO: this message assumes that, if this error occurs,
-                    // the argument is supposed to appear at most once.``
-                    ParameterError::GotAdditionalInstance => write!(
-                        out,
-                        "{source} appeared more than once",
-                        source = printable_source(source)
-                    ),
-                    ParameterError::ParseError { message, arg } => write!(
-                        out,
-                        "{source}: failed to parse {arg:?}: {message}",
-                        source = printable_source(source)
-                    ),
-                    ParameterError::Custom { message } => write!(
-                        out,
-                        "{source}: {message}",
-                        source = printable_source(source)
-                    ),
-                },
-                StateError::Unrecognized => write!(
-                    out,
-                    "unrecognized {source}",
-                    source = printable_source(source)
-                ),
-                StateError::UnknownSubcommand { .. } => {
-                    write!(out, "unrecognized subcommand <TODO: SOURCE>")
-                }
-                StateError::WrongSubcommand { subcommand, .. } => write!(
-                    out,
-                    "{source} is not valid for subcommand {subcommand:?}",
-                    source = printable_source(source),
-                ),
-                StateError::HelpRequested(..) => write!(out, "usage message was requested"),
-            },
+            ParameterError::NeedArgument => write!(
+                out,
+                "{source} requires an argument",
+                source = printable_source(source)
+            ),
+            ParameterError::FlagGotArgument(arg) => write!(
+                out,
+                "{source} is doesn't take an argument (got {arg:?})",
+                source = printable_source(source),
+            ),
+            // TODO: this message assumes that, if this error occurs,
+            // the argument is supposed to appear at most once. Might be
+            // worth including information here about the maximum permitted
+            // instances.
+            ParameterError::GotAdditionalInstance => write!(
+                out,
+                "{source} appeared more than once",
+                source = printable_source(source)
+            ),
+            ParameterError::ParseError { message, arg } => write!(
+                out,
+                "{source}: failed to parse {arg:?}: {message}",
+                source = printable_source(source)
+            ),
+            ParameterError::Custom { message } => write!(
+                out,
+                "{source}: {message}",
+                source = printable_source(source)
+            ),
+        }
+    }
+
+    pub fn write_state_error(
+        out: &mut impl io::Write,
+        source: &ParameterSource,
+        error: &StateError<'_>,
+    ) -> io::Result<()> {
+        match error {
+            StateError::Parameter { error, .. } => write_parameter_error(out, source, error),
+            StateError::Unrecognized => write!(
+                out,
+                "unrecognized {source}",
+                source = printable_source(source)
+            ),
+            StateError::UnknownSubcommand { .. } => {
+                write!(out, "unrecognized subcommand <TODO: SOURCE>")
+            }
+            StateError::WrongSubcommand { subcommand, .. } => write!(
+                out,
+                "{source} is not valid for subcommand {subcommand:?}",
+                source = printable_source(source),
+            ),
+            StateError::HelpRequested(..) => write!(out, "usage message was requested"),
+        }
+    }
+
+    pub fn write_build_error(out: &mut impl io::Write, error: &BuildError) -> io::Result<()> {
+        match error {
+            BuildError::Arg { source, error } => write_state_error(out, source, error),
             BuildError::RequiredSubcommand { .. } => write!(out, "no subcommand given"),
             BuildError::RequiredFieldAbsent { kind, .. } => match kind {
                 FieldKind::Long(long) => write! { out, "required option --{long} was omitted" },
@@ -476,7 +495,7 @@ mod with_std {
             UsageItems::Parameters { parameters } => parameters
                 .iter()
                 .filter_map(|parameter| match parameter {
-                    Parameter::Group { contents, .. } => Some(contents),
+                    Parameter::Group(ParameterSubgroup { contents, .. }) => Some(contents),
                     _ => None,
                 })
                 .find_map(|group| discover_subcommand_usage(command, group)),
@@ -575,12 +594,12 @@ mod with_std {
 
                     describe(out, tags, description, HelpRequest::Full)
                 }
-                Parameter::Positional {
+                Parameter::Positional(ParameterPositional {
                     ref description,
                     requirement,
                     repetition,
                     ref argument,
-                } => {
+                }) => {
                     let placeholder = argument.placeholder;
 
                     let name = lazy_format!(match ((requirement, repetition)) {
@@ -592,11 +611,11 @@ mod with_std {
 
                     describe(out, name, description, HelpRequest::Full)
                 }
-                Parameter::Group {
+                Parameter::Group(ParameterSubgroup {
                     description,
                     name,
                     ref contents,
-                } => match name {
+                }) => match name {
                     None => print_usage_items(out, contents),
                     Some(name) => {
                         section(out, name, |mut out| {

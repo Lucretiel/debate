@@ -143,21 +143,8 @@ pub enum Parameter<'a> {
     Option(ParameterOption<'a>),
 
     /// This is a positional parameter
-    Positional {
-        description: Description<'a>,
-        requirement: Requirement,
-        repetition: Repetition,
-        argument: ValueParameter<'a>,
-    },
-
-    /// This is a group of additional usage items. It may be additional
-    /// parameters, or a subcommand, or anything else like that. Conceptually
-    /// it's a nested `FromArgs` object.
-    Group {
-        description: Description<'a>,
-        name: Option<&'a str>,
-        contents: UsageItems<'a>,
-    },
+    Positional(ParameterPositional<'a>),
+    Group(ParameterSubgroup<'a>),
 }
 
 /// Details about a specific
@@ -168,6 +155,21 @@ pub struct ParameterOption<'a> {
     pub repetition: Repetition,
     pub argument: Option<ValueParameter<'a>>,
     pub tags: Tags<'a>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ParameterPositional<'a> {
+    pub description: Description<'a>,
+    pub requirement: Requirement,
+    pub repetition: Repetition,
+    pub argument: ValueParameter<'a>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ParameterSubgroup<'a> {
+    pub description: Description<'a>,
+    pub name: Option<&'a str>,
+    pub contents: UsageItems<'a>,
 }
 
 #[derive(Debug, Clone)]

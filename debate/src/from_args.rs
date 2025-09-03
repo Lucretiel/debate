@@ -67,7 +67,7 @@ where
         use std::{io, process};
 
         use crate::errors::BuildError;
-        use crate::printers::{print_help, write_error};
+        use crate::printers::{print_help, write_build_error};
 
         let mut state = T::State::default();
 
@@ -97,7 +97,9 @@ where
             .unwrap();
             process::exit(0);
         } else {
-            write_error(&mut io::stderr().lock(), &error).unwrap();
+            // TODO: print a usage message here, perhaps one that specifically
+            // accounts the flag that caused the error
+            write_build_error(&mut io::stderr().lock(), &error).unwrap();
             process::exit(1);
         }
     }
