@@ -62,16 +62,29 @@ pub fn struct_usage_items(parsed_fields: &[ParsedFieldInfo<'_>], help: HelpOptio
                 })
             }
         }
-        ParsedFieldInfo::Flatten(FlattenFieldInfo { ty, ident, docs }) => {
-            let name = ident.as_ref().map(|ident| ident.as_str());
+        ParsedFieldInfo::Flatten(FlattenFieldInfo {
+            ty,
+            docs,
+            group_name,
+            placeholder,
+            ..
+        }) => {
+            let name = group_name.as_ref().map(|name| name.as_str());
             let name = match name {
                 None => quote! { ::core::option::Option::None },
                 Some(name) => quote! { ::core::option::Option::Some(#name) },
             };
 
+            let placeholder = placeholder.as_ref().map(|placeholder| placeholder.as_str());
+            let placeholder = match placeholder {
+                None => quote! { ::core::option::Option::None },
+                Some(placeholder) => quote! { ::core::option::Option::Some(#placeholder) },
+            };
+
             quote! {
                 ::debate::help::Parameter::Group(::debate::help::ParameterSubgroup {
                     name: #name,
+                    placeholder: #placeholder,
                     description: ::debate::help::Description::new(#docs),
                     contents: <#ty as ::debate::help::Usage>::ITEMS,
                 })

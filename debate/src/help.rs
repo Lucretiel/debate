@@ -147,6 +147,29 @@ pub enum Parameter<'a> {
     Group(ParameterSubgroup<'a>),
 }
 
+impl<'a> Parameter<'a> {
+    pub fn as_option(&self) -> Option<&ParameterOption<'a>> {
+        match self {
+            Parameter::Option(opt) => Some(opt),
+            _ => None,
+        }
+    }
+
+    pub fn as_positional(&self) -> Option<&ParameterPositional<'a>> {
+        match self {
+            Parameter::Positional(pos) => Some(pos),
+            _ => None,
+        }
+    }
+
+    pub fn as_subgroup(&self) -> Option<&ParameterSubgroup<'a>> {
+        match self {
+            Parameter::Group(group) => Some(group),
+            _ => None,
+        }
+    }
+}
+
 /// Details about a specific
 #[derive(Debug, Clone)]
 pub struct ParameterOption<'a> {
@@ -168,7 +191,12 @@ pub struct ParameterPositional<'a> {
 #[derive(Debug, Clone)]
 pub struct ParameterSubgroup<'a> {
     pub description: Description<'a>,
+    // TODO: consider entirely getting rid of anonymous subgroups. Currently
+    // They're supported to allow newtype behavior (especially in subcommands),
+    // but it would probably make more sense to just special-case newtypes
+    // and ban the rest.
     pub name: Option<&'a str>,
+    pub placeholder: Option<&'a str>,
     pub contents: UsageItems<'a>,
 }
 

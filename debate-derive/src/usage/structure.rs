@@ -7,7 +7,7 @@ use syn::{Attribute, Field, Ident, Token, punctuated::Punctuated};
 
 use super::common::struct_usage_items;
 use crate::{
-    common::{ParsedFieldInfo, RawParsedTypeAttr},
+    common::{ParsedFieldInfo, RawParsedTypeAttr, compute_docs},
     generics::AngleBracedLifetime,
 };
 
@@ -22,6 +22,7 @@ pub fn derive_usage_struct(
         .map(ParsedFieldInfo::from_field)
         .try_collect()?;
 
+    let docs = compute_docs(attrs)?;
     let attrs = RawParsedTypeAttr::from_attributes(attrs)?;
     let items = struct_usage_items(&fields, attrs.help_option());
     let command_name = name.to_string().to_snake_case();
@@ -30,7 +31,7 @@ pub fn derive_usage_struct(
         impl #lifetime ::debate::help::Usage for #name #lifetime {
             const NAME: &'static str = #command_name;
             const DESCRIPTION: ::debate::help::Description<'static> =
-                ::debate::help::Description::new("TODO GLOBAL HELP");
+                ::debate::help::Description::new(#docs);
             const ITEMS: ::debate::help::UsageItems<'static> = ::debate::help::UsageItems::Parameters {
                 parameters: #items,
             };
