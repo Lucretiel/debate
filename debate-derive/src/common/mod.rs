@@ -1,7 +1,7 @@
 pub mod enumeration;
 pub mod value;
 
-use std::sync::OnceLock;
+use std::{borrow::Cow, sync::OnceLock};
 
 use darling::{
     FromAttributes as _,
@@ -227,15 +227,14 @@ impl<'a> ParsedFieldInfo<'a> {
             let group_name = ident.as_ref().map(|ident| {
                 let name = ident.as_str();
 
-                let name = if name.eq_ignore_ascii_case("subcommand") {
-                    "Subcommands".to_owned()
-                } else if name.eq_ignore_ascii_case("command") {
-                    "Commands".to_owned()
+                // TODO: case insensitivity here
+                let name = if name.ends_with("command") {
+                    Cow::Owned(format!("{name}s"))
                 } else {
-                    name.to_title_case()
+                    Cow::Borrowed(name)
                 };
 
-                SpannedValue::new(name, ident.span())
+                SpannedValue::new(name.to_title_case(), ident.span())
             });
 
             let placeholder = ident.as_ref().map(|ident| {

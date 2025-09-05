@@ -1,10 +1,6 @@
 use std::path::PathBuf;
 
-use anyhow::Context;
-use debate::{errors::BuildError, from_args::FromArgs, help::Usage as _};
 use debate_derive::{FromArgs, ParameterUsage, Usage, Value};
-use debate_parser::ArgumentsParser;
-use lazy_format::make_lazy_format;
 
 /// This is a demo program for the debate CLI parser
 ///
