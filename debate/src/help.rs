@@ -1,5 +1,3 @@
-use core::marker::PhantomData;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HelpRequest {
     /// There was a request for a succinct usage message, probably via `-h`

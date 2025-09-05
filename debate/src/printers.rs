@@ -94,7 +94,7 @@ mod with_std {
         match error {
             BuildError::Arg { source, error } => write_state_error(out, source, error),
             BuildError::RequiredSubcommand { .. } => write!(out, "no subcommand given"),
-            BuildError::RequiredFieldAbsent { kind, .. } => match kind {
+            BuildError::RequiredFieldAbsent { kind, .. } => match *kind {
                 FieldKind::Long(long) => write! { out, "required option --{long} was omitted" },
                 FieldKind::Short(short) => write! {out, "required option -{short} was omitted" },
                 FieldKind::Positional(placeholder) => {

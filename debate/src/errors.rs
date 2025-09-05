@@ -155,7 +155,6 @@ impl<'arg> from_args::Error<'arg> for EmptyError {
 mod with_std {
     use std::{
         borrow::ToOwned,
-        boxed::Box,
         fmt::Display,
         string::{String, ToString},
     };

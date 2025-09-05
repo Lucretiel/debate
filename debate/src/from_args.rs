@@ -67,7 +67,7 @@ where
         use std::{io, process};
 
         use crate::errors::BuildError;
-        use crate::printers::{print_help, write_build_error};
+        use crate::printers::write_build_error;
 
         let mut state = T::State::default();
 
