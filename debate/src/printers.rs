@@ -309,22 +309,22 @@ mod with_std {
                             return Ok(());
                         }
 
-                        let tags = lazy_format!(match (option.tags) {
+                        let tag = lazy_format!(match (option.tags) {
                             Tags::LongShort { long, .. } | Tags::Long { long } => "--{long}",
                             Tags::Short { short } => "-{short}",
                         });
 
-                        let tags = lazy_format!(match (option.argument) {
-                            None => "{tags}",
-                            Some(ValueParameter { placeholder, .. }) => "{tags} <{placeholder}>",
+                        let tag = lazy_format!(match (option.argument) {
+                            None => "{tag}",
+                            Some(ValueParameter { placeholder, .. }) => "{tag} <{placeholder}>",
                         });
 
-                        let tags = lazy_format!(match (option.repetition) {
-                            Repetition::Single => "{tags}",
-                            Repetition::Multiple => "<{tags}>...",
+                        let tag = lazy_format!(match (option.repetition) {
+                            Repetition::Single => "{tag}",
+                            Repetition::Multiple => "<{tag}>...",
                         });
 
-                        write!(out, " {tags}")
+                        write!(out, " {tag}")
                     }
                     Parameter::Positional(positional) => {
                         let placeholder = positional.argument.placeholder;
