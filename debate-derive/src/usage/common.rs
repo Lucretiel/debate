@@ -1,7 +1,9 @@
 use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
 
-use crate::common::{FieldDefault, FlattenFieldInfo, HelpOption, OptionTag, ParsedFieldInfo};
+use crate::common::{
+    Description, FieldDefault, FlattenFieldInfo, HelpOption, OptionTag, ParsedFieldInfo,
+};
 
 /// Convert a set of tags into an expression suitable for use after
 /// `::debate::help::Tags`
@@ -18,6 +20,21 @@ fn compute_usage_tags(tags: &OptionTag<&str, char>) -> TokenStream2 {
     }
 }
 
+impl Description {
+    /// Convert a description into a `::debate::help::Description` expression
+    pub fn quote(&self) -> TokenStream2 {
+        let short = self.short.as_str();
+        let long = self.long.as_str();
+
+        quote! {
+            ::debate::help::Description {
+                short: #short,
+                long: #long,
+            }
+        }
+    }
+}
+
 /// Given the description of a struct, produce a const expression of type
 /// `&[help::Parameter]` that can be used to fill in the items for a struct or subcommand
 pub fn struct_usage_items(parsed_fields: &[ParsedFieldInfo<'_>], help: HelpOption) -> TokenStream2 {
@@ -26,11 +43,11 @@ pub fn struct_usage_items(parsed_fields: &[ParsedFieldInfo<'_>], help: HelpOptio
             let placeholder = field.placeholder.as_str();
             let ty = field.ty;
             let defaulted = matches!(field.default, FieldDefault::Trait | FieldDefault::Expr(_));
-            let docs = field.docs.as_str();
+            let docs = field.docs.quote();
 
             quote! {
                 ::debate::help::Parameter::Positional(::debate::help::ParameterPositional {
-                    description: ::debate::help::Description::new(#docs),
+                    description: #docs,
                     requirement: match (#defaulted) {
                         true => ::debate::help::Requirement::Optional,
                         false => <#ty as ::debate::help::ParameterUsage>::REQUIREMENT,
@@ -46,11 +63,11 @@ pub fn struct_usage_items(parsed_fields: &[ParsedFieldInfo<'_>], help: HelpOptio
             let placeholder = field.placeholder.as_str();
             let ty = field.ty;
             let defaulted = matches!(field.default, FieldDefault::Trait | FieldDefault::Expr(_));
-            let docs = field.docs.as_str();
+            let docs = field.docs.quote();
 
             quote! {
                 ::debate::help::Parameter::Option(::debate::help::ParameterOption {
-                    description: ::debate::help::Description::new(#docs),
+                    description: #docs,
                     requirement: match #defaulted {
                         true => ::debate::help::Requirement::Optional,
                         false => <#ty as ::debate::help::ParameterUsage>::REQUIREMENT,
@@ -67,8 +84,13 @@ pub fn struct_usage_items(parsed_fields: &[ParsedFieldInfo<'_>], help: HelpOptio
             docs,
             group_name,
             placeholder,
-            ..
+            ident,
         }) => {
+            let id = ident
+                .as_ref()
+                .expect("anonymous groups are going away")
+                .as_str();
+
             let name = group_name.as_ref().map(|name| name.as_str());
             let name = match name {
                 None => quote! { ::core::option::Option::None },
@@ -81,11 +103,14 @@ pub fn struct_usage_items(parsed_fields: &[ParsedFieldInfo<'_>], help: HelpOptio
                 Some(placeholder) => quote! { ::core::option::Option::Some(#placeholder) },
             };
 
+            let docs = docs.quote();
+
             quote! {
                 ::debate::help::Parameter::Group(::debate::help::ParameterSubgroup {
+                    id: #id,
                     name: #name,
                     placeholder: #placeholder,
-                    description: ::debate::help::Description::new(#docs),
+                    description: #docs,
                     contents: <#ty as ::debate::help::Usage>::ITEMS,
                 })
             }

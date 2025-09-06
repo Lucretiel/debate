@@ -8,7 +8,6 @@ pub enum HelpRequest {
     Full,
 }
 
-#[non_exhaustive]
 /// A description of something, like a parameter or subcommand
 #[derive(Debug, Clone, Copy)]
 pub struct Description<'a> {
@@ -189,6 +188,7 @@ pub struct ParameterPositional<'a> {
 #[derive(Debug, Clone)]
 pub struct ParameterSubgroup<'a> {
     pub description: Description<'a>,
+    pub id: &'a str,
     // TODO: consider entirely getting rid of anonymous subgroups. Currently
     // They're supported to allow newtype behavior (especially in subcommands),
     // but it would probably make more sense to just special-case newtypes

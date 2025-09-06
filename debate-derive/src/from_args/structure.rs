@@ -14,8 +14,8 @@ use syn::{Attribute, Field, Ident, Token, punctuated::Punctuated};
 use crate::common::{ParsedFieldInfo, RawParsedTypeAttr};
 use crate::from_args::common::{
     complete_long_body, complete_long_option_body, complete_short_body, final_field_initializers,
-    struct_state_block_from_fields, struct_state_init_block_from_fields,
-    visit_positional_arms_for_fields,
+    get_subcommand_field_visitor_calls, struct_state_block_from_fields,
+    struct_state_init_block_from_fields, visit_positional_arms_for_fields,
 };
 use crate::generics::AngleBracedLifetime;
 
@@ -87,6 +87,7 @@ pub fn derive_args_struct(
     let state_ident = format_ident!("__{name}State");
     let argument = format_ident!("argument");
     let option = format_ident!("option");
+    let visitor = format_ident!("visitor");
 
     let state_block = struct_state_block_from_fields(&fields);
     let state_init_block = struct_state_init_block_from_fields(&fields);
@@ -126,6 +127,9 @@ pub fn derive_args_struct(
         &fields,
         help.short,
     );
+
+    let subcommand_context_visitor_calls =
+        get_subcommand_field_visitor_calls(&fields_ident, &visitor, &fields);
 
     let final_field_initializers = final_field_initializers(&fields_ident, &fields);
 
@@ -199,12 +203,25 @@ pub fn derive_args_struct(
 
                 #short_body
             }
+
+            fn get_subcommand_path<V: ::debate::state::SubcommandVisitor>(
+                &self,
+                #visitor: V
+            ) -> ::core::result::Result<V::Output, V> {
+                let #fields_ident = &self.fields;
+
+                #(#subcommand_context_visitor_calls)*
+
+                let _ = #fields_ident;
+
+                ::core::result::Result::Err(visitor)
+            }
         }
 
         impl<#lifetime> ::debate::build::BuildFromArgs<#lifetime> for #name #type_lifetime {
             type State = #state_ident <#lifetime>;
 
-            fn build<E>(state: Self::State) -> Result<Self,E>
+            fn build<E>(state: Self::State) -> ::core::result::Result<Self,E>
             where
                 E: ::debate::build::Error
             {
@@ -213,6 +230,31 @@ pub fn derive_args_struct(
                 ::core::result::Result::Ok(Self {
                     #(#final_field_initializers,)*
                 })
+            }
+        }
+    })
+}
+
+pub fn derive_args_newtype_struct(
+    name: &Ident,
+    field: &Field,
+    lifetime: &Lifetime,
+    type_lifetime: Option<&AngleBracedLifetime>,
+) -> syn::Result<TokenStream2> {
+    let inner_ty = &field.ty;
+
+    Ok(quote! {
+        impl<#lifetime> ::debate::build::BuildFromArgs<#lifetime> for #name #type_lifetime {
+            type State = <#inner_ty as ::debate::build::BuildFromArgs<#lifetime>>::State;
+
+            fn build<E>(state: Self::State) -> ::core::result::Result<Self, E>
+            where
+                E: ::debate::build::Error
+            {
+                match ::debate::build::BuildFromArgs::build(state) {
+                    Ok(inner) => Ok(Self(inner)),
+                    Err(err) => Err(err),
+                }
             }
         }
     })

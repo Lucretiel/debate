@@ -1,12 +1,14 @@
 use std::path::PathBuf;
 
+use debate::help::Description;
 use debate_derive::{FromArgs, ParameterUsage, Usage, Value};
 
 /// This is a demo program for the debate CLI parser
 ///
 /// Lorem ipsum dolor sit amet, consectetur adipiscing elit. Pellentesque
 /// feugiat eleifend rhoncus. Suspendisse facilisis faucibus dictum. Cras
-/// fermentum, justo in bibendum accumsan, ipsum quam porta sapien, sit amet
+/// fermentum, justo in bibendum accumsan,
+/// ipsum quam porta sapien, sit amet
 /// dictum mauris lorem non leo. Aliquam ut erat id enim gravida rhoncus sed
 /// dignissim libero. Nulla urna dui, condimentum quis nibh sed, tincidunt
 /// pulvinar enim. Aenean in nibh metus. Phasellus diam risus, eleifend a odio
@@ -32,6 +34,8 @@ struct Arguments {
     #[debate(short)]
     y: bool,
 
+    /// Brief header for z
+    ///
     /// A flag with a short form but long description. Lorem ipsum dolor sit
     /// amet, consectetur adipiscing elit. Nunc dignissim placerat dolor, eu
     /// semper leo venenatis ut. Morbi volutpat congue dignissim. Vivamus
@@ -46,6 +50,8 @@ struct Arguments {
     second_path: Option<PathBuf>,
 
     /**
+     * Intro material for the cool value
+     *
      * Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nunc dignissim
      * placerat dolor, eu semper leo venenatis ut. Morbi volutpat congue
      * dignissim. Vivamus aliquet vitae massa sed gravida. Phasellus vulputate

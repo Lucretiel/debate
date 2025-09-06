@@ -1,32 +1,76 @@
+use std::eprintln;
+
 use debate_parser::Arg;
 
 use crate::{help::HelpRequest, parameter};
 
-pub struct SubcommandChain<'a> {
-    command: &'static str,
-    prev: Option<&'a SubcommandChain<'a>>,
+pub trait SubcommandVisitor {
+    type Output;
+
+    fn visit_subcommand(self, subcommand: &SubcommandPath) -> Self::Output;
 }
 
-impl<'a> SubcommandChain<'a> {
-    pub const fn new(command: &'static str) -> SubcommandChain<'static> {
-        SubcommandChain {
-            command,
-            prev: None,
-        }
+#[derive(Debug, Clone, Copy)]
+pub enum SubcommandPathItem<'a> {
+    Field(&'a str),
+    Command(&'a str),
+}
+
+#[derive(Debug)]
+pub struct SubcommandPath<'a> {
+    item: SubcommandPathItem<'a>,
+    prev: Option<&'a SubcommandPath<'a>>,
+}
+
+impl<'a> SubcommandPath<'a> {
+    pub const fn new(item: SubcommandPathItem<'a>) -> SubcommandPath<'a> {
+        Self { item, prev: None }
     }
 
-    pub fn for_each(&self, func: &mut impl FnMut(&'static str)) {
-        if let Some(prev) = self.prev {
-            prev.for_each(func);
-        }
-        func(self.command)
-    }
-
-    pub const fn chain(&'a self, command: &'static str) -> Self {
+    pub const fn chain(&'a self, item: SubcommandPathItem<'a>) -> Self {
         Self {
-            command,
+            item,
             prev: Some(self),
         }
+    }
+}
+
+/// Helper type for implementing nested visitors in a way that's reversible.
+/// Normally we'd just use nested closures, but once a closure has been nested
+/// there's no way to get it back out again, which it turns out is a necessary
+/// step.
+#[doc(hidden)]
+pub struct SubcommandPathVisitorWithItem<'a, V> {
+    item: SubcommandPathItem<'a>,
+    visitor: V,
+}
+
+impl<'a, V: SubcommandVisitor> SubcommandPathVisitorWithItem<'a, V> {
+    #[inline]
+    #[must_use]
+    pub const fn new(item: SubcommandPathItem<'a>, visitor: V) -> Self {
+        Self { item, visitor }
+    }
+
+    #[inline]
+    #[must_use]
+    pub fn into_inner(self) -> V {
+        self.visitor
+    }
+
+    pub fn call(self) -> V::Output {
+        self.visitor
+            .visit_subcommand(&SubcommandPath::new(self.item))
+    }
+}
+
+impl<V: SubcommandVisitor> SubcommandVisitor for SubcommandPathVisitorWithItem<'_, V> {
+    type Output = V::Output;
+
+    #[inline]
+    fn visit_subcommand(self, subcommand: &SubcommandPath<'_>) -> Self::Output {
+        let wrapped = subcommand.chain(self.item);
+        self.visitor.visit_subcommand(&wrapped)
     }
 }
 
@@ -51,17 +95,22 @@ pub trait State<'arg> {
         A: parameter::ArgAccess<'arg>,
         E: Error<'arg, A>;
 
-    // IF this state includes a subcommand, it should call the handler using
-    // that subcommand. It should first attempt to forward the handler as
-    // deeply as possible to any nested subcommands.
-    //
-    // This method exists purely to assist with printing usage messages
-    // for subcommands.
-    fn with_subcommand_context<T, F: FnOnce(SubcommandChain<'_>) -> T>(
-        &self,
-        handler: F,
-    ) -> Result<T, F> {
-        Err(handler)
+    /**
+    IF this state includes an actively selected subcommand, it should call
+    the handler using that subcommand. It should first attempt to forward
+    the handler as deeply as possible to any nested subcommands.
+
+    Otherwise, it returns the unused handler.
+
+    If the state has more than one sibling subcommand, the LAST one is chosen.
+    This helps us with (imo) the most predictable behavior for how `--help`
+    interacts with subcommands.
+
+    This method exists purely to assist with printing usage messages
+    for subcommands.
+    */
+    fn get_subcommand_path<V: SubcommandVisitor>(&self, visitor: V) -> Result<V::Output, V> {
+        Err(visitor)
     }
 }
 

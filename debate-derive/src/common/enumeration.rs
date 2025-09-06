@@ -2,9 +2,9 @@ use darling::FromAttributes;
 use heck::ToKebabCase as _;
 use itertools::Itertools as _;
 use quote::format_ident;
-use syn::{Fields, FieldsNamed, FieldsUnnamed, Ident, Variant, spanned::Spanned as _};
+use syn::{Fields, Ident, Type, Variant, spanned::Spanned as _};
 
-use super::{IdentString, ParsedFieldInfo, compute_docs};
+use super::{Description, IdentString, ParsedFieldInfo, compute_docs};
 
 #[derive(FromAttributes)]
 #[darling(attributes(debate))]
@@ -37,10 +37,25 @@ struct VariantAttr {
     fallback: Option<()>,
 }
 
-pub enum VariantMode {
+pub enum SubcommandVariantMode<'a> {
     Unit,
-    Tuple,
-    Struct,
+    Newtype { ty: &'a Type },
+    Struct { fields: Vec<ParsedFieldInfo<'a>> },
+}
+
+impl<'a> SubcommandVariantMode<'a> {
+    /// A unit variant has essentially identical treatment to a struct variant
+    /// in most respects, so we can generalize slightly over the presence
+    /// or absence of fields by saying a unit variant has a present but empty
+    /// list of fields.
+    #[must_use]
+    pub fn fields(&self) -> Option<&[ParsedFieldInfo<'a>]> {
+        match *self {
+            Self::Unit => Some(&[]),
+            Self::Newtype { .. } => None,
+            Self::Struct { ref fields } => Some(fields),
+        }
+    }
 }
 
 pub struct ParsedSubcommandVariant<'a> {
@@ -49,13 +64,17 @@ pub struct ParsedSubcommandVariant<'a> {
     /// Case-converted command name
     pub command: String,
 
-    /// All of the fields in this variant. Basically agnostic to
-    /// struct/unit/tuple distinctions.
-    pub fields: Vec<ParsedFieldInfo<'a>>,
+    pub docs: Description,
 
-    pub docs: String,
+    pub mode: SubcommandVariantMode<'a>,
+}
 
-    pub mode: VariantMode,
+impl<'a> ParsedSubcommandVariant<'a> {
+    #[inline]
+    #[must_use]
+    pub fn fields(&self) -> Option<&[ParsedFieldInfo<'a>]> {
+        self.mode.fields()
+    }
 }
 
 pub struct ParsedSubcommandInfo<'a> {
@@ -95,34 +114,35 @@ impl<'a> ParsedSubcommandInfo<'a> {
                 let ident = IdentString::new(&variant.ident);
                 // TODO: rename attribute
                 let command = ident.as_str().to_kebab_case();
-
-                let fields = match variant.fields {
-                    Fields::Unnamed(FieldsUnnamed {
-                        unnamed: ref fields,
-                        ..
-                    })
-                    | Fields::Named(FieldsNamed {
-                        named: ref fields, ..
-                    }) => fields
-                        .iter()
-                        .map(ParsedFieldInfo::from_field)
-                        .try_collect()?,
-
-                    Fields::Unit => Vec::new(),
-                };
+                let docs = compute_docs(&variant.attrs)?;
 
                 let mode = match variant.fields {
-                    Fields::Named(_) => VariantMode::Struct,
-                    Fields::Unnamed(_) => VariantMode::Tuple,
-                    Fields::Unit => VariantMode::Unit,
+                    Fields::Unit => SubcommandVariantMode::Unit,
+                    Fields::Named(ref fields) => SubcommandVariantMode::Struct {
+                        fields: fields
+                            .named
+                            .iter()
+                            .map(ParsedFieldInfo::from_field)
+                            .try_collect()?,
+                    },
+                    Fields::Unnamed(ref fields) => SubcommandVariantMode::Newtype {
+                        ty: &fields
+                            .unnamed
+                            .iter()
+                            .exactly_one()
+                            .map_err(|_| {
+                                syn::Error::new(
+                                    fields.span(),
+                                    "tuple variants must be newtype variants",
+                                )
+                            })?
+                            .ty,
+                    },
                 };
-
-                let docs = compute_docs(&variant.attrs)?;
 
                 parsed_variants.push(ParsedSubcommandVariant {
                     ident,
                     command,
-                    fields,
                     mode,
                     docs,
                 });

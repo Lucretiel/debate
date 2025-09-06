@@ -12,7 +12,6 @@ An [`Arg`] internally is just a byte slice, since that's what the OS gives us.
 Callers can manually turn it into a [`str`] with [`from_utf8`][core::str::from_utf8],
 and from there parse it however they need.
 */
-// TODO: replace with `struct Arg([u8])` and use `&Arg`
 #[derive(Eq, PartialEq, Hash)]
 #[repr(transparent)]
 pub struct Arg([u8]);

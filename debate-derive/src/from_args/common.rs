@@ -16,7 +16,7 @@ enum HelpMode {
 /// for separate enum variant states
 pub fn struct_state_block_from_fields<'a>(
     fields: impl IntoIterator<Item = &'a ParsedFieldInfo<'a>>,
-) -> impl ToTokens {
+) -> TokenStream2 {
     {
         let field_state_types = fields
             .into_iter()
@@ -46,7 +46,7 @@ pub fn struct_state_block_from_fields<'a>(
 
 pub fn struct_state_init_block_from_fields<'a>(
     fields: impl IntoIterator<Item = &'a ParsedFieldInfo<'a>>,
-) -> impl ToTokens {
+) -> TokenStream2 {
     let field_state_initializers = fields.into_iter().map(|info| match *info {
         ParsedFieldInfo::Positional(_) | ParsedFieldInfo::Option(_) => quote! {
             ::core::option::Option::None
@@ -67,7 +67,7 @@ pub fn struct_state_init_block_from_fields<'a>(
 
 fn indexed_fields<'a>(
     fields: &'a [ParsedFieldInfo<'a>],
-) -> impl Iterator<Item = (Index, &'a ParsedFieldInfo<'a>)> {
+) -> impl Iterator<Item = (Index, &'a ParsedFieldInfo<'a>)> + DoubleEndedIterator {
     fields
         .iter()
         .enumerate()
@@ -85,7 +85,7 @@ fn option_fields<'a>(
 
 fn flatten_fields<'a>(
     fields: &'a [ParsedFieldInfo<'a>],
-) -> impl Iterator<Item = (Index, &'a FlattenFieldInfo<'a>)> {
+) -> impl Iterator<Item = (Index, &'a FlattenFieldInfo<'a>)> + DoubleEndedIterator {
     indexed_fields(fields).filter_map(|(index, field)| match field {
         ParsedFieldInfo::Flatten(field) => Some((index, field)),
         ParsedFieldInfo::Option(_) | ParsedFieldInfo::Positional(_) => None,
@@ -111,7 +111,7 @@ fn positional_flatten_fields<'a>(
 /// by calling either `Parameter::initial_method` or `Parameter::follow_up_method`,
 /// depending on whether the field is present already. This expression's type
 /// is always `Result<(), impl ParameterError>`. The field is
-/// `fields.#field-index`.
+/// `#fields_ident.#field_index`.
 pub fn apply_arg_to_field(
     fields_ident: &Ident,
     argument_ident: &Ident,
@@ -163,24 +163,15 @@ pub fn handle_propagated_error(
 /// Create an expression that calls a state method on a given field, then
 /// handles the error returned by it (specifically, it uses DetectUnrecognized
 /// to allow arguments to be retried).
-// TODO: wrap the error in `StateError::flatten`
 pub fn handle_flatten(
     expr: impl ToTokens,
-    field_name: Option<&str>,
+    field_name: &str,
     unrecognized_bind: impl ToTokens,
     unrecognized: impl ToTokens,
 ) -> TokenStream2 {
-    handle_propagated_error(
-        expr,
-        unrecognized_bind,
-        unrecognized,
-        |err| match field_name {
-            None => quote! { #err },
-            Some(field_name) => quote! {
-                ::debate::state::Error::flattened(#field_name, #err)
-            },
-        },
-    )
+    handle_propagated_error(expr, unrecognized_bind, unrecognized, |err| {
+        quote! { ::debate::state::Error::flattened(#field_name, #err) }
+    })
 }
 
 /// Given a set of fields, create an iterator of blocks suitable for use
@@ -240,7 +231,7 @@ pub fn visit_positional_arms_for_fields(
 
                 handle_flatten(
                     expr,
-                    info.ident_str(),
+                    info.ident.as_str(),
                     quote! { () },
                     quote! { #position + 1 },
                 )
@@ -326,7 +317,7 @@ fn complete_option_body<'a>(
                     argument
                 )
             },
-            info.ident_str(),
+            info.ident.as_str(),
             argument_ident,
             argument_ident,
         );
@@ -522,28 +513,46 @@ pub fn final_field_initializers(
                 }
             }
             FlattenOr::Flatten(FlattenFieldInfo { ident, .. }) => {
-                let wrap_err = match ident.as_ref().map(|ident| ident.as_str()) {
-                    Some(ident) => quote! {
-                        ::debate::build::Error::flattened(#ident, err)
-                    },
-                    None => quote! { err },
-                };
+                let field_name = ident.as_str();
 
-                let expr = quote! {
-                    match ::debate::build::BuildFromArgs::build(
+                quote! {
+                    #ident : match ::debate::build::BuildFromArgs::build(
                         #fields_ident.#idx,
                     ) {
                         ::core::result::Result::Ok(value) => value,
                         ::core::result::Result::Err(err) => return (
-                            ::core::result::Result::Err(#wrap_err)
+                            ::core::result::Result::Err(
+                                ::debate::build::Error::flattened(#field_name, err)
+                            )
                         ),
                     }
-                };
-
-                match ident {
-                    Some(ident) => quote! { #ident : #expr },
-                    None => expr,
                 }
             }
         })
+}
+
+/// Create a series of calls to `state.with_subcommand_context` for each
+/// of the fields, calling `return Ok(out)` if there's a successful hit.
+pub fn get_subcommand_field_visitor_calls(
+    fields_ident: &Ident,
+    visitor_ident: &Ident,
+
+    fields: &[ParsedFieldInfo<'_>],
+) -> impl Iterator<Item = TokenStream2> {
+    flatten_fields(fields).rev().map(move |(index, field)| {
+        let field_name = field.ident.as_str();
+
+        quote! {
+            let #visitor_ident = match ::debate::state::State::get_subcommand_path(
+                &#fields_ident.#index,
+                ::debate::state::SubcommandPathVisitorWithItem::new(
+                    ::debate::state::SubcommandPathItem::Field(#field_name),
+                    #visitor_ident,
+                )
+            ) {
+                ::core::result::Result::Ok(out) => return ::core::result::Result::Ok(out),
+                ::core::result::Result::Err(visitor) => visitor.into_inner(),
+            };
+        }
+    })
 }

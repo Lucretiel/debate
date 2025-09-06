@@ -26,14 +26,14 @@ pub fn derive_usage_enum_subcommand(
 
     let subcommands = parsed_variants.variants.iter().map(|variant| {
         let subcommand_name = variant.command.as_str();
-        let description = variant.docs.as_str();
+        let description = variant.docs.quote();
 
         let items_for_subcommand = struct_usage_items(&variant.fields, HelpOption::new());
 
         quote! {
             ::debate::help::Subcommand {
                 command: #subcommand_name,
-                description: ::debate::help::Description::new(#description),
+                description: #description,
                 usage: #items_for_subcommand,
             }
         }

@@ -23,6 +23,7 @@ pub fn derive_usage_struct(
         .try_collect()?;
 
     let docs = compute_docs(attrs)?;
+    let docs = docs.quote();
     let attrs = RawParsedTypeAttr::from_attributes(attrs)?;
     let items = struct_usage_items(&fields, attrs.help_option());
     let command_name = name.to_string().to_snake_case();
@@ -30,8 +31,7 @@ pub fn derive_usage_struct(
     Ok(quote! {
         impl #lifetime ::debate::help::Usage for #name #lifetime {
             const NAME: &'static str = #command_name;
-            const DESCRIPTION: ::debate::help::Description<'static> =
-                ::debate::help::Description::new(#docs);
+            const DESCRIPTION: ::debate::help::Description<'static> = #docs;
             const ITEMS: ::debate::help::UsageItems<'static> = ::debate::help::UsageItems::Parameters {
                 parameters: #items,
             };

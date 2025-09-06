@@ -18,6 +18,9 @@ pub fn derive_args_enum(
     if attr.subcommand.is_some() {
         subcommand::derive_args_enum_subcommand(name, variants, lifetime, type_lifetime)
     } else {
-        todo!("not implemented yet")
+        todo!(
+            "not implemented yet; this will be a mutually exclusive group \
+            of flags. Use `#[debate(subcommand)] to make a subcommand"
+        )
     }
 }

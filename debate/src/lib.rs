@@ -9,9 +9,11 @@ pub mod from_args;
 pub mod help;
 mod impls;
 pub mod parameter;
-pub mod printers;
 pub mod state;
 pub mod util;
 
 #[cfg(feature = "std")]
 pub mod arguments;
+
+#[cfg(feature = "std")]
+mod printers;

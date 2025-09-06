@@ -4,6 +4,20 @@ use debate_parser::{Arg, ArgumentsParser};
 
 use crate::{build, help::Usage, parameter, state};
 
+macro_rules! use_stream_and_die {
+    (
+        $stream:ident = $make_stream:expr,
+        $body:expr $(,)?
+    ) => {{
+        let $stream = $make_stream;
+        let mut $stream = io::BufWriter::new($stream);
+
+        $body.unwrap();
+        $stream.flush().unwrap();
+        process::exit(1);
+    }};
+}
+
 /// A type that can be parsed from command line arguments
 pub trait FromArgs<'arg>: Sized {
     fn try_from_parser<E>(
@@ -64,43 +78,85 @@ where
     where
         Self: Usage,
     {
-        use std::{io, process};
+        use std::{
+            io::{self, Write},
+            process,
+        };
 
         use crate::errors::BuildError;
         use crate::printers::write_build_error;
 
         let mut state = T::State::default();
 
-        // TODO: this is going to need to be refactored later, because usage
-        // messages in some cases will make use of the state.
-        let error: BuildError<'arg> = match load_state_from_parser(&mut state, arguments) {
-            Ok(()) => match Self::build(state) {
-                Ok(parsed) => return parsed,
-                Err(error) => error,
-            },
+        // First step: loading arguments into the state. Most problems happen
+        // here. This step is cool because, even if there's an error, the state
+        // is still available, so we can do things like print more specific
+        // usage messages based on the selected subcommand. This is where
+        // --help is detected.
+        if let Err(error) = load_state_from_parser(&mut state, arguments) {
+            let error: BuildError<'_> = error;
+
+            if let Some(mode) = error.help_request() {
+                use std::eprintln;
+
+                use crate::{printers::print_help, state::State};
+
+                let stdout = io::stdout().lock();
+                let mut stdout = io::BufWriter::new(stdout);
+
+                print_help(
+                    &mut stdout,
+                    Self::NAME,
+                    &Self::DESCRIPTION,
+                    &Self::ITEMS,
+                    mode,
+                )
+                .unwrap();
+
+                let _ = state.get_subcommand_path({
+                    use crate::state::SubcommandVisitor;
+
+                    struct Visitor;
+
+                    impl SubcommandVisitor for Visitor {
+                        type Output = ();
+
+                        fn visit_subcommand(
+                            self,
+                            subcommand: &state::SubcommandPath,
+                        ) -> Self::Output {
+                            eprintln!("PATH: {subcommand:#?}");
+                        }
+                    }
+
+                    Visitor
+                });
+
+                stdout.flush().unwrap();
+
+                process::exit(0);
+            } else {
+                // TODO: print a usage message here, perhaps one that specifically
+                // accounts the flag that caused the error
+                use_stream_and_die! {
+                    stderr = io::stderr().lock(),
+                    write_build_error(&mut stderr, &error)
+                }
+            }
+        }
+
+        // Second step: build the final parsed arguments from the state. This
+        // is generally where absent required arguments, issues reconciling
+        // alternation, and similar problems.
+        // TODO: Use a different `build::Error` type for this part.
+        let error: BuildError<'arg> = match Self::build(state) {
+            Ok(parsed) => return parsed,
             Err(error) => error,
         };
 
-        // TODO: if we have a subcommand, show help for that subcommand.
-        // Probably it's gonna make sense to use nested Errors to create a
-        // path to the relevant subcommand for looking up the usage in the
-        // UsageItems we have.
-        if let Some(_) = error.help_request() {
-            use crate::printers::print_help;
-
-            print_help(
-                &mut io::stdout().lock(),
-                Self::NAME,
-                Self::DESCRIPTION.long,
-                &Self::ITEMS,
-            )
-            .unwrap();
-            process::exit(0);
-        } else {
-            // TODO: print a usage message here, perhaps one that specifically
-            // accounts the flag that caused the error
-            write_build_error(&mut io::stderr().lock(), &error).unwrap();
-            process::exit(1);
+        use_stream_and_die! {
+            stderr = io::stderr().lock(),
+            write_build_error(&mut stderr, &error)
         }
     }
 }

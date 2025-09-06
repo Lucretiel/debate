@@ -1,464 +1,437 @@
-#[cfg(feature = "std")]
-mod with_std {
-    use std::{
-        fmt::Display,
-        io::{self, Write as _},
-    };
+use std::{
+    fmt::Display,
+    io::{self, Write as _},
+};
 
-    use indent_write::io::IndentWriter;
-    use lazy_format::lazy_format;
+use indent_write::io::IndentWriter;
+use lazy_format::lazy_format;
 
-    use crate::{
-        errors::{BuildError, FieldKind, ParameterError, ParameterSource, StateError},
-        help::{
-            Description, HelpRequest, Parameter, ParameterOption, ParameterPositional,
-            ParameterSubgroup, Repetition, Requirement, Subcommand, Tags, UsageItems,
-            ValueParameter,
-        },
-    };
+use crate::{
+    errors::{BuildError, FieldKind, ParameterError, ParameterSource, StateError},
+    help::{
+        Description, HelpRequest, Parameter, ParameterOption, ParameterPositional,
+        ParameterSubgroup, Repetition, Requirement, Subcommand, Tags, UsageItems, ValueParameter,
+    },
+};
 
-    pub fn printable_source(source: &ParameterSource) -> impl Display {
-        // TODO: the `long` case is current quoted and shouldn't be
-        lazy_format! {
-            match (*source) {
-                ParameterSource::Positional { arg } => "positional argument {arg:?}",
-                ParameterSource::Short { option } => "option -{option}",
-                ParameterSource::Long { option, .. } => "option --{option:?}",
-            }
-        }
-    }
-
-    pub fn write_parameter_error(
-        out: &mut impl io::Write,
-        source: &ParameterSource,
-        error: &ParameterError,
-    ) -> io::Result<()> {
-        match error {
-            ParameterError::NeedArgument => write!(
-                out,
-                "{source} requires an argument",
-                source = printable_source(source)
-            ),
-            ParameterError::FlagGotArgument(arg) => write!(
-                out,
-                "{source} is doesn't take an argument (got {arg:?})",
-                source = printable_source(source),
-            ),
-            // TODO: this message assumes that, if this error occurs,
-            // the argument is supposed to appear at most once. Might be
-            // worth including information here about the maximum permitted
-            // instances.
-            ParameterError::GotAdditionalInstance => write!(
-                out,
-                "{source} appeared too many times",
-                source = printable_source(source)
-            ),
-            ParameterError::ParseError { message, arg } => write!(
-                out,
-                "{source}: failed to parse {arg:?}: {message}",
-                source = printable_source(source)
-            ),
-            ParameterError::Custom { message } => write!(
-                out,
-                "{source}: {message}",
-                source = printable_source(source)
-            ),
-        }
-    }
-
-    pub fn write_state_error(
-        out: &mut impl io::Write,
-        source: &ParameterSource,
-        error: &StateError<'_>,
-    ) -> io::Result<()> {
-        match error {
-            StateError::Parameter { error, .. } => write_parameter_error(out, source, error),
-            StateError::Unrecognized => write!(
-                out,
-                "unrecognized {source}",
-                source = printable_source(source)
-            ),
-            StateError::UnknownSubcommand { .. } => {
-                write!(out, "unrecognized subcommand <TODO: SOURCE>")
-            }
-            StateError::WrongSubcommand { subcommand, .. } => write!(
-                out,
-                "{source} is not valid for subcommand {subcommand:?}",
-                source = printable_source(source),
-            ),
-            StateError::HelpRequested(..) => write!(out, "usage message was requested"),
-        }
-    }
-
-    pub fn write_build_error(out: &mut impl io::Write, error: &BuildError) -> io::Result<()> {
-        match error {
-            BuildError::Arg { source, error } => write_state_error(out, source, error),
-            BuildError::RequiredSubcommand { .. } => write!(out, "no subcommand given"),
-            BuildError::RequiredFieldAbsent { kind, .. } => match *kind {
-                FieldKind::Long(long) => write! { out, "required option --{long} was omitted" },
-                FieldKind::Short(short) => write! {out, "required option -{short} was omitted" },
-                FieldKind::Positional(placeholder) => {
-                    write! { out, "required argument <{placeholder}> was omitted"}
-                }
-            },
-            BuildError::Custom(message) => write!(out, "{message}"),
-        }
-    }
-
-    fn discover_subcommand_usage<'a>(
-        command: &str,
-        items: &'a UsageItems<'a>,
-    ) -> Option<&'a Subcommand<'a>> {
-        match items {
-            UsageItems::Parameters { parameters } => parameters
-                .iter()
-                .filter_map(|parameter| match parameter {
-                    Parameter::Group(ParameterSubgroup { contents, .. }) => Some(contents),
-                    _ => None,
-                })
-                .find_map(|group| discover_subcommand_usage(command, group)),
-            UsageItems::Subcommands { commands, .. } => {
-                commands.iter().find(|usage| usage.command == command)
-            }
-            UsageItems::Exclusive { .. } => None,
-        }
-    }
-
-    /*
-    Overall structure:
-
-    DESCRIPTION
-
-    USAGE:
-      command [OPTIONS] <ARG>
-
-    ARGUMENTS:
-      <ARG>
-
-    OPTIONS:
-      -f, --foo <ARG>
-          --help
-      -g
-
-    GROUP:
-      etc
-
-     */
-    pub fn print_help(
-        out: &mut impl io::Write,
-        command: &str,
-        description: &str,
-        items: &UsageItems<'_>,
-    ) -> io::Result<()> {
-        let description = description.trim_end();
-        write!(out, "{description}\n")?;
-
-        section(out, "Synopsis", |mut out| {
-            // TODO: [OPTIONS] is a lie, we should only print it if there's
-            // at least one optional flag.
-            // In particular, we know that there are definitely no options
-            // if items is a subcommand set.
-            write!(out, "{command} [OPTIONS]")?;
-            print_synopsis(&mut out, None, items)?;
-            writeln!(out)
-        })?;
-
-        match *items {
-            UsageItems::Parameters { parameters } => {
-                let positionals = parameters
-                    .iter()
-                    .filter_map(|parameter| parameter.as_positional());
-                let options = parameters
-                    .iter()
-                    .filter_map(|parameter| parameter.as_option());
-                let groups = parameters
-                    .iter()
-                    .filter_map(|parameter| parameter.as_subgroup());
-
-                // subcommands, then arguments, then options, then groups
-                groups
-                    .clone()
-                    .filter(|group| matches!(group.contents, UsageItems::Subcommands { .. }))
-                    .try_for_each(|group| print_parameter_subgroup(out, group))?;
-
-                maybe_section(out, "Arguments", positionals, |out, positional| {
-                    print_parameter_positional(out, positional)
-                })?;
-
-                maybe_section(out, "Options", options, |out, option| {
-                    print_parameter_option(out, option)
-                })?;
-
-                groups
-                    .filter(|group| !matches!(group.contents, UsageItems::Subcommands { .. }))
-                    // TODO: various edge cases here related to anonymous groups.
-                    // Hopefully that isn't an issue for a while.
-                    .try_for_each(|group| print_parameter_subgroup(out, group))
-            }
-            UsageItems::Subcommands { commands, .. } => {
-                maybe_section(out, "Commands", commands, |out, command| {
-                    describe(
-                        out,
-                        command.command,
-                        &command.description,
-                        HelpRequest::Full,
-                    )
-                })
-            }
-            UsageItems::Exclusive { all_options, .. } => {
-                maybe_section(out, "Options", all_options, |out, option| {
-                    print_parameter_option(out, option)
-                })
-            }
-        }
-    }
-
-    fn print_usage_items(
-        out: &mut (impl io::Write + ?Sized),
-        items: &UsageItems<'_>,
-    ) -> io::Result<()> {
-        match *items {
-            UsageItems::Parameters { parameters } => print_parameters(out, parameters),
-            UsageItems::Subcommands { commands, .. } => commands.iter().try_for_each(|command| {
-                describe(
-                    out,
-                    command.command,
-                    &command.description,
-                    HelpRequest::Full,
-                )
-            }),
-            UsageItems::Exclusive { .. } => {
-                todo!()
-            }
-        }
-    }
-    fn print_parameters<'a>(
-        out: &mut (impl io::Write + ?Sized),
-        parameters: impl IntoIterator<Item = &'a Parameter<'a>>,
-    ) -> io::Result<()> {
-        parameters
-            .into_iter()
-            .try_for_each(|parameter| match parameter {
-                Parameter::Option(option) => print_parameter_option(out, option),
-                Parameter::Positional(positional) => print_parameter_positional(out, positional),
-                Parameter::Group(group) => print_parameter_subgroup(out, group),
-            })
-    }
-
-    fn print_parameter_option(
-        out: &mut (impl io::Write + ?Sized),
-        option: &ParameterOption<'_>,
-    ) -> io::Result<()> {
-        // TODO: find a way to express the repetition and
-        // requirement for an option
-        let tags = lazy_format!(match (option.tags) {
-            Tags::Short { short } => "-{short}",
-            Tags::Long { long } => "    --{long}",
-            Tags::LongShort { short, long } => "-{short}, --{long}",
-        });
-
-        let tags = lazy_format!(match (option.argument) {
-            None => "{tags}",
-            Some(ValueParameter { placeholder, .. }) => "{tags} <{placeholder}>",
-        });
-
-        describe(out, tags, &option.description, HelpRequest::Full)
-    }
-
-    fn print_parameter_positional(
-        out: &mut (impl io::Write + ?Sized),
-        positional: &ParameterPositional<'_>,
-    ) -> io::Result<()> {
-        let placeholder = positional.argument.placeholder;
-
-        let name = lazy_format!(match ((positional.requirement, positional.repetition)) {
-            (Requirement::Mandatory, Repetition::Single) => "<{placeholder}>",
-            (Requirement::Mandatory, Repetition::Multiple) => "<{placeholder}>...",
-            (Requirement::Optional, Repetition::Single) => "[{placeholder}]",
-            (Requirement::Optional, Repetition::Multiple) => "[{placeholder}...]",
-        });
-
-        describe(out, name, &positional.description, HelpRequest::Full)
-    }
-
-    fn print_parameter_subgroup(
-        out: &mut (impl io::Write + ?Sized),
-        subgroup: &ParameterSubgroup<'_>,
-    ) -> io::Result<()> {
-        match subgroup.name {
-            None => print_usage_items(out, &subgroup.contents),
-            Some(name) => section(out, name, |mut out| {
-                // This is necessary to avoid an unbounded recursion of
-                // nested types
-                let out: &mut dyn io::Write = &mut out;
-                print_usage_items(out, &subgroup.contents)
-            }),
-        }
-    }
-
-    fn print_synopsis(
-        out: &mut (impl io::Write + ?Sized),
-        placeholder: Option<&str>,
-        items: &UsageItems<'_>,
-    ) -> io::Result<()> {
-        match *items {
-            UsageItems::Parameters { parameters } => {
-                parameters.iter().try_for_each(|parameter| match parameter {
-                    Parameter::Option(option) => {
-                        if option.requirement == Requirement::Optional {
-                            return Ok(());
-                        }
-
-                        let tag = lazy_format!(match (option.tags) {
-                            Tags::LongShort { long, .. } | Tags::Long { long } => "--{long}",
-                            Tags::Short { short } => "-{short}",
-                        });
-
-                        let tag = lazy_format!(match (option.argument) {
-                            None => "{tag}",
-                            Some(ValueParameter { placeholder, .. }) => "{tag} <{placeholder}>",
-                        });
-
-                        let tag = lazy_format!(match (option.repetition) {
-                            Repetition::Single => "{tag}",
-                            Repetition::Multiple => "<{tag}>...",
-                        });
-
-                        write!(out, " {tag}")
-                    }
-                    Parameter::Positional(positional) => {
-                        let placeholder = positional.argument.placeholder;
-
-                        let name =
-                            lazy_format!(match ((positional.requirement, positional.repetition)) {
-                                (Requirement::Mandatory, Repetition::Single) => "<{placeholder}>",
-                                (Requirement::Mandatory, Repetition::Multiple) =>
-                                    "<{placeholder}>...",
-                                (Requirement::Optional, Repetition::Single) => "[{placeholder}]",
-                                (Requirement::Optional, Repetition::Multiple) =>
-                                    "[{placeholder}...]",
-                            });
-
-                        write!(out, " {name}")
-                    }
-                    Parameter::Group(group) => {
-                        print_synopsis(out, group.placeholder, &group.contents)
-                    }
-                })
-            }
-            UsageItems::Subcommands { requirement, .. } => {
-                let name = placeholder.unwrap_or("COMMAND");
-                match requirement {
-                    Requirement::Optional => write!(out, " [{name}]"),
-                    Requirement::Mandatory => write!(out, " <{name}>"),
-                }
-            }
-            UsageItems::Exclusive { .. } => todo!(),
-        }
-    }
-
-    /// Write a section by writing a newline, then the `header`, then an
-    /// indented `body`.
-    fn section<O: io::Write + ?Sized, T>(
-        out: &mut O,
-        header: &str,
-        body: impl FnOnce(IndentWriter<&mut O>) -> io::Result<T>,
-    ) -> io::Result<T> {
-        writeln!(out, "\n{header}:")?;
-        let value = body(IndentWriter::new("  ", out))?;
-
-        Ok(value)
-    }
-
-    /// Write an optional section, only if the iterator is not empty.
-    /// Otherwise identical to `section`.
-    fn maybe_section<O: io::Write + ?Sized, I: IntoIterator>(
-        out: &mut O,
-        header: &str,
-        items: I,
-        body: impl Fn(&mut IndentWriter<&mut O>, I::Item) -> io::Result<()>,
-    ) -> io::Result<()> {
-        let mut items = items.into_iter();
-
-        match items.next() {
-            None => Ok(()),
-            Some(first) => section(out, header, |mut out| {
-                body(&mut out, first)?;
-                items.try_for_each(|item| body(&mut out, item))
-            }),
-        }
-    }
-
-    /// Describe an item by printing the item, followed by the indented
-    /// description. Doesn't yet support short help; need to find a solution
-    /// for aligned indentation in that case.
-    ///
-    /// If the description is and item are both short enough, the entire
-    /// thing is instead printed on a single line.
-    fn describe(
-        out: &mut (impl io::Write + ?Sized),
-        item: impl Display,
-        description: &Description<'_>,
-        style: HelpRequest,
-    ) -> io::Result<()> {
-        /// Helper type that counts the bytes that flow through it. We use this
-        /// to detect if we need any newlines here in `describe`
-        struct IoByteCounter<'a, T: io::Write + ?Sized> {
-            inner: &'a mut T,
-            count: &'a mut usize,
-        }
-
-        impl<'a, T: io::Write + ?Sized> IoByteCounter<'a, T> {
-            pub fn new(inner: &'a mut T, count: &'a mut usize) -> Self {
-                Self { inner, count }
-            }
-        }
-
-        impl<'a, T: io::Write + ?Sized> io::Write for IoByteCounter<'a, T> {
-            fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-                let n = self.inner.write(buf)?;
-                *self.count += n;
-                Ok(n)
-            }
-
-            fn flush(&mut self) -> io::Result<()> {
-                self.inner.flush()
-            }
-        }
-
-        let mut count = 0;
-
-        {
-            let mut out = IoByteCounter::new(&mut *out, &mut count);
-            write!(out, "{item}")?;
-        }
-
-        let description = description.get(style);
-        let indent = "        ";
-
-        // For the record, this kind of significant conditional logic is
-        // exactly the sort of thing I really *don't* like doing in libraries
-        // like this, where we could instead do so much of this analysis during
-        // codegen and emit unconditional prints.
-        //
-        // The dream, of course, is that `#[derive(Usage)]` ends up almost
-        // producing a single string literal (or, like, a single format string
-        // that just can be fed formatting parameters). I may yet rewrite a
-        // lot of this in a future debate v2.
-
-        if description.is_empty() {
-            writeln!(out)
-        } else if let Some(space) = indent.len().checked_sub(count)
-            && space >= 2
-            && !description.contains('\n')
-        {
-            (0..space).try_for_each(|_| out.write_all(b" "))?;
-            writeln!(out, "{description}")
-        } else {
-            let mut out = IndentWriter::new("        ", out);
-            writeln!(out, "\n{description}\n")
+pub fn printable_source(source: &ParameterSource) -> impl Display {
+    // TODO: the `long` case is current quoted and shouldn't be
+    lazy_format! {
+        match (*source) {
+            ParameterSource::Positional { arg } => "positional argument {arg:?}",
+            ParameterSource::Short { option } => "option -{option}",
+            ParameterSource::Long { option, .. } => "option --{option:?}",
         }
     }
 }
 
-pub use with_std::*;
+pub fn write_parameter_error(
+    out: &mut impl io::Write,
+    source: &ParameterSource,
+    error: &ParameterError,
+) -> io::Result<()> {
+    match error {
+        ParameterError::NeedArgument => write!(
+            out,
+            "{source} requires an argument",
+            source = printable_source(source)
+        ),
+        ParameterError::FlagGotArgument(arg) => write!(
+            out,
+            "{source} is doesn't take an argument (got {arg:?})",
+            source = printable_source(source),
+        ),
+        // TODO: this message assumes that, if this error occurs,
+        // the argument is supposed to appear at most once. Might be
+        // worth including information here about the maximum permitted
+        // instances.
+        ParameterError::GotAdditionalInstance => write!(
+            out,
+            "{source} appeared too many times",
+            source = printable_source(source)
+        ),
+        ParameterError::ParseError { message, arg } => write!(
+            out,
+            "{source}: failed to parse {arg:?}: {message}",
+            source = printable_source(source)
+        ),
+        ParameterError::Custom { message } => write!(
+            out,
+            "{source}: {message}",
+            source = printable_source(source)
+        ),
+    }
+}
+
+pub fn write_state_error(
+    out: &mut impl io::Write,
+    source: &ParameterSource,
+    error: &StateError<'_>,
+) -> io::Result<()> {
+    match error {
+        StateError::Parameter { error, .. } => write_parameter_error(out, source, error),
+        StateError::Unrecognized => write!(
+            out,
+            "unrecognized {source}",
+            source = printable_source(source)
+        ),
+        StateError::UnknownSubcommand { .. } => {
+            write!(out, "unrecognized subcommand <TODO: SOURCE>")
+        }
+        StateError::WrongSubcommand { subcommand, .. } => write!(
+            out,
+            "{source} is not valid for subcommand {subcommand:?}",
+            source = printable_source(source),
+        ),
+        StateError::HelpRequested(..) => write!(out, "usage message was requested"),
+    }
+}
+
+pub fn write_build_error(out: &mut impl io::Write, error: &BuildError) -> io::Result<()> {
+    match error {
+        BuildError::Arg { source, error } => write_state_error(out, source, error),
+        BuildError::RequiredSubcommand { .. } => write!(out, "no subcommand given"),
+        BuildError::RequiredFieldAbsent { kind, .. } => match *kind {
+            FieldKind::Long(long) => write! { out, "required option --{long} was omitted" },
+            FieldKind::Short(short) => write! {out, "required option -{short} was omitted" },
+            FieldKind::Positional(placeholder) => {
+                write! { out, "required argument <{placeholder}> was omitted"}
+            }
+        },
+        BuildError::Custom(message) => write!(out, "{message}"),
+    }
+}
+
+/*
+Overall structure:
+
+DESCRIPTION
+
+USAGE:
+  command [OPTIONS] <ARG>
+
+ARGUMENTS:
+  <ARG>
+
+OPTIONS:
+  -f, --foo <ARG>
+      --help
+  -g
+
+GROUP:
+  etc
+
+ */
+pub fn print_help(
+    out: &mut impl io::Write,
+    command: &str,
+    description: &Description<'_>,
+    items: &UsageItems<'_>,
+    style: HelpRequest,
+) -> io::Result<()> {
+    let description = description.get(style);
+    write!(out, "{description}\n")?;
+
+    section(out, "Synopsis", |mut out| {
+        // TODO: [OPTIONS] is a lie, we should only print it if there's
+        // at least one optional flag.
+        // In particular, we know that there are definitely no options
+        // if items is a subcommand set.
+        write!(out, "{command} [OPTIONS]")?;
+        print_synopsis(&mut out, None, style, items)?;
+        writeln!(out)
+    })?;
+
+    match *items {
+        UsageItems::Parameters { parameters } => {
+            let positionals = parameters
+                .iter()
+                .filter_map(|parameter| parameter.as_positional());
+            let options = parameters
+                .iter()
+                .filter_map(|parameter| parameter.as_option());
+            let groups = parameters
+                .iter()
+                .filter_map(|parameter| parameter.as_subgroup());
+
+            // subcommands, then arguments, then options, then groups
+            groups
+                .clone()
+                .filter(|group| matches!(group.contents, UsageItems::Subcommands { .. }))
+                .try_for_each(|group| print_parameter_subgroup(out, style, group))?;
+
+            maybe_section(out, "Arguments", positionals, |out, positional| {
+                print_parameter_positional(out, style, positional)
+            })?;
+
+            maybe_section(out, "Options", options, |out, option| {
+                print_parameter_option(out, style, option)
+            })?;
+
+            groups
+                .filter(|group| !matches!(group.contents, UsageItems::Subcommands { .. }))
+                // TODO: various edge cases here related to anonymous groups.
+                // Hopefully that isn't an issue for a while.
+                .try_for_each(|group| print_parameter_subgroup(out, style, group))
+        }
+        UsageItems::Subcommands { commands, .. } => {
+            maybe_section(out, "Commands", commands, |out, command| {
+                describe(out, command.command, &command.description, style)
+            })
+        }
+        UsageItems::Exclusive { all_options, .. } => {
+            maybe_section(out, "Options", all_options, |out, option| {
+                print_parameter_option(out, style, option)
+            })
+        }
+    }
+}
+
+fn print_usage_items(
+    out: &mut (impl io::Write + ?Sized),
+    style: HelpRequest,
+    items: &UsageItems<'_>,
+) -> io::Result<()> {
+    match *items {
+        UsageItems::Parameters { parameters } => {
+            parameters
+                .into_iter()
+                .try_for_each(|parameter| match parameter {
+                    Parameter::Option(option) => print_parameter_option(out, style, option),
+                    Parameter::Positional(positional) => {
+                        print_parameter_positional(out, style, positional)
+                    }
+                    Parameter::Group(group) => print_parameter_subgroup(out, style, group),
+                })
+        }
+        UsageItems::Subcommands { commands, .. } => commands
+            .iter()
+            .try_for_each(|command| describe(out, command.command, &command.description, style)),
+        UsageItems::Exclusive { .. } => {
+            todo!()
+        }
+    }
+}
+
+fn print_parameter_option(
+    out: &mut (impl io::Write + ?Sized),
+    style: HelpRequest,
+    option: &ParameterOption<'_>,
+) -> io::Result<()> {
+    // TODO: find a way to express the repetition and
+    // requirement for an option
+    let tags = lazy_format!(match (option.tags) {
+        Tags::Short { short } => "-{short}",
+        Tags::Long { long } => "    --{long}",
+        Tags::LongShort { short, long } => "-{short}, --{long}",
+    });
+
+    let tags = lazy_format!(match (option.argument) {
+        None => "{tags}",
+        Some(ValueParameter { placeholder, .. }) => "{tags} <{placeholder}>",
+    });
+
+    describe(out, tags, &option.description, style)
+}
+
+fn print_parameter_positional(
+    out: &mut (impl io::Write + ?Sized),
+    style: HelpRequest,
+    positional: &ParameterPositional<'_>,
+) -> io::Result<()> {
+    let placeholder = positional.argument.placeholder;
+
+    let name = lazy_format!(match ((positional.requirement, positional.repetition)) {
+        (Requirement::Mandatory, Repetition::Single) => "<{placeholder}>",
+        (Requirement::Mandatory, Repetition::Multiple) => "<{placeholder}>...",
+        (Requirement::Optional, Repetition::Single) => "[{placeholder}]",
+        (Requirement::Optional, Repetition::Multiple) => "[{placeholder}...]",
+    });
+
+    describe(out, name, &positional.description, style)
+}
+
+fn print_parameter_subgroup(
+    out: &mut (impl io::Write + ?Sized),
+    style: HelpRequest,
+    subgroup: &ParameterSubgroup<'_>,
+) -> io::Result<()> {
+    match subgroup.name {
+        None => print_usage_items(out, style, &subgroup.contents),
+        Some(name) => section(out, name, |mut out| {
+            // This is necessary to avoid an unbounded recursion of
+            // nested types
+            let out: &mut dyn io::Write = &mut out;
+            print_usage_items(out, style, &subgroup.contents)
+        }),
+    }
+}
+
+fn print_synopsis(
+    out: &mut (impl io::Write + ?Sized),
+    placeholder: Option<&str>,
+    style: HelpRequest,
+    items: &UsageItems<'_>,
+) -> io::Result<()> {
+    match *items {
+        UsageItems::Parameters { parameters } => {
+            parameters.iter().try_for_each(|parameter| match parameter {
+                Parameter::Option(option) => {
+                    if option.requirement == Requirement::Optional {
+                        return Ok(());
+                    }
+
+                    let tag = lazy_format!(match (option.tags) {
+                        Tags::LongShort { long, .. } | Tags::Long { long } => "--{long}",
+                        Tags::Short { short } => "-{short}",
+                    });
+
+                    let tag = lazy_format!(match (option.argument) {
+                        None => "{tag}",
+                        Some(ValueParameter { placeholder, .. }) => "{tag} <{placeholder}>",
+                    });
+
+                    let tag = lazy_format!(match (option.repetition) {
+                        Repetition::Single => "{tag}",
+                        Repetition::Multiple => "<{tag}>...",
+                    });
+
+                    write!(out, " {tag}")
+                }
+                Parameter::Positional(positional) => {
+                    let placeholder = positional.argument.placeholder;
+
+                    let name =
+                        lazy_format!(match ((positional.requirement, positional.repetition)) {
+                            (Requirement::Mandatory, Repetition::Single) => "<{placeholder}>",
+                            (Requirement::Mandatory, Repetition::Multiple) => "<{placeholder}>...",
+                            (Requirement::Optional, Repetition::Single) => "[{placeholder}]",
+                            (Requirement::Optional, Repetition::Multiple) => "[{placeholder}...]",
+                        });
+
+                    write!(out, " {name}")
+                }
+                Parameter::Group(group) => {
+                    print_synopsis(out, group.placeholder, style, &group.contents)
+                }
+            })
+        }
+        UsageItems::Subcommands { requirement, .. } => {
+            let name = placeholder.unwrap_or("COMMAND");
+            match requirement {
+                Requirement::Optional => write!(out, " [{name}]"),
+                Requirement::Mandatory => write!(out, " <{name}>"),
+            }
+        }
+        UsageItems::Exclusive { .. } => todo!(),
+    }
+}
+
+/// Write a section by writing a newline, then the `header`, then an
+/// indented `body`.
+fn section<O: io::Write + ?Sized, T>(
+    out: &mut O,
+    header: &str,
+    body: impl FnOnce(IndentWriter<&mut O>) -> io::Result<T>,
+) -> io::Result<T> {
+    writeln!(out, "\n{header}:")?;
+    let value = body(IndentWriter::new("  ", out))?;
+
+    Ok(value)
+}
+
+/// Write an optional section, only if the iterator is not empty.
+/// Otherwise identical to `section`.
+fn maybe_section<O: io::Write + ?Sized, I: IntoIterator>(
+    out: &mut O,
+    header: &str,
+    items: I,
+    body: impl Fn(&mut IndentWriter<&mut O>, I::Item) -> io::Result<()>,
+) -> io::Result<()> {
+    let mut items = items.into_iter();
+
+    match items.next() {
+        None => Ok(()),
+        Some(first) => section(out, header, |mut out| {
+            body(&mut out, first)?;
+            items.try_for_each(|item| body(&mut out, item))
+        }),
+    }
+}
+
+/// Describe an item by printing the item, followed by the indented
+/// description. Doesn't yet support short help; need to find a solution
+/// for aligned indentation in that case.
+///
+/// If the description is and item are both short enough, the entire
+/// thing is instead printed on a single line.
+fn describe(
+    out: &mut (impl io::Write + ?Sized),
+    item: impl Display,
+    description: &Description<'_>,
+    style: HelpRequest,
+) -> io::Result<()> {
+    /// Helper type that counts the bytes that flow through it. We use this
+    /// to detect if we need any newlines here in `describe`
+    struct IoByteCounter<'a, T: io::Write + ?Sized> {
+        inner: &'a mut T,
+        count: &'a mut usize,
+    }
+
+    impl<'a, T: io::Write + ?Sized> IoByteCounter<'a, T> {
+        pub fn new(inner: &'a mut T, count: &'a mut usize) -> Self {
+            Self { inner, count }
+        }
+    }
+
+    impl<'a, T: io::Write + ?Sized> io::Write for IoByteCounter<'a, T> {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            let n = self.inner.write(buf)?;
+            *self.count += n;
+            Ok(n)
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            self.inner.flush()
+        }
+    }
+
+    let mut count = 0;
+
+    {
+        let mut out = IoByteCounter::new(&mut *out, &mut count);
+        write!(out, "{item}")?;
+    }
+
+    let description = description.get(style);
+    let indent = "        ";
+
+    // For the record, this kind of significant conditional logic is
+    // exactly the sort of thing I really *don't* like doing in libraries
+    // like this, where we could instead do so much of this analysis during
+    // codegen and emit unconditional prints.
+    //
+    // The dream, of course, is that `#[derive(Usage)]` ends up almost
+    // producing a single string literal (or, like, a single format string
+    // that just can be fed formatting parameters). I may yet rewrite a
+    // lot of this in a future debate v2.
+
+    if description.is_empty() {
+        writeln!(out)
+    } else if let Some(space) = indent.len().checked_sub(count)
+        && space >= 2
+        && !description.contains('\n')
+    {
+        (0..space).try_for_each(|_| out.write_all(b" "))?;
+        writeln!(out, "{description}")
+    } else {
+        let mut out = IndentWriter::new("        ", out);
+
+        writeln!(out, "\n{description}")?;
+        if description.contains('\n') || matches!(style, HelpRequest::Full) {
+            writeln!(out)?;
+        }
+
+        Ok(())
+    }
+}

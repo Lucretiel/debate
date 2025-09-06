@@ -341,7 +341,8 @@ mod with_std {
         }
 
         fn rank(&self) -> u16 {
-            // TODO: complete ranking of errors
+            // TODO: complete ranking of errors. Lower numbered ranks are
+            // prioritized over higher ranking ones.
             0
         }
     }

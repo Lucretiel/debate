@@ -9,10 +9,11 @@ use darling::{
 };
 use heck::{ToKebabCase as _, ToShoutySnakeCase, ToTitleCase};
 use itertools::Itertools as _;
+use lazy_format::lazy_format;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::ToTokens;
 use regex::Regex;
-use syn::{Attribute, Expr, Field, Ident, Type, spanned::Spanned as _};
+use syn::{Attribute, Expr, Field, Ident, Type, spanned::Spanned};
 
 macro_rules! regex {
     ($pattern:literal) => {{
@@ -123,12 +124,38 @@ impl OptionTag<SpannedValue<String>, SpannedValue<char>> {
     }
 }
 
+#[derive(Default)]
+pub struct Description {
+    pub short: String,
+    pub long: String,
+}
+
+impl Description {
+    pub fn from_paragraphs(paragraphs: impl IntoIterator<Item = String>) -> Self {
+        let mut paragraphs = paragraphs.into_iter();
+
+        let Some(first) = paragraphs.next() else {
+            return Self::default();
+        };
+
+        let short = first.clone();
+        let long = paragraphs.fold(first, |mut body, paragraph| {
+            body.reserve(paragraph.len() + 2);
+            body.push_str("\n\n");
+            body.push_str(&paragraph);
+            body
+        });
+
+        Self { short, long }
+    }
+}
+
 pub struct PositionalFieldInfo<'a> {
     pub ident: IdentString<'a>,
     pub placeholder: SpannedValue<String>,
     pub ty: &'a Type,
     pub default: FieldDefault,
-    pub docs: String,
+    pub docs: Description,
 }
 
 pub struct OptionFieldInfo<'a> {
@@ -136,30 +163,31 @@ pub struct OptionFieldInfo<'a> {
     pub placeholder: SpannedValue<String>,
     pub ty: &'a Type,
     pub default: FieldDefault,
-    pub docs: String,
+    pub docs: Description,
     pub tags: OptionTag<SpannedValue<String>, SpannedValue<char>>,
 }
 
 pub struct FlattenFieldInfo<'a> {
-    pub docs: String,
-    pub ident: Option<IdentString<'a>>,
-    pub group_name: Option<SpannedValue<String>>,
+    /// Documentation for this fie;d
+    pub docs: Description,
+
+    /// Identifier for this field
+    pub ident: IdentString<'a>,
+
+    /// Printed group name used for this field
+    pub group_name: SpannedValue<String>,
+
     /// When this entire field is used as a placeholder (basically just for
     /// subcommands, but could be useful later)
-    pub placeholder: Option<SpannedValue<String>>,
-    pub ty: &'a Type,
-}
+    pub placeholder: SpannedValue<String>,
 
-impl FlattenFieldInfo<'_> {
-    #[inline]
-    pub fn ident_str(&self) -> Option<&str> {
-        self.ident.as_ref().map(|ident| ident.as_str())
-    }
+    /// Type of this field
+    pub ty: &'a Type,
 }
 
 // TODO: compute short + long docs
 // TODO: rewrap
-pub fn compute_docs(attrs: &[Attribute]) -> syn::Result<String> {
+pub fn compute_docs(attrs: &[Attribute]) -> syn::Result<Description> {
     let body: String = attrs
         .iter()
         .filter_map(|attr| match attr.meta {
@@ -195,16 +223,15 @@ pub fn compute_docs(attrs: &[Attribute]) -> syn::Result<String> {
     let body = body.trim_end();
     let body = leading_whitespace.replace(body, "");
 
-    Ok(paragraph_separator
-        .split(&body)
-        .map(|paragraph| {
-            // This is basically `textwrap::refill`, except that `refill` takes
-            // care to preserve line prefixes, and we explicitly are trying not
-            // to do that.
-            let (unfilled, _) = textwrap::unfill(paragraph);
-            textwrap::fill(&unfilled, 80)
-        })
-        .join("\n\n"))
+    let paragraphs = paragraph_separator.split(&body).map(|paragraph| {
+        // This is basically `textwrap::refill`, except that `refill` takes
+        // care to preserve line prefixes, and we explicitly are trying not
+        // to do that.
+        let (unfilled, _) = textwrap::unfill(paragraph);
+        textwrap::fill(&unfilled, 80)
+    });
+
+    Ok(Description::from_paragraphs(paragraphs))
 }
 
 pub enum ParsedFieldInfo<'a> {
@@ -219,27 +246,28 @@ impl<'a> ParsedFieldInfo<'a> {
         let docs = compute_docs(&field.attrs)?;
 
         let ty = &field.ty;
-        let ident = field.ident.as_ref().map(IdentString::new);
+        let ident = IdentString::new(field.ident.as_ref().ok_or_else(|| {
+            syn::Error::new(
+                field.span(),
+                "can't use anonymous fields in debate derives. This should \
+                have been detected already, it's probably a bug in `debate`.",
+            )
+        })?);
 
         // TODO: enforce that flatten doesn't coexist with other variants.
         if let Some(()) = parsed.flatten {
-            // TODO: allow rename for flattened fields
-            let group_name = ident.as_ref().map(|ident| {
-                let name = ident.as_str();
+            let name = ident.as_str();
 
-                // TODO: case insensitivity here
-                let name = if name.ends_with("command") {
-                    Cow::Owned(format!("{name}s"))
-                } else {
-                    Cow::Borrowed(name)
-                };
+            let group_name = SpannedValue::new(
+                match name.ends_with("command") {
+                    true => Cow::Owned(format!("{name}s")),
+                    false => Cow::Borrowed(name),
+                }
+                .to_title_case(),
+                ident.span(),
+            );
 
-                SpannedValue::new(name.to_title_case(), ident.span())
-            });
-
-            let placeholder = ident.as_ref().map(|ident| {
-                SpannedValue::new(ident.as_str().to_shouty_snake_case(), ident.span())
-            });
+            let placeholder = SpannedValue::new(name.to_shouty_snake_case(), ident.span());
 
             return Ok(Self::Flatten(FlattenFieldInfo {
                 ident,
@@ -249,13 +277,6 @@ impl<'a> ParsedFieldInfo<'a> {
                 docs,
             }));
         }
-
-        let ident = ident.ok_or_else(|| {
-            syn::Error::new(
-                field.span(),
-                "can't use non-flattened fields in tuple structs",
-            )
-        })?;
 
         let long = parsed
             .long
