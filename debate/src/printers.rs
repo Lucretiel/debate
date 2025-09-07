@@ -122,11 +122,12 @@ GROUP:
   etc
 
  */
-pub fn print_help(
+pub fn print_help<'a>(
     out: &mut impl io::Write,
     command: &str,
-    description: &Description<'_>,
-    items: &UsageItems<'_>,
+    subcommand: impl IntoIterator<Item = &'a str>,
+    description: &Description<'a>,
+    items: &UsageItems<'a>,
     style: HelpRequest,
 ) -> io::Result<()> {
     let description = description.get(style);
@@ -137,7 +138,11 @@ pub fn print_help(
         // at least one optional flag.
         // In particular, we know that there are definitely no options
         // if items is a subcommand set.
-        write!(out, "{command} [OPTIONS]")?;
+        write!(out, "{command}")?;
+        subcommand
+            .into_iter()
+            .try_for_each(|subcommand| write!(out, " {subcommand}"))?;
+        write!(out, " [OPTIONS]")?;
         print_synopsis(&mut out, "COMMAND", style, items)?;
         writeln!(out)
     })?;

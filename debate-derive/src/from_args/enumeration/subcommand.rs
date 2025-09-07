@@ -225,31 +225,40 @@ pub fn derive_args_enum_subcommand(
     });
 
     let get_subcommand_arms = parsed_variants.variants.iter().map(|variant| {
-        make_variant_arm(
-            variant,
-            &format_ident!("get_subcommand_path"),
-            &fields_ident,
-            [&visitor],
-            quote! { ref #fields_ident, .. },
-            |fields| {
-                let command_name = variant.command.as_str();
-                let field_visitor_calls =
-                    get_subcommand_field_visitor_calls(&fields_ident, &visitor, fields);
+        /*let command_name = variant.command.as_str();
+        let field_visitor_calls =
+            get_subcommand_field_visitor_calls(&fields_ident, &visitor, fields);
 
-                quote! {{
-                    let #visitor = ::debate::state::SubcommandPathVisitorWithItem::new(
-                        ::debate::state::SubcommandPathItem::Command(#command_name),
-                        #visitor,
-                    );
+        quote! {{
+            let #visitor = ::debate::state::SubcommandPathVisitorWithItem::new(
+                ::debate::state::SubcommandPathItem::Command(#command_name),
+                #visitor,
+            );
 
-                    #(#field_visitor_calls)*
+            #(#field_visitor_calls)*
 
-                    let _ = #fields_ident;
+            let _ = #fields_ident;
 
-                    ::core::result::Result::Ok(#visitor.call())
-                }}
-            },
-        )
+            ::core::result::Result::Ok(#visitor.call())
+        }} */
+
+        let body = match variant.mode.normalized() {
+            SubcommandVariantNormalizedMode::Fields(parsed_field_infos) => todo!(),
+            SubcommandVariantNormalizedMode::Newtype(_) => todo!(),
+        };
+
+        quote! {
+            Self :: #variant_ident { ref #fields_ident, .. } => {
+                let #visitor = ::debate::state::SubcommandPathVisitorWithItem::new(
+                    ::debate::state::SubcommandPathItem::Command(#command_name),
+                    #visitor,
+                );
+
+                let _ = #fields_ident;
+
+                ::core::result::Result::Ok(#visitor.call())
+            }
+        }
     });
 
     let build_body_fallback = match parsed_variants.fallback {

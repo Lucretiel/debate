@@ -1,3 +1,5 @@
+use core::iter;
+
 use debate_parser::Arg;
 
 use crate::{help::HelpRequest, parameter};
@@ -5,8 +7,13 @@ use crate::{help::HelpRequest, parameter};
 pub trait SubcommandVisitor {
     type Output;
 
-    fn visit_subcommand(self, subcommand: &SubcommandPath) -> Self::Output;
+    fn visit_subcommand(self, subcommand: &SubcommandPath<'_>) -> Self::Output;
 }
+
+// TODO: find a way to impl `SubcommandVisitor` for `FnOnce(&SubcommandPath)`.
+// Currently it chokes on the lifetimes but it would be VERY convenient.
+// alternatively, find a way to use a closure instead of a visitor in the first
+// place. That has trouble with our need to "reverse" the closure process.
 
 #[derive(Debug, Clone, Copy)]
 pub enum SubcommandPathItem<'a> {
@@ -30,6 +37,10 @@ impl<'a> SubcommandPath<'a> {
             item,
             prev: Some(self),
         }
+    }
+
+    pub fn iter<'s>(&'s self) -> impl Iterator<Item = &'s SubcommandPathItem<'a>> {
+        iter::successors(Some(self), |current| current.prev).map(|current| &current.item)
     }
 }
 

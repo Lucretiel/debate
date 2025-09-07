@@ -17,7 +17,7 @@ use debate_derive::{FromArgs, ParameterUsage, Usage, Value};
 /// amet dui quis, pulvinar faucibus ligula.
 #[derive(Debug, FromArgs, Usage)]
 #[debate(help)]
-struct Arguments {
+struct DebateDemo {
     /// The path
     #[debate(short, long = "foo")]
     path: PathBuf,
@@ -156,7 +156,7 @@ struct TestArgs {
 
 fn main() -> anyhow::Result<()> {
     let args = debate::arguments::LoadedArguments::from_env();
-    let args: Arguments = args.parse();
+    let args: DebateDemo = args.parse();
 
     println!("{args:#?}");
 
