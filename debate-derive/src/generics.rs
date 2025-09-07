@@ -3,6 +3,9 @@ use proc_macro2::{Punct, Span, TokenStream as TokenStream2, TokenTree as TokenTr
 use quote::ToTokens;
 use syn::{Generics, Lifetime, spanned::Spanned};
 
+/// A lifetime that, when rendered with `to_tokens`, includes `< >` around it.
+/// This exists because you can wrap it in `Option` to make it easy to omit
+/// or include an entire generics clause.
 pub struct AngleBracedLifetime {
     lifetime: Lifetime,
 }

@@ -21,6 +21,7 @@ macro_rules! regex {
     }};
 }
 
+/// A borrowed identifier that also has its string pre-computed for easy reuse.
 pub struct IdentString<'a> {
     raw: &'a Ident,
     string: String,
@@ -54,7 +55,9 @@ pub enum FlattenOr<F, T> {
     Normal(T),
 }
 
-/// Attributes for a field
+/// Attributes for a field. "Raw" because it doesn't yet do various
+/// correctness checks, such as ensuring `flatten` is unique, or that `invert`
+/// only appears on flags.
 #[derive(darling::FromAttributes, Debug)]
 #[darling(attributes(debate))]
 struct RawParsedFieldAttr {
@@ -62,8 +65,8 @@ struct RawParsedFieldAttr {
     short: Option<Override<SpannedValue<char>>>,
     default: Option<Override<Expr>>,
     placeholder: Option<SpannedValue<String>>,
-    // clear = "no-verbose"
-    // overridable
+    // invert = "no-verbose"
+    // override
 
     // TODO: add a parse step where `flatten` must not coexist with the other
     // variants. Consider switching from `darling` to `deluxe`, which apparently
@@ -71,19 +74,23 @@ struct RawParsedFieldAttr {
     flatten: Option<()>,
 }
 
+/// Setting for a default for a field
 pub enum FieldDefault {
-    None,
+    /// Use `Default::default` to populate this field if it was absent
     Trait,
+
+    /// Use this expression to populate the field if it was absent
     Expr(Expr),
 }
 
 impl FieldDefault {
-    pub fn new(default: Option<Override<Expr>>) -> Self {
-        match default {
-            Some(Override::Explicit(default)) => Self::Expr(default),
-            Some(Override::Inherit) => Self::Trait,
-            None => Self::None,
-        }
+    #[inline]
+    #[must_use]
+    pub fn new(default: Option<Override<Expr>>) -> Option<Self> {
+        default.map(|default| match default {
+            Override::Explicit(default) => Self::Expr(default),
+            Override::Inherit => Self::Trait,
+        })
     }
 }
 
@@ -94,6 +101,8 @@ pub enum OptionTag<Long, Short> {
 }
 
 impl OptionTag<SpannedValue<String>, SpannedValue<char>> {
+    #[inline]
+    #[must_use]
     pub fn long(&self) -> Option<SpannedValue<&str>> {
         match *self {
             OptionTag::Long(ref long) | OptionTag::LongShort { ref long, .. } => {
@@ -103,6 +112,8 @@ impl OptionTag<SpannedValue<String>, SpannedValue<char>> {
         }
     }
 
+    #[inline]
+    #[must_use]
     pub fn short(&self) -> Option<SpannedValue<char>> {
         match *self {
             OptionTag::Short(short) | OptionTag::LongShort { short, .. } => Some(short),
@@ -111,6 +122,8 @@ impl OptionTag<SpannedValue<String>, SpannedValue<char>> {
     }
 
     // Shed the spanned value stuff if we don't need it
+    #[inline]
+    #[must_use]
     pub fn simplify(&self) -> OptionTag<&str, char> {
         match self {
             OptionTag::Long(long) => OptionTag::Long(long.as_str()),
@@ -130,6 +143,7 @@ pub struct Description {
 }
 
 impl Description {
+    #[must_use]
     pub fn from_paragraphs(paragraphs: impl IntoIterator<Item = String>) -> Self {
         let mut paragraphs = paragraphs.into_iter();
 
@@ -151,17 +165,28 @@ impl Description {
 
 pub struct PositionalFieldInfo<'a> {
     pub ident: IdentString<'a>,
+
+    /// The placeholder for this field, shown to the user in usage messages.
+    /// usually all caps.
     pub placeholder: SpannedValue<String>,
     pub ty: &'a Type,
-    pub default: FieldDefault,
+    pub default: Option<FieldDefault>,
     pub docs: Description,
 }
 
-pub struct OptionFieldInfo<'a> {
+pub struct FlagFieldInfo<'a> {
+    /// Identifier for this field
     pub ident: IdentString<'a>,
+
+    /// The placeholder for this field, shown to the user in usage messages.
     pub placeholder: SpannedValue<String>,
+
+    /// Type of this field
     pub ty: &'a Type,
-    pub default: FieldDefault,
+
+    /// Default value setting (either to use the `Default` trait, a specific
+    /// expression, or none)
+    pub default: Option<FieldDefault>,
     pub docs: Description,
     pub tags: OptionTag<SpannedValue<String>, SpannedValue<char>>,
 }
@@ -235,7 +260,7 @@ pub fn compute_docs(attrs: &[Attribute]) -> syn::Result<Description> {
 
 pub enum ParsedFieldInfo<'a> {
     Positional(PositionalFieldInfo<'a>),
-    Option(OptionFieldInfo<'a>),
+    Option(FlagFieldInfo<'a>),
     Flatten(FlattenFieldInfo<'a>),
 }
 
@@ -305,7 +330,7 @@ impl<'a> ParsedFieldInfo<'a> {
                     default,
                     docs,
                 }),
-                Some(tags) => Self::Option(OptionFieldInfo {
+                Some(tags) => Self::Option(FlagFieldInfo {
                     ident,
                     placeholder,
                     ty,

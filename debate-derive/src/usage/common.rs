@@ -42,7 +42,7 @@ pub fn struct_usage_items(parsed_fields: &[ParsedFieldInfo<'_>], help: HelpOptio
         ParsedFieldInfo::Positional(field) => {
             let placeholder = field.placeholder.as_str();
             let ty = field.ty;
-            let defaulted = matches!(field.default, FieldDefault::Trait | FieldDefault::Expr(_));
+            let defaulted = field.default.is_some();
             let docs = field.docs.quote();
 
             quote! {
@@ -62,7 +62,7 @@ pub fn struct_usage_items(parsed_fields: &[ParsedFieldInfo<'_>], help: HelpOptio
             let tags = compute_usage_tags(&field.tags.simplify());
             let placeholder = field.placeholder.as_str();
             let ty = field.ty;
-            let defaulted = matches!(field.default, FieldDefault::Trait | FieldDefault::Expr(_));
+            let defaulted = field.default.is_some();
             let docs = field.docs.quote();
 
             quote! {

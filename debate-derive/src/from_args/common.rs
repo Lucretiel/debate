@@ -3,7 +3,7 @@ use quote::{ToTokens, format_ident, quote};
 use syn::{Ident, Index, Lifetime};
 
 use crate::common::{
-    FieldDefault, FlattenFieldInfo, FlattenOr, IdentString, OptionFieldInfo, ParsedFieldInfo,
+    FieldDefault, FlagFieldInfo, FlattenFieldInfo, FlattenOr, IdentString, ParsedFieldInfo,
     PositionalFieldInfo,
 };
 
@@ -38,7 +38,7 @@ pub fn struct_state_block_from_fields<'a>(
         .into_iter()
         .map(|info| match *info {
             ParsedFieldInfo::Positional(PositionalFieldInfo { ty, .. })
-            | ParsedFieldInfo::Option(OptionFieldInfo { ty, .. }) => FlattenOr::Normal(ty),
+            | ParsedFieldInfo::Option(FlagFieldInfo { ty, .. }) => FlattenOr::Normal(ty),
             ParsedFieldInfo::Flatten(FlattenFieldInfo { ty, .. }) => FlattenOr::Flatten(ty),
         })
         .map(|field| match field {
@@ -83,7 +83,7 @@ fn indexed_fields<'a>(
 
 fn option_fields<'a>(
     fields: &'a [ParsedFieldInfo<'a>],
-) -> impl Iterator<Item = (Index, &'a OptionFieldInfo<'a>)> {
+) -> impl Iterator<Item = (Index, &'a FlagFieldInfo<'a>)> {
     indexed_fields(fields).filter_map(|(index, field)| match field {
         ParsedFieldInfo::Option(field) => Some((index, field)),
         ParsedFieldInfo::Positional(_) | ParsedFieldInfo::Flatten(_) => None,
@@ -263,7 +263,7 @@ fn complete_option_body<'a>(
 
     fields: &'a [ParsedFieldInfo<'a>],
     help: Option<(Literal, HelpMode)>,
-    make_scrutinee: impl Fn(&'a OptionFieldInfo<'a>) -> Option<Literal>,
+    make_scrutinee: impl Fn(&'a FlagFieldInfo<'a>) -> Option<Literal>,
 
     trait_ident: &Ident,
     parameter_method: &Ident,
@@ -444,7 +444,7 @@ pub fn final_field_initializers(
         short: Option<char>,
         placeholder: &'a str,
         ident: &'a IdentString<'a>,
-        default: &'a FieldDefault,
+        default: Option<&'a FieldDefault>,
     }
 
     indexed_fields(fields)
@@ -457,14 +457,14 @@ pub fn final_field_initializers(
                         short: None,
                         placeholder: &field.placeholder,
                         ident: &field.ident,
-                        default: &field.default,
+                        default: field.default.as_ref(),
                     }),
                     ParsedFieldInfo::Option(field) => FlattenOr::Normal(NormalFieldInfo {
                         long: field.tags.long().as_deref().copied(),
                         short: field.tags.short().as_deref().copied(),
                         placeholder: &field.placeholder,
                         ident: &field.ident,
-                        default: &field.default,
+                        default: field.default.as_ref(),
                     }),
                     ParsedFieldInfo::Flatten(field) => FlattenOr::Flatten(field),
                 },
@@ -498,16 +498,16 @@ pub fn final_field_initializers(
                 };
 
                 let default = match field.default {
-                    FieldDefault::Expr(expr) => quote! { #expr },
-                    FieldDefault::Trait => quote! { ::core::default::Default::default() },
-                    FieldDefault::None => quote! {
+                    Some(FieldDefault::Expr(expr)) => quote! { #expr },
+                    Some(FieldDefault::Trait) => quote! { ::core::default::Default::default() },
+                    None => quote! {
                         match ::debate::parameter::Parameter::absent() {
                             ::core::result::Result::Ok(value) => value,
-                            ::core::result::Result::Err(::debate::parameter::RequiredError) => return (
-                                ::core::result::Result::Err(
+                            ::core::result::Result::Err(::debate::parameter::RequiredError) => {
+                                return ::core::result::Result::Err(
                                     ::debate::build::Error:: #error,
                                 )
-                            ),
+                            }
                         }
                     },
                 };
