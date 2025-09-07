@@ -89,7 +89,7 @@ pub fn derive_args_struct(
     let option = format_ident!("option");
     let visitor = format_ident!("visitor");
 
-    let state_block = struct_state_block_from_fields(&fields);
+    let state_block = struct_state_block_from_fields(&fields, lifetime);
     let state_init_block = struct_state_init_block_from_field_count(fields.len());
 
     let visit_positional_arms = visit_positional_arms_for_fields(

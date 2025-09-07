@@ -12,7 +12,7 @@ use itertools::Itertools as _;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::ToTokens;
 use regex::Regex;
-use syn::{Attribute, Expr, Field, Ident, Type, spanned::Spanned};
+use syn::{Attribute, Expr, Field, Ident, Type, spanned::Spanned as _};
 
 macro_rules! regex {
     ($pattern:literal) => {{

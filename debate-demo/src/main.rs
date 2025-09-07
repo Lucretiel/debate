@@ -1,7 +1,7 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use debate::help::Description;
-use debate_derive::{FromArgs, ParameterUsage, Usage, Value};
+use debate_derive::{self, FromArgs, ParameterUsage, Usage, Value};
 
 /// This is a demo program for the debate CLI parser
 ///
@@ -17,10 +17,10 @@ use debate_derive::{FromArgs, ParameterUsage, Usage, Value};
 /// amet dui quis, pulvinar faucibus ligula.
 #[derive(Debug, FromArgs, Usage)]
 #[debate(help)]
-struct DebateDemo {
+struct DebateDemo<'a> {
     /// The path
     #[debate(short, long = "foo")]
-    path: PathBuf,
+    path: &'a Path,
 
     /// Whether or not we're running in verbose mode
     #[debate(short, long)]
@@ -154,10 +154,8 @@ struct TestArgs {
     warn_only: bool,
 }
 
-fn main() -> anyhow::Result<()> {
-    let args = debate::arguments::LoadedArguments::from_env();
-    let args: DebateDemo = args.parse();
-
+#[debate_derive::main(leak)]
+fn main(args: DebateDemo<'static>) -> anyhow::Result<()> {
     println!("{args:#?}");
 
     Ok(())

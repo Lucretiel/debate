@@ -77,12 +77,15 @@ pub fn derive_args_enum_subcommand(
         // The bodies of the states are carefully massaged to have the same
         // field idents, to make it easier to deduplicate code using them
         let variant_state_body = match variant.mode {
-            SubcommandVariantMode::Unit => struct_state_block(quote! {()}, []),
+            SubcommandVariantMode::Unit => struct_state_block(quote! {()}, lifetime, []),
             SubcommandVariantMode::Newtype { ty } => struct_state_block(
                 quote! {()},
-                [quote! { <#ty as ::debate::build::BuildFromArgs<'arg>>::State }],
+                lifetime,
+                [quote! { <#ty as ::debate::build::BuildFromArgs<#lifetime>>::State }],
             ),
-            SubcommandVariantMode::Struct { ref fields } => struct_state_block_from_fields(fields),
+            SubcommandVariantMode::Struct { ref fields } => {
+                struct_state_block_from_fields(fields, lifetime)
+            }
         };
 
         quote! {

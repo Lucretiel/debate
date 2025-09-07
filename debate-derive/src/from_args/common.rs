@@ -1,6 +1,6 @@
 use proc_macro2::{Literal, Span, TokenStream as TokenStream2};
 use quote::{ToTokens, format_ident, quote};
-use syn::{Ident, Index};
+use syn::{Ident, Index, Lifetime};
 
 use crate::common::{
     FieldDefault, FlattenFieldInfo, FlattenOr, IdentString, OptionFieldInfo, ParsedFieldInfo,
@@ -14,6 +14,7 @@ enum HelpMode {
 
 pub fn struct_state_block<'a>(
     position_ty: impl ToTokens,
+    lifetime: &Lifetime,
     fields_types: impl IntoIterator<Item = TokenStream2>,
 ) -> TokenStream2 {
     let fields_types = fields_types.into_iter();
@@ -21,7 +22,7 @@ pub fn struct_state_block<'a>(
     quote! {
         {
             position: #position_ty,
-            phantom: ::core::marker::PhantomData<& 'arg ()>,
+            phantom: ::core::marker::PhantomData<& #lifetime ()>,
             fields: ( #(#fields_types,)* ),
         }
     }
@@ -31,6 +32,7 @@ pub fn struct_state_block<'a>(
 /// for separate enum variant states
 pub fn struct_state_block_from_fields<'a>(
     fields: impl IntoIterator<Item = &'a ParsedFieldInfo<'a>>,
+    lifetime: &Lifetime,
 ) -> TokenStream2 {
     let field_state_types = fields
         .into_iter()
@@ -41,14 +43,14 @@ pub fn struct_state_block_from_fields<'a>(
         })
         .map(|field| match field {
             FlattenOr::Flatten(ty) => quote! {
-                <#ty as ::debate::build::BuildFromArgs<'arg>>::State
+                <#ty as ::debate::build::BuildFromArgs<#lifetime>>::State
             },
             FlattenOr::Normal(ty) => quote! {
                 ::core::option::Option<#ty>
             },
         });
 
-    struct_state_block(quote! { u16 }, field_state_types)
+    struct_state_block(quote! { u16 }, lifetime, field_state_types)
 }
 
 /// Create a default initializer block for a structure

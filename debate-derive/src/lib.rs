@@ -1,6 +1,7 @@
 mod common;
 mod from_args;
 mod generics;
+mod main_func;
 mod usage;
 mod value;
 
@@ -24,6 +25,9 @@ macro_rules! proc_macro_definition {
     }
 }
 
+// TODO: separate `BuildFromArgs` and `Usage` derive, with `FromArgs` covering
+// both
+
 proc_macro_definition! {
     derive(FromArgs) attributes(debate)
     pub fn derive_args => from_args::derive_args_result;
@@ -42,4 +46,30 @@ proc_macro_definition! {
 proc_macro_definition! {
     derive(ParameterUsage) attributes()
     pub fn derive_parameter_usage => usage::value::derive_parameter_usage_result;
+}
+
+/*
+    fn main(args: Args) -> Foo {
+        $BODY
+    }
+
+    becomes
+
+    fn main() {
+        let args = LoadedArguments::from_env();
+        let args: Args = args.parse();
+
+        $BODY
+    }
+*/
+
+// TODO: reuse the macro from above, it's close enough.
+/// Decorate an `fn main` to inject the command line arguments as a type.
+#[proc_macro_attribute]
+pub fn main(attrs: TokenStream, item: TokenStream) -> TokenStream {
+    match main_func::decorate_fn_main(attrs.into(), item.into()) {
+        Ok(tokens) => tokens,
+        Err(err) => err.to_compile_error(),
+    }
+    .into()
 }
