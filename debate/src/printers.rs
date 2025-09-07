@@ -102,6 +102,24 @@ pub fn write_build_error(out: &mut impl io::Write, error: &BuildError) -> io::Re
     }
 }
 
+fn any_options(items: &UsageItems<'_>) -> bool {
+    match *items {
+        UsageItems::Parameters { parameters } => {
+            parameters.iter().any(|parameter| match parameter {
+                Parameter::Option(option) => option.requirement == Requirement::Optional,
+                Parameter::Positional(_) => false,
+                Parameter::Group(group) => any_options(&group.contents),
+            })
+        }
+        // Subcommands might have options, but their usage messages are printed
+        // separately.
+        UsageItems::Subcommands { .. } => todo!(),
+        // For now we'll say yes, but definitely will revisit later when we
+        // decide how to print synopses for exclusive flag sets
+        UsageItems::Exclusive { all_options, .. } => all_options.len() > 0,
+    }
+}
+
 /*
 Overall structure:
 
@@ -139,10 +157,15 @@ pub fn print_help<'a>(
         // In particular, we know that there are definitely no options
         // if items is a subcommand set.
         write!(out, "{command}")?;
+
         subcommand
             .into_iter()
             .try_for_each(|subcommand| write!(out, " {subcommand}"))?;
-        write!(out, " [OPTIONS]")?;
+
+        if any_options(items) {
+            write!(out, " [OPTIONS]")?;
+        }
+
         print_synopsis(&mut out, "COMMAND", style, items)?;
         writeln!(out)
     })?;
