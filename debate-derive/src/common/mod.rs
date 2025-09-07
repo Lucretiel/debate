@@ -142,27 +142,6 @@ pub struct Description {
     pub long: String,
 }
 
-impl Description {
-    #[must_use]
-    pub fn from_paragraphs(paragraphs: impl IntoIterator<Item = String>) -> Self {
-        let mut paragraphs = paragraphs.into_iter();
-
-        let Some(first) = paragraphs.next() else {
-            return Self::default();
-        };
-
-        let short = first.clone();
-        let long = paragraphs.fold(first, |mut body, paragraph| {
-            body.reserve(paragraph.len() + 2);
-            body.push_str("\n\n");
-            body.push_str(&paragraph);
-            body
-        });
-
-        Self { short, long }
-    }
-}
-
 pub struct PositionalFieldInfo<'a> {
     pub ident: IdentString<'a>,
 
@@ -209,8 +188,6 @@ pub struct FlattenFieldInfo<'a> {
     pub ty: &'a Type,
 }
 
-// TODO: compute short + long docs
-// TODO: rewrap
 pub fn compute_docs(attrs: &[Attribute]) -> syn::Result<Description> {
     let body: String = attrs
         .iter()
@@ -241,21 +218,41 @@ pub fn compute_docs(attrs: &[Attribute]) -> syn::Result<Description> {
 
     // textwrap doesn't support multiple paragraphs, so we need to separate it
     // ourselves.
+
+    // Preserve leading whitespace, but not newlines
     let leading_whitespace = regex!("^[\t\n ]*\n");
+
+    // Paragraphs are separated by at least two newlines, with any amount of
+    // whitespace in between.
     let paragraph_separator = regex!("[\t ]*\n[*\t\n ]*\n");
 
     let body = body.trim_end();
     let body = leading_whitespace.replace(body, "");
 
-    let paragraphs = paragraph_separator.split(&body).map(|paragraph| {
+    let mut paragraphs = paragraph_separator.split(&body).map(|paragraph| {
         // This is basically `textwrap::refill`, except that `refill` takes
         // care to preserve line prefixes, and we explicitly are trying not
         // to do that.
         let (unfilled, _) = textwrap::unfill(paragraph);
+
+        // One cute thing we get to do is wrap to 80 actual real columns of
+        // text, because indentation is handled separately.
         textwrap::fill(&unfilled, 80)
     });
 
-    Ok(Description::from_paragraphs(paragraphs))
+    let Some(first) = paragraphs.next() else {
+        return Ok(Description::default());
+    };
+
+    let short = first.clone();
+    let long = paragraphs.fold(first, |mut body, paragraph| {
+        body.reserve(paragraph.len() + 2);
+        body.push_str("\n\n");
+        body.push_str(&paragraph);
+        body
+    });
+
+    Ok(Description { short, long })
 }
 
 pub enum ParsedFieldInfo<'a> {

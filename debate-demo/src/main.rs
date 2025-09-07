@@ -26,25 +26,6 @@ struct DebateDemo<'a> {
     #[debate(short, long)]
     verbose: bool,
 
-    /// A flag with only a short form, to test some stuff with short descriptions
-    #[debate(short)]
-    x: bool,
-
-    /// A flag with a short form only
-    #[debate(short)]
-    y: bool,
-
-    /// Brief header for z
-    ///
-    /// A flag with a short form but long description. Lorem ipsum dolor sit
-    /// amet, consectetur adipiscing elit. Nunc dignissim placerat dolor, eu
-    /// semper leo venenatis ut. Morbi volutpat congue dignissim. Vivamus
-    /// aliquet vitae massa sed gravida. Phasellus vulputate lacus vitae
-    /// convallis ultricies. Nulla facilisi. Suspendisse leo turpis, tincidunt
-    /// ut nisl eu, bibendum efficitur magna.
-    #[debate(short)]
-    z: bool,
-
     /// The second path
     #[debate(short)]
     second_path: Option<PathBuf>,
@@ -94,6 +75,32 @@ struct Alphabet {
     /// Want to go
     #[debate(long)]
     direction: Option<Direction>,
+
+    /// Even more deeply nested options
+    #[debate(flatten)]
+    special_alphabet_options: NestedAlphabet,
+}
+
+#[derive(FromArgs, Usage, Debug)]
+struct NestedAlphabet {
+    /// A flag with only a short form, to test some stuff with short descriptions
+    #[debate(short)]
+    x: bool,
+
+    /// A flag with a short form only
+    #[debate(short)]
+    y: bool,
+
+    /// Brief header for z
+    ///
+    /// A flag with a short form but long description. Lorem ipsum dolor sit
+    /// amet, consectetur adipiscing elit. Nunc dignissim placerat dolor, eu
+    /// semper leo venenatis ut. Morbi volutpat congue dignissim. Vivamus
+    /// aliquet vitae massa sed gravida. Phasellus vulputate lacus vitae
+    /// convallis ultricies. Nulla facilisi. Suspendisse leo turpis, tincidunt
+    /// ut nisl eu, bibendum efficitur magna.
+    #[debate(short)]
+    z: bool,
 }
 
 #[derive(Debug, Clone, Copy, Value, ParameterUsage)]

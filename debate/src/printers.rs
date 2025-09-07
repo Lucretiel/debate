@@ -370,6 +370,9 @@ fn print_synopsis(
 
 /// Write a section by writing a newline, then the `header`, then an
 /// indented `body`.
+///
+/// TODO: Only top-level sections should get the bonus leading newline.
+/// Consider removing it from `section` and doing it only in `print_help`.
 fn section<O: io::Write + ?Sized, T>(
     out: &mut O,
     header: &str,
