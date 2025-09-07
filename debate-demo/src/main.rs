@@ -1,6 +1,5 @@
 use std::path::{Path, PathBuf};
 
-use debate::help::Description;
 use debate_derive::{self, FromArgs, ParameterUsage, Usage, Value};
 
 /// This is a demo program for the debate CLI parser
@@ -52,6 +51,14 @@ struct DebateDemo<'a> {
 
     #[debate(flatten)]
     subcommand: Subcommand,
+
+    /**
+    An optional positional number.
+
+    This is here to test error messages related to positionals and parse
+    errors.
+    */
+    scale: Option<u32>,
 
     /// A positional argument
     extra: Option<String>,
@@ -165,8 +172,8 @@ struct TestArgs {
     warn_only: bool,
 }
 
-#[debate_derive::main(leak)]
-fn main(args: DebateDemo<'static>) -> anyhow::Result<()> {
+#[debate_derive::main]
+fn main(args: DebateDemo<'_>) -> anyhow::Result<()> {
     println!("{args:#?}");
 
     Ok(())
