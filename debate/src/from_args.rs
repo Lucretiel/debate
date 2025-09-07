@@ -24,6 +24,11 @@ macro_rules! use_stream_and_die {
 }
 
 /// A type that can be parsed from command line arguments
+///
+/// If you're implementing this by hand, you should certainly prefer instead
+/// to implement [`BuildFromArgs`]. That takes care of a lot of the tedious
+/// looping over the `arguments` object, and also allows delegating argument
+/// parsing with `#[debate(flatten)]`.
 pub trait FromArgs<'arg>: Sized {
     fn try_from_parser<E>(
         arguments: ArgumentsParser<'arg, impl Iterator<Item = &'arg [u8]>>,

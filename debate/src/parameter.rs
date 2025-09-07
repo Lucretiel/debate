@@ -132,14 +132,19 @@ pub trait Parameter<'arg>: Sized {
     fn add_present<E: Error<'arg>>(&mut self, argument: impl ArgAccess<'arg>) -> Result<(), E>;
 }
 
-/// A parameter that can be used as a positional parameter (as opposed to a
-/// --option), which means that it MUST take an argument. A positional
-/// parameter may appear 0 or more times on the command line (depending on its
-/// specific implementation); for types that should appear exactly once (like
-/// integers and strings), you should implement [`Value`] instead.
-///
-/// Types that implement [`PositionalParameter`] automatically implement
-/// [`Parameter`].
+/**
+A parameter that can be used as a positional parameter (as opposed to a
+`--option`), which means that it MUST take an argument. A positional
+parameter may appear 0 or more times on the command line (depending on its
+specific implementation); for types that should appear exactly once (like
+integers and strings), you should implement [`Value`] instead.
+
+Note that, despite the name, a `PostionalParameter` *can* be used as a
+`--flag` type
+
+Types that implement [`PositionalParameter`] automatically implement
+[`Parameter`].
+*/
 pub trait PositionalParameter<'arg>: Sized {
     /**
     This parameter was absent from the command line.

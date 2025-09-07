@@ -9,9 +9,14 @@ use crate::{
     build,
     from_args::{self, FromArgs},
     help::Usage,
-
 };
 
+/// Helper type for loading arguments from the environment. Usually you can
+/// just use `#[debate::main]` instead of reaching for this type.
+///
+/// This type exists for roughly two purposes: to provide a convenient
+/// owned container for args retreived from [`std::env`], and to be an object
+/// that a [`FromArgs`] can borrow from.
 #[derive(Debug, Clone)]
 pub struct LoadedArguments {
     arguments: Vec<OsString>,

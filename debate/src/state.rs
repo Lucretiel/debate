@@ -4,6 +4,7 @@ use debate_parser::Arg;
 
 use crate::{help::HelpRequest, parameter};
 
+// TODO: move all this subcommand business to another module
 pub trait SubcommandVisitor {
     type Output;
 

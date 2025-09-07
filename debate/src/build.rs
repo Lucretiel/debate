@@ -33,10 +33,17 @@ those argument into a `State`, and then then turning that state into this
 final type. Types that implement `BuildFromArgs` automatically implement
 `FromArgs`.
 
-If you are manually implementing [`FromArgs`], it usually makes sense to
-instead implement [`BuildFromArgs`]. It will take care of the looping logic
-and allow you to focus on individual argument handling, and will also grant
-compatibility with delegating argument parsing with `#[debate(flatten)]`.
+If you are manually implementing [`FromArgs`][crate::from_args::FromArgs], it
+usually makes sense to instead implement [`BuildFromArgs`]. It will take care
+of the looping logic and allow you to focus on individual argument handling,
+and will also grant compatibility with delegating argument parsing with
+`#[debate(flatten)]`.
+
+Most of the interesting work happens in the associated
+[`State`][BuildFromArgs::State] type, which has methods that allow it to parse
+one command line argument at a time. After all arguments have been parsed, the
+state object is passed into [`build`][BuildFromArgs::build], which checks for
+things like required arguments and then constructs the final object.
 */
 pub trait BuildFromArgs<'arg>: Sized {
     type State: state::State<'arg> + Default;
