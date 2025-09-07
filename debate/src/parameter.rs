@@ -34,6 +34,10 @@ pub trait Error<'arg> {
     /// The argument wasn't valid UTF-8 and should be
     fn invalid_utf8(argument: &'arg Arg) -> Self;
 
+    /// The argument should be one of the given values (or, possibly, a case
+    /// insensitive variation)
+    fn should_be(argument: &'arg Arg, expected: &'static [&'static str]) -> Self;
+
     /// The argument was valid UTF-8, but it failed to parse into an instance
     /// of the type
     fn parse_error(argument: &'arg str, message: impl Display) -> Self;
@@ -60,10 +64,10 @@ type of argument (option vs flag vs positional). It is the "type" part of the
 command line argument, responsible for requesting arguments (if appropriate)
 and parsing them into the underlying type.
 
-Generally a type should have a consistent behavior with regard to taking values;
-that is, it should either ALWAYS or NEVER accept arguments. This ensures that
-the parse behavior is as consistent as possible, with no weird ambiguities
-about options vs arguments.
+A type should have a consistent behavior with regard to taking values; that is,
+it should either ALWAYS or NEVER accept arguments. This ensures that the parse
+behavior is as consistent as possible, with no weird ambiguities about options
+vs arguments.
 
 This is the lowest-level parameter trait, with the broadest range of
 capabilities; usually it makes more sense to implement [`Value`] (for types

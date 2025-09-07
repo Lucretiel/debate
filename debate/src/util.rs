@@ -41,6 +41,10 @@ where
         Self::Error(E::byte_parse_error(arg, msg))
     }
 
+    fn should_be(argument: &'arg Arg, expected: &'static [&'static str]) -> Self {
+        Self::Error(E::should_be(argument, expected))
+    }
+
     fn custom(msg: impl fmt::Display) -> Self {
         Self::Error(E::custom(msg))
     }

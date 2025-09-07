@@ -63,8 +63,15 @@ pub fn parameter_error(source: &ParameterSource, error: &ParameterError) -> impl
                 "{source} appeared too many times",
                 source = printable_source(source)
             ),
+            // TODO: these error messages are not ideal with positional
+            // arguments (argument is duplicated)
             ParameterError::ParseError { message, arg } => (
                 "{source}: failed to parse {arg:?}: {message}",
+                source = printable_source(source)
+            ),
+            // TODO: show the possibility set (potentially only if it's small)
+            ParameterError::ShouldBe { arg, .. } => (
+                "{source}: {arg:?} wasn't an expected possible value",
                 source = printable_source(source)
             ),
             ParameterError::Custom { message } => (

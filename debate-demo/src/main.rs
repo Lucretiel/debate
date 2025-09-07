@@ -126,10 +126,14 @@ enum Subcommand {
     Clean,
 
     /// Build the project into a target directory
+    ///
+    /// These are more extensive docs for the build command
     Build {
+        /// The target directory to execute the build
         #[debate(long)]
         target: PathBuf,
 
+        /// If given, the build mode. Should be either `debug` or `release`.
         #[debate(long)]
         mode: Option<BuildMode>,
     },

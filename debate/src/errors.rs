@@ -47,6 +47,11 @@ impl<'arg> parameter::Error<'arg> for EmptyError {
     }
 
     #[inline(always)]
+    fn should_be(_: &'arg debate_parser::Arg, _: &'static [&'static str]) -> Self {
+        Self
+    }
+
+    #[inline(always)]
     fn custom(_: impl core::fmt::Display) -> Self {
         Self
     }
@@ -180,6 +185,13 @@ mod with_std {
         /// Failed to parse the argument
         ParseError { arg: &'arg Arg, message: String },
 
+        /// The argument should have been one of these (or, possibly, a case
+        /// insensitive variation)
+        ShouldBe {
+            arg: &'arg Arg,
+            expected: &'static [&'static str],
+        },
+
         /// Something else went wrong
         Custom { message: String },
     }
@@ -215,6 +227,13 @@ mod with_std {
             Self::ParseError {
                 arg,
                 message: message.to_string(),
+            }
+        }
+
+        fn should_be(argument: &'arg Arg, expected: &'static [&'static str]) -> Self {
+            Self::ShouldBe {
+                arg: argument,
+                expected,
             }
         }
 
