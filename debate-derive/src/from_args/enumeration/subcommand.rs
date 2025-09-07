@@ -1,4 +1,4 @@
-use proc_macro2::{Literal, TokenStream as TokenStream2, TokenTree};
+use proc_macro2::{Literal, TokenStream as TokenStream2};
 use quote::{format_ident, quote};
 use syn::{Ident, Lifetime, Token, Variant, punctuated::Punctuated};
 
@@ -31,17 +31,6 @@ fn make_variant_arm<const N: usize>(
     make_body: impl FnOnce(&[ParsedFieldInfo<'_>]) -> TokenStream2,
 ) -> TokenStream2 {
     let variant_ident = variant.ident.raw();
-
-    // TODO: find a better way (probably with a macro) to detect mutability
-    // on the fields binding
-    let mutable = bind
-        .clone()
-        .into_iter()
-        .take_while(|token| match token {
-            TokenTree::Ident(ident) => ident != fields_ident,
-            _ => true,
-        })
-        .any(|token| matches!(token, TokenTree::Ident(ref ident) if ident == "mut"));
 
     let body = match variant.mode.normalized() {
         SubcommandVariantNormalizedMode::Fields(fields) => make_body(fields),

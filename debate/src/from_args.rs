@@ -89,7 +89,7 @@ where
         };
 
         use crate::errors::BuildError;
-        use crate::printers::write_build_error;
+        use crate::printers::build_error;
 
         let mut state = T::State::default();
 
@@ -184,7 +184,7 @@ where
                 // accounts the flag that caused the error
                 use_stream_and_die! {
                     stderr = io::stderr().lock(),
-                    write_build_error(&mut stderr, &error)
+                    writeln!(stderr, "{}", build_error(&error)),
                 }
             }
         }
@@ -200,7 +200,7 @@ where
 
         use_stream_and_die! {
             stderr = io::stderr().lock(),
-            write_build_error(&mut stderr, &error)
+            writeln!(stderr, "{}", build_error(&error)),
         }
     }
 }

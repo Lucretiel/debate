@@ -1,3 +1,4 @@
+use core::slice;
 use std::{
     fmt::Display,
     io::{self, Write as _},
@@ -14,91 +15,100 @@ use crate::{
     },
 };
 
+fn printable_byte(byte: &u8) -> &str {
+    let bytes = slice::from_ref(byte);
+    match str::from_utf8(bytes) {
+        Ok(s) => s,
+        Err(_) => "??",
+    }
+}
+
+/// Turn a parameter source into a "noun" that can be used in the error
+/// messages
 pub fn printable_source(source: &ParameterSource) -> impl Display {
-    // TODO: the `long` case is current quoted and shouldn't be
     lazy_format! {
         match (*source) {
-            ParameterSource::Positional { arg } => "positional argument {arg:?}",
-            ParameterSource::Short { option } => "option -{option}",
-            ParameterSource::Long { option, .. } => "option --{option:?}",
+            ParameterSource::Positional { arg } => ("positional argument {arg}", arg = arg.as_str()),
+            ParameterSource::Short { option } => ("option -{option}", option = printable_byte(&option)),
+            ParameterSource::Long { option, .. } => ("option --{option}", option = option.as_str()),
         }
     }
 }
 
-pub fn write_parameter_error(
-    out: &mut impl io::Write,
-    source: &ParameterSource,
-    error: &ParameterError,
-) -> io::Result<()> {
-    match error {
-        ParameterError::NeedArgument => write!(
-            out,
-            "{source} requires an argument",
-            source = printable_source(source)
-        ),
-        ParameterError::FlagGotArgument(arg) => write!(
-            out,
-            "{source} is doesn't take an argument (got {arg:?})",
-            source = printable_source(source),
-        ),
-        // TODO: this message assumes that, if this error occurs,
-        // the argument is supposed to appear at most once. Might be
-        // worth including information here about the maximum permitted
-        // instances.
-        ParameterError::GotAdditionalInstance => write!(
-            out,
-            "{source} appeared too many times",
-            source = printable_source(source)
-        ),
-        ParameterError::ParseError { message, arg } => write!(
-            out,
-            "{source}: failed to parse {arg:?}: {message}",
-            source = printable_source(source)
-        ),
-        ParameterError::Custom { message } => write!(
-            out,
-            "{source}: {message}",
-            source = printable_source(source)
-        ),
+/// Get the "word" contained within the source. Usually `printable_source` is
+/// preferable, but this has its uses.
+pub fn source_word<'a>(source: &'a ParameterSource<'_>) -> &'a str {
+    match *source {
+        ParameterSource::Positional { arg } => arg.as_str(),
+        ParameterSource::Short { ref option } => printable_byte(option),
+        ParameterSource::Long { option, .. } => option.as_str(),
     }
 }
 
-pub fn write_state_error(
-    out: &mut impl io::Write,
-    source: &ParameterSource,
-    error: &StateError<'_>,
-) -> io::Result<()> {
-    match error {
-        StateError::Parameter { error, .. } => write_parameter_error(out, source, error),
-        StateError::Unrecognized => write!(
-            out,
-            "unrecognized {source}",
-            source = printable_source(source)
-        ),
-        StateError::UnknownSubcommand { .. } => {
-            write!(out, "unrecognized subcommand <TODO: SOURCE>")
+pub fn parameter_error(source: &ParameterSource, error: &ParameterError) -> impl Display {
+    lazy_format! {
+        match (error) {
+            ParameterError::NeedArgument => (
+                "{source} requires an argument",
+                source = printable_source(source)
+            ),
+            ParameterError::FlagGotArgument(arg) => (
+                "{source} doesn't take an argument (got {arg:?})",
+                source = printable_source(source),
+            ),
+            // TODO: typically this message means that it appeared more than once,
+            // which is common enough that we should find a way to detect it and
+            // print a specific message for it.
+            ParameterError::GotAdditionalInstance => (
+                "{source} appeared too many times",
+                source = printable_source(source)
+            ),
+            ParameterError::ParseError { message, arg } => (
+                "{source}: failed to parse {arg:?}: {message}",
+                source = printable_source(source)
+            ),
+            ParameterError::Custom { message } => (
+                "{source}: {message}",
+                source = printable_source(source)
+            ),
         }
-        StateError::WrongSubcommand { subcommand, .. } => write!(
-            out,
-            "{source} is not valid for subcommand {subcommand:?}",
-            source = printable_source(source),
-        ),
-        StateError::HelpRequested(..) => write!(out, "usage message was requested"),
     }
 }
 
-pub fn write_build_error(out: &mut impl io::Write, error: &BuildError) -> io::Result<()> {
-    match error {
-        BuildError::Arg { source, error } => write_state_error(out, source, error),
-        BuildError::RequiredSubcommand { .. } => write!(out, "no subcommand given"),
-        BuildError::RequiredFieldAbsent { kind, .. } => match *kind {
-            FieldKind::Long(long) => write! { out, "required option --{long} was omitted" },
-            FieldKind::Short(short) => write! {out, "required option -{short} was omitted" },
-            FieldKind::Positional(placeholder) => {
-                write! { out, "required argument <{placeholder}> was omitted"}
-            }
-        },
-        BuildError::Custom(message) => write!(out, "{message}"),
+pub fn state_error(source: &ParameterSource, error: &StateError<'_>) -> impl Display {
+    lazy_format! {
+        match (error) {
+            StateError::Parameter { error, .. } => ("{}", parameter_error(source, error)),
+            StateError::Unrecognized => (
+                "unrecognized {source}",
+                source = printable_source(source)
+            ),
+            StateError::UnknownSubcommand { .. } => (
+                "unrecognized subcommand {source:?}",
+                source = source_word(source)
+            ),
+            StateError::WrongSubcommand { subcommand, .. } => (
+                "{source} is not valid for subcommand {subcommand:?}",
+                source = printable_source(source),
+            ),
+            StateError::HelpRequested(..) => "usage message was requested",
+        }
+    }
+}
+
+pub fn build_error(error: &BuildError) -> impl Display {
+    lazy_format! {
+        match (error) {
+            BuildError::Arg { source, error } => ("{}", state_error(source, error)),
+            BuildError::RequiredSubcommand { .. } => "no subcommand given",
+            BuildError::RequiredFieldAbsent { kind: FieldKind::Long(long), .. } =>
+                "required option --{long} was omitted",
+            BuildError::RequiredFieldAbsent { kind: FieldKind::Short(short), .. } =>
+                "required option -{short} was omitted",
+            BuildError::RequiredFieldAbsent { kind:  FieldKind::Positional { placeholder }, .. } =>"
+                required argument <{placeholder}> was omitted",
+            BuildError::Custom(message) => "{message}",
+        }
     }
 }
 

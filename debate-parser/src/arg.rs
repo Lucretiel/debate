@@ -26,6 +26,21 @@ impl Arg {
     pub const fn bytes(&self) -> &[u8] {
         &self.0
     }
+
+    /// Attempt to turn this `Arg` into a string. Returns question marks if
+    /// it's not valid utf-8.
+    pub fn as_str(&self) -> &str {
+        let questions: &str = "????????????????";
+        let bytes = self.bytes();
+
+        match str::from_utf8(bytes) {
+            Ok(s) => s,
+            Err(_) => match questions.get(..bytes.len()) {
+                Some(questions) => questions,
+                None => questions,
+            },
+        }
+    }
 }
 
 impl PartialEq<[u8]> for Arg {
@@ -50,7 +65,7 @@ impl fmt::Debug for Arg {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match str::from_utf8(self.bytes()) {
             Ok(s) => write!(f, "{:?}", s),
-            Err(_) => write!(f, "{:?}", &self.0),
+            Err(_) => write!(f, "{:x?}", &self.0),
         }
     }
 }

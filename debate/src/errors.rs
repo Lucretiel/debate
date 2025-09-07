@@ -163,6 +163,9 @@ mod with_std {
 
     use crate::{build, from_args, help::HelpRequest, parameter, state};
 
+    /// An error trying to parse a parameter from a `--flag` or positional
+    /// argument. These error are produced from the primitive types, like
+    /// bools and strings and vectors.
     #[derive(Debug, Clone)]
     pub enum ParameterError<'arg> {
         /// This parameter needs an argument and didn't get one
@@ -226,23 +229,35 @@ mod with_std {
     /// arguments
     #[derive(Debug, Clone)]
     pub enum StateError<'arg> {
+        /// The argument was matched with a typed parameter, but the type
+        /// returned an error.
         Parameter {
             field: &'static str,
             error: ParameterError<'arg>,
         },
+
+        /// The argument failed to match any known parameters
         Unrecognized,
-        // Flattened {
-        //     field: &'static str,
-        //     error: Box<Self>,
-        // },
-        UnknownSubcommand {
-            expected: &'static [&'static str],
-        },
+
+        /// The argument was identified as a subcommand, but didn't match
+        /// any known subcommands.
+        UnknownSubcommand { expected: &'static [&'static str] },
+
+        /// Similar to `Unrecognized`: The argument was unrecognized by
+        /// *this* subcommand, but is possibly a valid argument for one of the
+        /// other subcommands.
         WrongSubcommand {
             subcommand: &'static str,
             allowed: &'static [&'static str],
         },
+
+        /// The argument was a request for a usage message
         HelpRequested(HelpRequest),
+        // /// A nested error from a nested arguments struct
+        // Flattened {
+        //     field: &'static str,
+        //     error: Box<Self>,
+        // },
     }
 
     impl StateError<'_> {
@@ -288,6 +303,9 @@ mod with_std {
         }
     }
 
+    /// A description of an argument that was found on the command line,
+    /// exactly as we found it. Used for messages about unrecognized arguments,
+    /// parse errors, and so on.
     #[derive(Debug, Clone)]
     pub enum ParameterSource<'arg> {
         Positional {
@@ -302,11 +320,12 @@ mod with_std {
         },
     }
 
+    /// Filtered, user-printable identification for a particular parameter.
     #[derive(Debug, Clone)]
     pub enum FieldKind {
         Long(&'static str),
         Short(char),
-        Positional(&'static str),
+        Positional { placeholder: &'static str },
     }
 
     /// Errors  that occur after all command line arguments have been parsed,
@@ -314,14 +333,20 @@ mod with_std {
     /// like absent required fields are detected.
     #[derive(Debug, Clone)]
     pub enum BuildError<'arg> {
+        /// There was a state error when loading the an argument from the
+        /// given source.
         Arg {
             source: ParameterSource<'arg>,
             error: StateError<'arg>,
         },
+
+        /// This field was absent. The `kind` includes information a
         RequiredFieldAbsent {
             field: &'static str,
             kind: FieldKind,
         },
+
+        /// One of these subcommands is required here
         RequiredSubcommand {
             expected: &'static [&'static str],
         },
@@ -365,7 +390,7 @@ mod with_std {
         fn required_positional(field: &'static str, placeholder: &'static str) -> Self {
             Self::RequiredFieldAbsent {
                 field,
-                kind: FieldKind::Positional(placeholder),
+                kind: FieldKind::Positional { placeholder },
             }
         }
 
