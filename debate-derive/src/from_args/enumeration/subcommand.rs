@@ -43,15 +43,10 @@ fn make_variant_arm<const N: usize>(
         })
         .any(|token| matches!(token, TokenTree::Ident(ref ident) if ident == "mut"));
 
-    let mut_token = match mutable {
-        true => quote! { mut },
-        false => quote! {},
-    };
-
     let body = match variant.mode.normalized() {
         SubcommandVariantNormalizedMode::Fields(fields) => make_body(fields),
         SubcommandVariantNormalizedMode::Newtype(_) => quote! {
-            ::debate::state::State::#state_method(& #mut_token #fields_ident.0, #(#argument_idents,)*)
+            ::debate::state::State::#state_method(&mut #fields_ident.0, #(#argument_idents,)*)
         },
     };
 
@@ -225,26 +220,24 @@ pub fn derive_args_enum_subcommand(
     });
 
     let get_subcommand_arms = parsed_variants.variants.iter().map(|variant| {
-        /*let command_name = variant.command.as_str();
-        let field_visitor_calls =
-            get_subcommand_field_visitor_calls(&fields_ident, &visitor, fields);
-
-        quote! {{
-            let #visitor = ::debate::state::SubcommandPathVisitorWithItem::new(
-                ::debate::state::SubcommandPathItem::Command(#command_name),
-                #visitor,
-            );
-
-            #(#field_visitor_calls)*
-
-            let _ = #fields_ident;
-
-            ::core::result::Result::Ok(#visitor.call())
-        }} */
+        let variant_ident = variant.ident.raw();
+        let command_name = variant.command.as_str();
 
         let body = match variant.mode.normalized() {
-            SubcommandVariantNormalizedMode::Fields(parsed_field_infos) => todo!(),
-            SubcommandVariantNormalizedMode::Newtype(_) => todo!(),
+            SubcommandVariantNormalizedMode::Fields(fields) => {
+                let field_visitor_calls =
+                    get_subcommand_field_visitor_calls(&fields_ident, &visitor, fields);
+
+                quote! { #(#field_visitor_calls)* }
+            }
+            SubcommandVariantNormalizedMode::Newtype(_) => quote! {
+                let #visitor = match ::debate::state::State::get_subcommand_path(
+                    &#fields_ident.0, #visitor
+                ) {
+                    ::core::result::Result::Ok(out) => return ::core::result::Result::Ok(out),
+                    ::core::result::Result::Err(visitor) => visitor,
+                };
+            },
         };
 
         quote! {
@@ -253,6 +246,8 @@ pub fn derive_args_enum_subcommand(
                     ::debate::state::SubcommandPathItem::Command(#command_name),
                     #visitor,
                 );
+
+                #body
 
                 let _ = #fields_ident;
 
