@@ -1,17 +1,15 @@
 use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
 
-use crate::common::{
-    Description, FieldDefault, FlattenFieldInfo, HelpOption, OptionTag, ParsedFieldInfo,
-};
+use crate::common::{Description, FlagTags, FlattenFieldInfo, HelpOption, ParsedFieldInfo};
 
 /// Convert a set of tags into an expression suitable for use after
 /// `::debate::help::Tags`
-fn compute_usage_tags(tags: &OptionTag<&str, char>) -> TokenStream2 {
+fn compute_usage_tags(tags: &FlagTags<&str, char>) -> TokenStream2 {
     match *tags {
-        OptionTag::Long(ref long) => quote! { Long { long : #long } },
-        OptionTag::Short(ref short) => quote! { Short { short: #short} },
-        OptionTag::LongShort {
+        FlagTags::Long(ref long) => quote! { Long { long : #long } },
+        FlagTags::Short(ref short) => quote! { Short { short: #short} },
+        FlagTags::LongShort {
             ref long,
             ref short,
         } => {

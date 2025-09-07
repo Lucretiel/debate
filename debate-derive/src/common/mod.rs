@@ -94,21 +94,21 @@ impl FieldDefault {
     }
 }
 
-pub enum OptionTag<Long, Short> {
+pub enum FlagTags<Long, Short> {
     Long(Long),
     Short(Short),
     LongShort { long: Long, short: Short },
 }
 
-impl OptionTag<SpannedValue<String>, SpannedValue<char>> {
+impl FlagTags<SpannedValue<String>, SpannedValue<char>> {
     #[inline]
     #[must_use]
     pub fn long(&self) -> Option<SpannedValue<&str>> {
         match *self {
-            OptionTag::Long(ref long) | OptionTag::LongShort { ref long, .. } => {
+            FlagTags::Long(ref long) | FlagTags::LongShort { ref long, .. } => {
                 Some(SpannedValue::new(long.as_str(), long.span()))
             }
-            OptionTag::Short(_) => None,
+            FlagTags::Short(_) => None,
         }
     }
 
@@ -116,19 +116,19 @@ impl OptionTag<SpannedValue<String>, SpannedValue<char>> {
     #[must_use]
     pub fn short(&self) -> Option<SpannedValue<char>> {
         match *self {
-            OptionTag::Short(short) | OptionTag::LongShort { short, .. } => Some(short),
-            OptionTag::Long(_) => None,
+            FlagTags::Short(short) | FlagTags::LongShort { short, .. } => Some(short),
+            FlagTags::Long(_) => None,
         }
     }
 
     // Shed the spanned value stuff if we don't need it
     #[inline]
     #[must_use]
-    pub fn simplify(&self) -> OptionTag<&str, char> {
+    pub fn simplify(&self) -> FlagTags<&str, char> {
         match self {
-            OptionTag::Long(long) => OptionTag::Long(long.as_str()),
-            OptionTag::Short(short) => OptionTag::Short(**short),
-            OptionTag::LongShort { long, short } => OptionTag::LongShort {
+            FlagTags::Long(long) => FlagTags::Long(long.as_str()),
+            FlagTags::Short(short) => FlagTags::Short(**short),
+            FlagTags::LongShort { long, short } => FlagTags::LongShort {
                 long: long.as_str(),
                 short: **short,
             },
@@ -188,11 +188,11 @@ pub struct FlagFieldInfo<'a> {
     /// expression, or none)
     pub default: Option<FieldDefault>,
     pub docs: Description,
-    pub tags: OptionTag<SpannedValue<String>, SpannedValue<char>>,
+    pub tags: FlagTags<SpannedValue<String>, SpannedValue<char>>,
 }
 
 pub struct FlattenFieldInfo<'a> {
-    /// Documentation for this fie;d
+    /// Documentation for this field
     pub docs: Description,
 
     /// Identifier for this field
@@ -319,9 +319,9 @@ impl<'a> ParsedFieldInfo<'a> {
         Ok(
             match match (long, short) {
                 (None, None) => None,
-                (Some(long), None) => Some(OptionTag::Long(long)),
-                (None, Some(short)) => Some(OptionTag::Short(short)),
-                (Some(long), Some(short)) => Some(OptionTag::LongShort { long, short }),
+                (Some(long), None) => Some(FlagTags::Long(long)),
+                (None, Some(short)) => Some(FlagTags::Short(short)),
+                (Some(long), Some(short)) => Some(FlagTags::LongShort { long, short }),
             } {
                 None => Self::Positional(PositionalFieldInfo {
                     ident,
@@ -471,12 +471,12 @@ impl<'a> HelpOption<'a> {
         }
     }
 
-    pub const fn as_tags(&self) -> Option<OptionTag<&'a str, char>> {
+    pub const fn as_tags(&self) -> Option<FlagTags<&'a str, char>> {
         match (self.long, self.short) {
             (None, None) => None,
-            (Some(long), None) => Some(OptionTag::Long(long)),
-            (None, Some(short)) => Some(OptionTag::Short(short)),
-            (Some(long), Some(short)) => Some(OptionTag::LongShort { long, short }),
+            (Some(long), None) => Some(FlagTags::Long(long)),
+            (None, Some(short)) => Some(FlagTags::Short(short)),
+            (Some(long), Some(short)) => Some(FlagTags::LongShort { long, short }),
         }
     }
 }

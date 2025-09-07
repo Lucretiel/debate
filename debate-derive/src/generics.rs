@@ -29,14 +29,14 @@ pub fn compute_generics(
     if let Some(param) = generics.const_params().next() {
         return Err(syn::Error::new(
             param.span(),
-            "const generics aren't (yet) supported by debate",
+            "const generics aren't supported by debate derives",
         ));
     }
 
     if let Some(param) = generics.type_params().next() {
         return Err(syn::Error::new(
             param.span(),
-            "generic types aren't (yet) supported by debate",
+            "generic types aren't supported by debate derives",
         ));
     }
 
