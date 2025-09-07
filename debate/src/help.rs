@@ -188,13 +188,20 @@ pub struct ParameterPositional<'a> {
 #[derive(Debug, Clone)]
 pub struct ParameterSubgroup<'a> {
     pub description: Description<'a>,
+    /// The identifier for this group. Not usually shown to the user in a
+    /// usage message. I'd prefer to omit it entirely, but we use it to help
+    /// look up the usage messages of individual subcommands (by traversing
+    /// nested subgroups).
     pub id: &'a str,
-    // TODO: consider entirely getting rid of anonymous subgroups. Currently
-    // They're supported to allow newtype behavior (especially in subcommands),
-    // but it would probably make more sense to just special-case newtypes
-    // and ban the rest.
-    pub name: Option<&'a str>,
-    pub placeholder: Option<&'a str>,
+
+    /// When used as a group of items, the name of the group we show to the
+    /// user. Usualy Title Cased.
+    pub title: &'a str,
+
+    /// When used as a placeholder, the name of the group we show to the user.
+    /// Usually SHOUTY_SNAKE_CASED. Generally only used to refer to a subcommand
+    /// in a synopsis.
+    pub placeholder: &'a str,
     pub contents: UsageItems<'a>,
 }
 
@@ -202,7 +209,7 @@ pub struct ParameterSubgroup<'a> {
 pub struct Subcommand<'a> {
     pub command: &'a str,
     pub description: Description<'a>,
-    pub usage: &'a [Parameter<'a>],
+    pub usage: UsageItems<'a>,
 }
 
 // TODO: error implementation here

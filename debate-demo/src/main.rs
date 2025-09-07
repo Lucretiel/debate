@@ -104,6 +104,12 @@ enum Direction {
     Right,
 }
 
+#[derive(Debug, Clone, Copy, Value, ParameterUsage)]
+enum BuildMode {
+    Debug,
+    Release,
+}
+
 enum FlagChoice {
     OutDir(PathBuf),
     WorkingDir,
@@ -123,10 +129,29 @@ enum Subcommand {
     Build {
         #[debate(long)]
         target: PathBuf,
+
+        #[debate(long)]
+        mode: Option<BuildMode>,
     },
 
     /// Add an item to the project
     Add { item: String },
+
+    /// Run the project's tests
+    Test(TestArgs),
+}
+
+#[derive(FromArgs, Usage, Debug)]
+struct TestArgs {
+    /// If given, only run this test.
+    ///
+    /// Run all of them otherwise.
+    #[debate(short, long)]
+    test: Option<String>,
+
+    /// If set, test failures will only produce warnings.
+    #[debate(short = 'w', long)]
+    warn_only: bool,
 }
 
 fn main() -> anyhow::Result<()> {

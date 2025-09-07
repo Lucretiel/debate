@@ -1,17 +1,64 @@
-use proc_macro2::{Literal, TokenStream as TokenStream2};
-use quote::{format_ident, quote};
+use proc_macro2::{Literal, TokenStream as TokenStream2, TokenTree};
+use quote::{ToTokens, format_ident, quote};
 use syn::{Ident, Lifetime, Token, Variant, punctuated::Punctuated};
 
 use crate::{
-    common::enumeration::{Fallback, ParsedSubcommandInfo, SubcommandVariantMode},
+    common::{
+        ParsedFieldInfo,
+        enumeration::{
+            Fallback, ParsedSubcommandInfo, ParsedSubcommandVariant, SubcommandVariantMode,
+            SubcommandVariantNormalizedMode,
+        },
+    },
     from_args::common::{
         complete_long_body, complete_long_option_body, complete_short_body,
-        final_field_initializers, get_subcommand_field_visitor_calls,
-        struct_state_block_from_fields, struct_state_init_block_from_fields,
+        final_field_initializers, get_subcommand_field_visitor_calls, struct_state_block,
+        struct_state_block_from_fields, struct_state_init_block_from_field_count,
         visit_positional_arms_for_fields,
     },
     generics::AngleBracedLifetime,
 };
+
+/// Helper for making the `match state { ... }` arms. Specifically, this
+/// helps with switching between the newtype behavior and the unit/struct
+/// behavior
+fn make_variant_arm<const N: usize>(
+    variant: &ParsedSubcommandVariant<'_>,
+    state_method: &Ident,
+    fields_ident: &Ident,
+    argument_idents: [&Ident; N],
+    bind: TokenStream2,
+    make_body: impl FnOnce(&[ParsedFieldInfo<'_>]) -> TokenStream2,
+) -> TokenStream2 {
+    let variant_ident = variant.ident.raw();
+
+    // TODO: find a better way (probably with a macro) to detect mutability
+    // on the fields binding
+    let mutable = bind
+        .clone()
+        .into_iter()
+        .take_while(|token| match token {
+            TokenTree::Ident(ident) => ident != fields_ident,
+            _ => true,
+        })
+        .any(|token| matches!(token, TokenTree::Ident(ref ident) if ident == "mut"));
+
+    let mut_token = match mutable {
+        true => quote! { mut },
+        false => quote! {},
+    };
+
+    let body = match variant.mode.normalized() {
+        SubcommandVariantNormalizedMode::Fields(fields) => make_body(fields),
+        SubcommandVariantNormalizedMode::Newtype(_) => quote! {
+            ::debate::state::State::#state_method(& #mut_token #fields_ident.0, #(#argument_idents,)*)
+        },
+    };
+
+    quote! {
+        Self :: #variant_ident { #bind } => #body
+    }
+}
 
 pub fn derive_args_enum_subcommand(
     name: &Ident,
@@ -30,6 +77,11 @@ pub fn derive_args_enum_subcommand(
     let option = format_ident!("option");
     let visitor = format_ident!("visitor");
 
+    let add_positional_ident = format_ident!("add_positional");
+    let add_long_option_ident = format_ident!("add_long_option");
+    let add_long_ident = format_ident!("add_long");
+    let add_short_ident = format_ident!("add_short");
+
     let parsed_variants = ParsedSubcommandInfo::from_variants(variants)?;
 
     let fallback_ident = parsed_variants.fallback.ident();
@@ -38,13 +90,14 @@ pub fn derive_args_enum_subcommand(
     let state_variants = parsed_variants.variants.iter().map(|variant| {
         let variant_ident = variant.ident.raw();
 
+        // The bodies of the states are carefully massaged to have the same
+        // field idents, to make it easier to deduplicate code using them
         let variant_state_body = match variant.mode {
-            SubcommandVariantMode::Unit => quote! {
-                ( ::core::marker::PhantomData<& #lifetime ()> )
-            },
-            SubcommandVariantMode::Newtype { ty } => quote! {
-                ( <#ty as ::debate::build::BuildFromArgs<#lifetime>>::State )
-            },
+            SubcommandVariantMode::Unit => struct_state_block(quote! {()}, []),
+            SubcommandVariantMode::Newtype { ty } => struct_state_block(
+                quote! {()},
+                [quote! { <#ty as ::debate::build::BuildFromArgs<'arg>>::State }],
+            ),
             SubcommandVariantMode::Struct { ref fields } => struct_state_block_from_fields(fields),
         };
 
@@ -69,127 +122,134 @@ pub fn derive_args_enum_subcommand(
         let scrutinee = Literal::byte_string(scrutinee);
         let variant_ident = variant.ident.raw();
 
-        let variant_init_block = match variant.mode {
-            SubcommandVariantMode::Unit => quote! {
-                ( ::core::marker::PhantomData )
-            },
-            SubcommandVariantMode::Newtype { .. } => quote! {
-                ( ::core::default::Default::default() )
-            },
-            SubcommandVariantMode::Struct { ref fields } => {
-                struct_state_init_block_from_fields(fields)
-            }
-        };
+        let variant_init_block = struct_state_init_block_from_field_count(match variant.mode {
+            SubcommandVariantMode::Unit => 0,
+            SubcommandVariantMode::Newtype { .. } => 1,
+            SubcommandVariantMode::Struct { ref fields } => fields.len(),
+        });
 
         quote! {
             #scrutinee => Self :: #variant_ident #variant_init_block
         }
     });
 
-    // TODO: Deduplicate these 4 things
+    // TODO: find a way to deduplicate a lot of this (especially the 3 variants
+    // of flags)
 
     let visit_positional_arms = parsed_variants.variants.iter().map(|variant| {
-        let variant_ident = variant.ident.raw();
-
-        match variant.mode {
-            SubcommandVariantMode::Unit => todo!(),
-            SubcommandVariantMode::Newtype { ty } => todo!(),
-            SubcommandVariantMode::Struct { fields } => todo!(),
-        }
-
-        let local_positional_arms = visit_positional_arms_for_fields(
+        make_variant_arm(
+            variant,
+            &add_positional_ident,
             &fields_ident,
-            &argument,
-            &positional_parameter_ident,
-            &arg_ident,
-            &add_arg_ident,
-            &variant.fields,
-        );
+            [&argument],
+            quote! { ref mut #fields_ident, ref mut position, .. },
+            |fields| {
+                let local_positional_arms = visit_positional_arms_for_fields(
+                    &fields_ident,
+                    &argument,
+                    &positional_parameter_ident,
+                    &arg_ident,
+                    &add_arg_ident,
+                    fields,
+                );
 
-        quote! {
-            Self :: #variant_ident #variant_bind => #variant_body
-        }
+                quote! {{
+                    #(#local_positional_arms)*
 
-        quote! {
-            Self :: #variant_ident { ref mut #fields_ident, ref mut position, .. } => {
-                #(#local_positional_arms)*
-
-                ::core::result::Result::Err(
-                    ::debate::state::Error::unrecognized(())
-                )
-            }
-        }
+                    ::core::result::Result::Err(
+                        ::debate::state::Error::unrecognized(())
+                    )
+                }}
+            },
+        )
     });
 
     let long_option_arms = parsed_variants.variants.iter().map(|variant| {
-        let variant_ident = variant.ident.raw();
-        let body = complete_long_option_body(
+        make_variant_arm(
+            variant,
+            &add_long_option_ident,
             &fields_ident,
-            &argument,
-            &option,
-            &parameter_ident,
-            &variant.fields,
-            None,
-        );
-
-        quote! {
-            Self :: #variant_ident { ref mut #fields_ident, .. } => #body,
-        }
+            [&option, &argument],
+            quote! {  ref mut #fields_ident, .. },
+            |fields| {
+                complete_long_option_body(
+                    &fields_ident,
+                    &argument,
+                    &option,
+                    &parameter_ident,
+                    fields,
+                    None,
+                )
+            },
+        )
     });
 
     let long_arms = parsed_variants.variants.iter().map(|variant| {
-        let variant_ident = variant.ident.raw();
-        let body = complete_long_body(
+        make_variant_arm(
+            variant,
+            &add_long_ident,
             &fields_ident,
-            &argument,
-            &option,
-            &parameter_ident,
-            &variant.fields,
-            None,
-        );
-
-        quote! {
-            Self :: #variant_ident { ref mut #fields_ident, .. } => #body,
-        }
+            [&option, &argument],
+            quote! { ref mut #fields_ident, .. },
+            |fields| {
+                complete_long_body(
+                    &fields_ident,
+                    &argument,
+                    &option,
+                    &parameter_ident,
+                    fields,
+                    None,
+                )
+            },
+        )
     });
 
     let short_arms = parsed_variants.variants.iter().map(|variant| {
-        let variant_ident = variant.ident.raw();
-        let body = complete_short_body(
+        make_variant_arm(
+            variant,
+            &add_short_ident,
             &fields_ident,
-            &argument,
-            &option,
-            &parameter_ident,
-            &variant.fields,
-            None,
-        );
-
-        quote! {
-            Self :: #variant_ident { ref mut #fields_ident, .. } => #body,
-        }
+            [&option, &argument],
+            quote! {ref mut #fields_ident, ..},
+            |fields| {
+                complete_short_body(
+                    &fields_ident,
+                    &argument,
+                    &option,
+                    &parameter_ident,
+                    fields,
+                    None,
+                )
+            },
+        )
     });
 
     let get_subcommand_arms = parsed_variants.variants.iter().map(|variant| {
-        let variant_ident = variant.ident.raw();
-        let command_name = variant.command.as_str();
+        make_variant_arm(
+            variant,
+            &format_ident!("get_subcommand_path"),
+            &fields_ident,
+            [&visitor],
+            quote! { ref #fields_ident, .. },
+            |fields| {
+                let command_name = variant.command.as_str();
+                let field_visitor_calls =
+                    get_subcommand_field_visitor_calls(&fields_ident, &visitor, fields);
 
-        let field_visitor_calls =
-            get_subcommand_field_visitor_calls(&fields_ident, &visitor, &variant.fields);
+                quote! {{
+                    let #visitor = ::debate::state::SubcommandPathVisitorWithItem::new(
+                        ::debate::state::SubcommandPathItem::Command(#command_name),
+                        #visitor,
+                    );
 
-        quote! {
-            Self :: #variant_ident { ref #fields_ident, .. } => {
-                let #visitor = ::debate::state::SubcommandPathVisitorWithItem::new(
-                    ::debate::state::SubcommandPathItem::Command(#command_name),
-                    #visitor,
-                );
+                    #(#field_visitor_calls)*
 
-                #(#field_visitor_calls)*
+                    let _ = #fields_ident;
 
-                let _ = #fields_ident;
-
-                ::core::result::Result::Ok(#visitor.call())
-            }
-        }
+                    ::core::result::Result::Ok(#visitor.call())
+                }}
+            },
+        )
     });
 
     let build_body_fallback = match parsed_variants.fallback {
@@ -205,16 +265,22 @@ pub fn derive_args_enum_subcommand(
 
     let build_body_variant_arms = parsed_variants.variants.iter().map(|variant| {
         let variant_ident = variant.ident.raw();
-        let field_initializers = final_field_initializers(&fields_ident, &variant.fields);
 
         let variant_body = match variant.mode {
             SubcommandVariantMode::Unit => quote! {},
-            SubcommandVariantMode::Tuple => quote! {
-                ( #(#field_initializers,)* )
-            },
-            SubcommandVariantMode::Struct => quote! {
-                { #(#field_initializers,)* }
-            },
+            SubcommandVariantMode::Newtype { .. } => quote! {(
+                match ::debate::build::BuildFromArgs::build(#fields_ident.0) {
+                    ::core::result::Result::Ok(value) => value,
+                    ::core::result::Result::Err(err) => return (
+                        ::core::result::Result::Err(err)
+                    ),
+                }
+            )},
+            SubcommandVariantMode::Struct { ref fields } => {
+                let field_initializers = final_field_initializers(&fields_ident, fields);
+
+                quote! { { #(#field_initializers,)* } }
+            }
         };
 
         quote! {

@@ -175,7 +175,7 @@ pub struct FlattenFieldInfo<'a> {
     pub ident: IdentString<'a>,
 
     /// Printed group name used for this field
-    pub group_name: SpannedValue<String>,
+    pub title: SpannedValue<String>,
 
     /// When this entire field is used as a placeholder (basically just for
     /// subcommands, but could be useful later)
@@ -272,7 +272,7 @@ impl<'a> ParsedFieldInfo<'a> {
             return Ok(Self::Flatten(FlattenFieldInfo {
                 ident,
                 ty,
-                group_name,
+                title: group_name,
                 placeholder,
                 docs,
             }));

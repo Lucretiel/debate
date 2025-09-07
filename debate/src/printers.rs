@@ -138,7 +138,7 @@ pub fn print_help(
         // In particular, we know that there are definitely no options
         // if items is a subcommand set.
         write!(out, "{command} [OPTIONS]")?;
-        print_synopsis(&mut out, None, style, items)?;
+        print_synopsis(&mut out, "COMMAND", style, items)?;
         writeln!(out)
     })?;
 
@@ -256,20 +256,19 @@ fn print_parameter_subgroup(
     style: HelpRequest,
     subgroup: &ParameterSubgroup<'_>,
 ) -> io::Result<()> {
-    match subgroup.name {
-        None => print_usage_items(out, style, &subgroup.contents),
-        Some(name) => section(out, name, |mut out| {
-            // This is necessary to avoid an unbounded recursion of
-            // nested types
-            let out: &mut dyn io::Write = &mut out;
-            print_usage_items(out, style, &subgroup.contents)
-        }),
-    }
+    // TODO: include a description for the section? That would be a neat
+    // trick that other libraries don't really do.
+    section(out, subgroup.title, |mut out| {
+        // This is necessary to avoid an unbounded recursion of
+        // nested types
+        let out: &mut dyn io::Write = &mut out;
+        print_usage_items(out, style, &subgroup.contents)
+    })
 }
 
 fn print_synopsis(
     out: &mut (impl io::Write + ?Sized),
-    placeholder: Option<&str>,
+    subcommand_placeholder: &str,
     style: HelpRequest,
     items: &UsageItems<'_>,
 ) -> io::Result<()> {
@@ -316,13 +315,10 @@ fn print_synopsis(
                 }
             })
         }
-        UsageItems::Subcommands { requirement, .. } => {
-            let name = placeholder.unwrap_or("COMMAND");
-            match requirement {
-                Requirement::Optional => write!(out, " [{name}]"),
-                Requirement::Mandatory => write!(out, " <{name}>"),
-            }
-        }
+        UsageItems::Subcommands { requirement, .. } => match requirement {
+            Requirement::Optional => write!(out, " [{subcommand_placeholder}]"),
+            Requirement::Mandatory => write!(out, " <{subcommand_placeholder}>"),
+        },
         UsageItems::Exclusive { .. } => todo!(),
     }
 }

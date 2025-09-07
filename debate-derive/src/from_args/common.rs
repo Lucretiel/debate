@@ -12,54 +12,59 @@ enum HelpMode {
     Full,
 }
 
+pub fn struct_state_block<'a>(
+    position_ty: impl ToTokens,
+    fields_types: impl IntoIterator<Item = TokenStream2>,
+) -> TokenStream2 {
+    let fields_types = fields_types.into_iter();
+
+    quote! {
+        {
+            position: #position_ty,
+            phantom: ::core::marker::PhantomData<& 'arg ()>,
+            fields: ( #(#fields_types,)* ),
+        }
+    }
+}
+
 /// Create a state block, in curlies. Used both for the struct state, and
 /// for separate enum variant states
 pub fn struct_state_block_from_fields<'a>(
     fields: impl IntoIterator<Item = &'a ParsedFieldInfo<'a>>,
 ) -> TokenStream2 {
-    {
-        let field_state_types = fields
-            .into_iter()
-            .map(|info| match *info {
-                ParsedFieldInfo::Positional(PositionalFieldInfo { ty, .. })
-                | ParsedFieldInfo::Option(OptionFieldInfo { ty, .. }) => FlattenOr::Normal(ty),
-                ParsedFieldInfo::Flatten(FlattenFieldInfo { ty, .. }) => FlattenOr::Flatten(ty),
-            })
-            .map(|field| match field {
-                FlattenOr::Flatten(ty) => quote! {
-                    <#ty as ::debate::build::BuildFromArgs<'arg>>::State
-                },
-                FlattenOr::Normal(ty) => quote! {
-                    ::core::option::Option<#ty>
-                },
-            });
+    let field_state_types = fields
+        .into_iter()
+        .map(|info| match *info {
+            ParsedFieldInfo::Positional(PositionalFieldInfo { ty, .. })
+            | ParsedFieldInfo::Option(OptionFieldInfo { ty, .. }) => FlattenOr::Normal(ty),
+            ParsedFieldInfo::Flatten(FlattenFieldInfo { ty, .. }) => FlattenOr::Flatten(ty),
+        })
+        .map(|field| match field {
+            FlattenOr::Flatten(ty) => quote! {
+                <#ty as ::debate::build::BuildFromArgs<'arg>>::State
+            },
+            FlattenOr::Normal(ty) => quote! {
+                ::core::option::Option<#ty>
+            },
+        });
 
-        quote! {
-            {
-                position: u16,
-                phantom: ::core::marker::PhantomData<& 'arg ()>,
-                fields: (#(#field_state_types,)*),
-            }
-        }
-    }
+    struct_state_block(quote! { u16 }, field_state_types)
 }
 
-pub fn struct_state_init_block_from_fields<'a>(
-    fields: impl IntoIterator<Item = &'a ParsedFieldInfo<'a>>,
-) -> TokenStream2 {
-    let field_state_initializers = fields.into_iter().map(|info| match *info {
-        ParsedFieldInfo::Positional(_) | ParsedFieldInfo::Option(_) => quote! {
-            ::core::option::Option::None
-        },
-        ParsedFieldInfo::Flatten(_) => quote! {
+/// Create a default initializer block for a structure
+pub fn struct_state_init_block_from_field_count<'a>(num_fields: usize) -> TokenStream2 {
+    let field_state_initializers = (0..num_fields).into_iter().map(|_| {
+        quote! {
             ::core::default::Default::default()
-        },
+        }
     });
 
     quote! {
         {
-            position: 0,
+            position: ::core::default::Default::default(),
             phantom: ::core::marker::PhantomData,
+            // It would be nice to just call `default()` here, but that's only
+            // defined for tuples up to 12 values.
             fields: (#(#field_state_initializers,)*),
         }
     }
@@ -531,8 +536,10 @@ pub fn final_field_initializers(
         })
 }
 
-/// Create a series of calls to `state.with_subcommand_context` for each
-/// of the fields, calling `return Ok(out)` if there's a successful hit.
+/// Create a series of calls to `state.get_subcommand_path` for each
+/// of the flattened fields, calling `return Ok(out)` if there's a successful
+/// hit. We check each field in reverse order, which ends up making more sense
+/// for --help.
 pub fn get_subcommand_field_visitor_calls(
     fields_ident: &Ident,
     visitor_ident: &Ident,

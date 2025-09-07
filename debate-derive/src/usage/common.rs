@@ -82,33 +82,19 @@ pub fn struct_usage_items(parsed_fields: &[ParsedFieldInfo<'_>], help: HelpOptio
         ParsedFieldInfo::Flatten(FlattenFieldInfo {
             ty,
             docs,
-            group_name,
+            title,
             placeholder,
             ident,
         }) => {
-            let id = ident
-                .as_ref()
-                .expect("anonymous groups are going away")
-                .as_str();
-
-            let name = group_name.as_ref().map(|name| name.as_str());
-            let name = match name {
-                None => quote! { ::core::option::Option::None },
-                Some(name) => quote! { ::core::option::Option::Some(#name) },
-            };
-
-            let placeholder = placeholder.as_ref().map(|placeholder| placeholder.as_str());
-            let placeholder = match placeholder {
-                None => quote! { ::core::option::Option::None },
-                Some(placeholder) => quote! { ::core::option::Option::Some(#placeholder) },
-            };
-
+            let id = ident.as_str();
+            let title = title.as_str();
+            let placeholder = placeholder.as_str();
             let docs = docs.quote();
 
             quote! {
                 ::debate::help::Parameter::Group(::debate::help::ParameterSubgroup {
                     id: #id,
-                    name: #name,
+                    title: #title,
                     placeholder: #placeholder,
                     description: #docs,
                     contents: <#ty as ::debate::help::Usage>::ITEMS,
@@ -117,6 +103,12 @@ pub fn struct_usage_items(parsed_fields: &[ParsedFieldInfo<'_>], help: HelpOptio
         }
     });
 
+    // TODO: it's annoying maintenence burden to have this separated from the
+    // `ParsedFieldInfo::Option(field)` branch, above, because every time
+    // `::debate::help::Parameter` changes, we have to fix it there AND here.
+    // Need to find a way to add this up there. It's tricky cause the iterator
+    // above is for `&ParsedFieldInfo`, and it's difficult to create a
+    // `ParsedFieldInfo:` for `--help`
     let help_parameter = help.as_tags().map(|tags| {
         let tags = compute_usage_tags(&tags);
 

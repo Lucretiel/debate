@@ -15,7 +15,7 @@ use crate::common::{ParsedFieldInfo, RawParsedTypeAttr};
 use crate::from_args::common::{
     complete_long_body, complete_long_option_body, complete_short_body, final_field_initializers,
     get_subcommand_field_visitor_calls, struct_state_block_from_fields,
-    struct_state_init_block_from_fields, visit_positional_arms_for_fields,
+    struct_state_init_block_from_field_count, visit_positional_arms_for_fields,
 };
 use crate::generics::AngleBracedLifetime;
 
@@ -90,7 +90,7 @@ pub fn derive_args_struct(
     let visitor = format_ident!("visitor");
 
     let state_block = struct_state_block_from_fields(&fields);
-    let state_init_block = struct_state_init_block_from_fields(&fields);
+    let state_init_block = struct_state_init_block_from_field_count(fields.len());
 
     let visit_positional_arms = visit_positional_arms_for_fields(
         &fields_ident,
