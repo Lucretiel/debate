@@ -1,5 +1,5 @@
 use proc_macro2::{Literal, TokenStream as TokenStream2, TokenTree};
-use quote::{ToTokens, format_ident, quote};
+use quote::{format_ident, quote};
 use syn::{Ident, Lifetime, Token, Variant, punctuated::Punctuated};
 
 use crate::{

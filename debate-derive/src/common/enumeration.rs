@@ -43,8 +43,8 @@ pub enum SubcommandVariantMode<'a> {
     Struct { fields: Vec<ParsedFieldInfo<'a>> },
 }
 
-pub enum SubcommandVariantNormalizedMode<'a> {
-    Fields(&'a [ParsedFieldInfo<'a>]),
+pub enum SubcommandVariantNormalizedMode<'s, 'a> {
+    Fields(&'s [ParsedFieldInfo<'a>]),
     Newtype(&'a Type),
 }
 
@@ -54,7 +54,7 @@ impl<'a> SubcommandVariantMode<'a> {
     /// or absence of fields by saying a unit variant has a present but empty
     /// list of fields.
     #[must_use]
-    pub fn normalized(&self) -> SubcommandVariantNormalizedMode {
+    pub fn normalized(&self) -> SubcommandVariantNormalizedMode<'_, 'a> {
         match *self {
             Self::Unit => SubcommandVariantNormalizedMode::Fields(&[]),
             Self::Newtype { ty } => SubcommandVariantNormalizedMode::Newtype(ty),

@@ -10,7 +10,7 @@ use crate::{
     errors::{BuildError, FieldKind, ParameterError, ParameterSource, StateError},
     help::{
         Description, HelpRequest, Parameter, ParameterOption, ParameterPositional,
-        ParameterSubgroup, Repetition, Requirement, Subcommand, Tags, UsageItems, ValueParameter,
+        ParameterSubgroup, Repetition, Requirement, Tags, UsageItems, ValueParameter,
     },
 };
 

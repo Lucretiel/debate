@@ -9,7 +9,6 @@ use darling::{
 };
 use heck::{ToKebabCase as _, ToShoutySnakeCase, ToTitleCase};
 use itertools::Itertools as _;
-use lazy_format::lazy_format;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::ToTokens;
 use regex::Regex;

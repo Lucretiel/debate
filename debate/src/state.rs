@@ -1,5 +1,3 @@
-use std::eprintln;
-
 use debate_parser::Arg;
 
 use crate::{help::HelpRequest, parameter};

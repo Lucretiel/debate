@@ -6,9 +6,7 @@ use syn::{Ident, Token, Variant, punctuated::Punctuated};
 use crate::{
     common::{
         HelpOption,
-        enumeration::{
-            Fallback, ParsedSubcommandInfo, SubcommandVariantMode, SubcommandVariantNormalizedMode,
-        },
+        enumeration::{Fallback, ParsedSubcommandInfo, SubcommandVariantNormalizedMode},
     },
     generics::AngleBracedLifetime,
     usage::common::struct_usage_items,
