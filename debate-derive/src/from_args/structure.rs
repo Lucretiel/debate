@@ -68,7 +68,7 @@ pub fn derive_args_struct(
         let mut short_tags = HashMap::new();
 
         for tags in fields.iter().filter_map(|field| match field {
-            ParsedFieldInfo::Option(option) => Some(&option.tags),
+            ParsedFieldInfo::Flag(option) => Some(&option.tags),
             ParsedFieldInfo::Positional(_) | ParsedFieldInfo::Flatten(_) => None,
         }) {
             detect_collision(&mut long_tags, tags.long(), |tag| lazy_format!("--{tag}"))?;

@@ -12,7 +12,7 @@ repository = "https://github.com/Lucretiel/debate"
 proc-macro = true
 
 [dependencies]
-darling = { version = "0.20.11", default-features = false }
+darling = { version = "0.21.3", default-features = false }
 heck = { version = "0.5.0", default-features = false }
 itertools = "0.14.0"
 lazy_format = { version = "2.0.3", default-features = false }

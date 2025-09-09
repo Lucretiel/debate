@@ -12,10 +12,10 @@ pub enum HelpRequest {
 #[derive(Debug, Clone, Copy)]
 pub struct Description<'a> {
     /// A succinct description of this thing, usually only a sentence long
-    pub short: &'a str,
+    pub succinct: &'a str,
 
     /// A full description of this thing
-    pub long: &'a str,
+    pub full: &'a str,
 }
 
 impl<'a> Description<'a> {
@@ -24,8 +24,8 @@ impl<'a> Description<'a> {
     #[must_use]
     pub const fn new(description: &'a str) -> Self {
         Self {
-            short: description,
-            long: description,
+            succinct: description,
+            full: description,
         }
     }
 
@@ -33,8 +33,8 @@ impl<'a> Description<'a> {
     #[must_use]
     pub const fn get(&self, style: HelpRequest) -> &'a str {
         match style {
-            HelpRequest::Succinct => self.short,
-            HelpRequest::Full => self.long,
+            HelpRequest::Succinct => self.succinct,
+            HelpRequest::Full => self.full,
         }
     }
 }

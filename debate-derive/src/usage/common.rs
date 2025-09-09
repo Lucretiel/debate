@@ -21,13 +21,13 @@ fn compute_usage_tags(tags: &FlagTags<&str, char>) -> TokenStream2 {
 impl Description {
     /// Convert a description into a `::debate::help::Description` expression
     pub fn quote(&self) -> TokenStream2 {
-        let short = self.short.as_str();
-        let long = self.long.as_str();
+        let succinct = self.succinct.as_str();
+        let full = self.full.as_str();
 
         quote! {
             ::debate::help::Description {
-                short: #short,
-                long: #long,
+                succinct: #succinct,
+                full: #full,
             }
         }
     }
@@ -53,17 +53,32 @@ pub fn struct_usage_items(parsed_fields: &[ParsedFieldInfo<'_>], help: HelpOptio
                     repetition: <#ty as ::debate::help::ParameterUsage>::REPETITION,
                     argument: <#ty as ::debate::help::ParameterUsage>::VALUE
                         .as_value_parameter(#placeholder),
-                })
+                }),
             }
         }
-        ParsedFieldInfo::Option(field) => {
+        ParsedFieldInfo::Flag(field) => {
             let tags = compute_usage_tags(&field.tags.simplify());
             let placeholder = field.placeholder.as_str();
             let ty = field.ty;
             let defaulted = field.default.is_some();
             let docs = field.docs.quote();
 
+            let invert = field.invert.as_ref().map(|invert| {
+                let long = invert.as_str();
+
+                quote! {
+                    ::debate::help::Parameter::Option(::debate::help::ParameterOption {
+                        description: ::debate::help::Description::new(""),
+                        requirement: ::debate::help::Requirement::Optional,
+                        repetition: ::debate::help::Repetition::Single,
+                        argument: ::core::option::Option::None,
+                        tags: ::debate::help::Tags::Long { long: #long},
+                    }),
+                }
+            });
+
             quote! {
+                #invert
                 ::debate::help::Parameter::Option(::debate::help::ParameterOption {
                     description: #docs,
                     requirement: match #defaulted {
@@ -74,7 +89,7 @@ pub fn struct_usage_items(parsed_fields: &[ParsedFieldInfo<'_>], help: HelpOptio
                     argument: <#ty as ::debate::help::ParameterUsage>::VALUE
                         .as_maybe_value_parameter(#placeholder),
                     tags: ::debate::help::Tags:: #tags,
-                })
+                }),
             }
         }
         ParsedFieldInfo::Flatten(FlattenFieldInfo {
@@ -96,7 +111,7 @@ pub fn struct_usage_items(parsed_fields: &[ParsedFieldInfo<'_>], help: HelpOptio
                     placeholder: #placeholder,
                     description: #docs,
                     contents: <#ty as ::debate::help::Usage>::ITEMS,
-                })
+                }),
             }
         }
     });
@@ -123,7 +138,7 @@ pub fn struct_usage_items(parsed_fields: &[ParsedFieldInfo<'_>], help: HelpOptio
 
     quote! {
         &[
-            #(#parameters,)*
+            #(#parameters)*
             #help_parameter
         ]
     }

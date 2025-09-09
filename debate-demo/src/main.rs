@@ -18,7 +18,7 @@ use debate_derive::{self, FromArgs, ParameterUsage, Usage, Value};
 #[debate(help)]
 struct DebateDemo<'a> {
     /// The path
-    #[debate(short, long = "foo")]
+    #[debate(short, long = "foo", override)]
     path: &'a Path,
 
     /// Whether or not we're running in verbose mode
@@ -62,6 +62,10 @@ struct DebateDemo<'a> {
 
     /// A positional argument
     extra: Option<String>,
+
+    /// A list of possible items we're interested in
+    #[debate(short, long = "item", invert = "no-items")]
+    items: Vec<String>,
 }
 
 #[derive(FromArgs, Usage, Debug)]

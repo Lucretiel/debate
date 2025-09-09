@@ -12,6 +12,7 @@ enum HelpMode {
     Full,
 }
 
+#[must_use]
 pub fn struct_state_block<'a>(
     position_ty: impl ToTokens,
     lifetime: &Lifetime,
@@ -30,6 +31,7 @@ pub fn struct_state_block<'a>(
 
 /// Create a state block, in curlies. Used both for the struct state, and
 /// for separate enum variant states
+#[must_use]
 pub fn struct_state_block_from_fields<'a>(
     fields: impl IntoIterator<Item = &'a ParsedFieldInfo<'a>>,
     lifetime: &Lifetime,
@@ -38,7 +40,7 @@ pub fn struct_state_block_from_fields<'a>(
         .into_iter()
         .map(|info| match *info {
             ParsedFieldInfo::Positional(PositionalFieldInfo { ty, .. })
-            | ParsedFieldInfo::Option(FlagFieldInfo { ty, .. }) => FlattenOr::Normal(ty),
+            | ParsedFieldInfo::Flag(FlagFieldInfo { ty, .. }) => FlattenOr::Normal(ty),
             ParsedFieldInfo::Flatten(FlattenFieldInfo { ty, .. }) => FlattenOr::Flatten(ty),
         })
         .map(|field| match field {
@@ -54,6 +56,7 @@ pub fn struct_state_block_from_fields<'a>(
 }
 
 /// Create a default initializer block for a structure
+#[must_use]
 pub fn struct_state_init_block_from_field_count<'a>(num_fields: usize) -> TokenStream2 {
     let field_state_initializers = (0..num_fields).into_iter().map(|_| {
         quote! {
@@ -72,6 +75,7 @@ pub fn struct_state_init_block_from_field_count<'a>(num_fields: usize) -> TokenS
     }
 }
 
+#[must_use]
 fn indexed_fields<'a>(
     fields: &'a [ParsedFieldInfo<'a>],
 ) -> impl Iterator<Item = (Index, &'a ParsedFieldInfo<'a>)> + DoubleEndedIterator {
@@ -81,24 +85,27 @@ fn indexed_fields<'a>(
         .map(|(index, field)| (Index::from(index), field))
 }
 
+#[must_use]
 fn option_fields<'a>(
     fields: &'a [ParsedFieldInfo<'a>],
 ) -> impl Iterator<Item = (Index, &'a FlagFieldInfo<'a>)> {
     indexed_fields(fields).filter_map(|(index, field)| match field {
-        ParsedFieldInfo::Option(field) => Some((index, field)),
+        ParsedFieldInfo::Flag(field) => Some((index, field)),
         ParsedFieldInfo::Positional(_) | ParsedFieldInfo::Flatten(_) => None,
     })
 }
 
+#[must_use]
 fn flatten_fields<'a>(
     fields: &'a [ParsedFieldInfo<'a>],
 ) -> impl Iterator<Item = (Index, &'a FlattenFieldInfo<'a>)> + DoubleEndedIterator {
     indexed_fields(fields).filter_map(|(index, field)| match field {
         ParsedFieldInfo::Flatten(field) => Some((index, field)),
-        ParsedFieldInfo::Option(_) | ParsedFieldInfo::Positional(_) => None,
+        ParsedFieldInfo::Flag(_) | ParsedFieldInfo::Positional(_) => None,
     })
 }
 
+#[must_use]
 fn positional_flatten_fields<'a>(
     fields: &'a [ParsedFieldInfo<'a>],
 ) -> impl Iterator<
@@ -119,23 +126,34 @@ fn positional_flatten_fields<'a>(
 /// depending on whether the field is present already. This expression's type
 /// is always `Result<(), impl ParameterError>`. The field is
 /// `#fields_ident.#field_index`.
+///
+/// If `Parameter::follow_up_method` is omitted, then we assume this is an
+/// overridable field and that we should always use `initial_method`
 pub fn apply_arg_to_field(
     fields_ident: &Ident,
     argument_ident: &Ident,
     field_index: &Index,
     parameter_trait: &Ident,
     initial_method: &Ident,
-    follow_up_method: &Ident,
-) -> impl ToTokens {
+    follow_up_method: Option<&Ident>,
+) -> TokenStream2 {
+    let parse_argument_expr = quote! {
+        match ::debate::parameter::#parameter_trait::#initial_method(#argument_ident) {
+            ::core::result::Result::Err(err) => ::core::result::Result::Err(err),
+            ::core::result::Result::Ok(value) => {
+                #fields_ident.#field_index = ::core::option::Option::Some(value);
+                ::core::result::Result::Ok(())
+            }
+        }
+    };
+
+    let Some(follow_up_method) = follow_up_method else {
+        return parse_argument_expr;
+    };
+
     quote! {
         match #fields_ident.#field_index {
-            ::core::option::Option::None => match ::debate::parameter::#parameter_trait::#initial_method(#argument_ident) {
-                ::core::result::Result::Err(err) => ::core::result::Result::Err(err),
-                ::core::result::Result::Ok(value) => {
-                    #fields_ident.#field_index = ::core::option::Option::Some(value);
-                    ::core::result::Result::Ok(())
-                }
-            }
+            ::core::option::Option::None => #parse_argument_expr,
             ::core::option::Option::Some(ref mut old) => ::debate::parameter::#parameter_trait::#follow_up_method(
                 old,
                 argument
@@ -210,7 +228,7 @@ pub fn visit_positional_arms_for_fields(
                     &idx,
                     trait_ident,
                     arg_ident,
-                    add_arg_ident,
+                    Some(add_arg_ident),
                 );
 
                 handle_propagated_error(
@@ -253,17 +271,39 @@ pub fn visit_positional_arms_for_fields(
     })
 }
 
+/// Trait to convert a flag's tag into a `Literal` expression scrutinee in
+/// a `match` arm. Currently, we do bytewise matching, so strings become
+/// byte arrays and characters become u8 byte literals.
+trait MakeScrutinee {
+    fn make_scrutinee(self) -> Literal;
+}
+
+impl MakeScrutinee for char {
+    fn make_scrutinee(self) -> Literal {
+        // I hate using `as` here, but we did already guarantee it's an
+        Literal::byte_character(u8::try_from(self).expect("short flag wasn't an ascii character"))
+    }
+}
+
+impl MakeScrutinee for &str {
+    fn make_scrutinee(self) -> Literal {
+        Literal::byte_string(self.as_bytes())
+    }
+}
+
 /// Shared logic for creating the match block that handles options of all
 /// kinds.
 #[expect(clippy::too_many_arguments)]
-fn complete_option_body<'a>(
+#[must_use]
+fn complete_flag_body<'a, Tag: MakeScrutinee>(
     fields_ident: &Ident,
     argument_ident: &Ident,
     option_expr: impl ToTokens,
 
     fields: &'a [ParsedFieldInfo<'a>],
-    help: Option<(Literal, HelpMode)>,
-    make_scrutinee: impl Fn(&'a FlagFieldInfo<'a>) -> Option<Literal>,
+    help: Option<(Tag, HelpMode)>,
+    get_tag: impl Fn(&'a FlagFieldInfo<'a>) -> Option<Tag>,
+    get_invert_tag: impl Fn(&'a FlagFieldInfo<'a>) -> Option<Tag>,
 
     trait_ident: &Ident,
     parameter_method: &Ident,
@@ -273,6 +313,7 @@ fn complete_option_body<'a>(
     flatten_rebind_argument: impl ToTokens,
 ) -> TokenStream2 {
     let help_arm = help.map(|(help, mode)| {
+        let help = help.make_scrutinee();
         let mode = match mode {
             HelpMode::Succinct => "Succinct",
             HelpMode::Full => "Full",
@@ -291,10 +332,17 @@ fn complete_option_body<'a>(
 
     let local_arms = option_fields(fields)
         .filter_map(move |(index, field)| {
-            make_scrutinee(field).map(|scrutinee| (field, scrutinee, index))
+            get_tag(field)
+                .map(|tag| tag.make_scrutinee())
+                .map(|scrutinee| (field, scrutinee, index))
         })
         .map(move |(field, scrutinee, index)| {
             let field_name = field.ident.as_str();
+
+            let add_parameter_method = match field.overridable {
+                true => None,
+                false => Some(add_parameter_method),
+            };
 
             let expr = apply_arg_to_field(
                 fields_ident,
@@ -312,6 +360,42 @@ fn complete_option_body<'a>(
                         ::debate::state::Error::parameter(#field_name, err)
                     ),
                 },
+            }
+        });
+
+    let invert_arms = option_fields(fields)
+        .filter_map(move |(index, field)| {
+            get_invert_tag(field)
+                .map(|tag| tag.make_scrutinee())
+                .map(|scrutinee| (field, scrutinee, index))
+        })
+        .map(move |(field, scrutinee, index)| {
+            let field_name = field.ident.as_str();
+
+            // A lot of this error handling is redundant; we always return an
+            // error in --long=option and never return an option in `--long`.
+            // It simplifies our codegen, however, to just delegate to the
+            // implementation for `()`. Probably worth revisiting this design
+            // in the future.
+            //
+            // One option, of course, would be to omit inverters entirely
+            // when generating long=arg flags. However, this would cause the
+            // error to be "unrecognized argument" instead of "flag got arg".
+            // TODO: deduplicate this with `apply_arg_to_field`
+            quote! {
+                #scrutinee => match ::debate::parameter::Parameter::#parameter_method(
+                    #argument_ident
+                ) {
+                    ::core::result::Result::Ok(()) => {
+                        #fields_ident.#index = ::core::option::Option::None;
+                        ::core::result::Result::Ok(())
+                    }
+                    ::core::result::Result::Err(err) => ::core::result::Result::Err(
+                        // Technically this isn't a parameter error, the
+                        // parameter didn't really get a say in this.
+                        ::debate::state::Error::parameter(#field_name, err)
+                    )
+                }
             }
         });
 
@@ -338,6 +422,7 @@ fn complete_option_body<'a>(
         match (#option_expr) {
             #help_arm
             #(#local_arms)*
+            #(#invert_arms)*
             _ => {
                 #(#flatten_arms)*
 
@@ -360,17 +445,14 @@ pub fn complete_long_option_body(
     fields: &[ParsedFieldInfo<'_>],
     help: Option<&str>,
 ) -> TokenStream2 {
-    complete_option_body(
+    complete_flag_body(
         fields_ident,
         argument_ident,
         quote! { #option_ident.bytes() },
         fields,
-        help.map(|long| (Literal::byte_string(long.as_bytes()), HelpMode::Full)),
-        |info| {
-            info.tags
-                .long()
-                .map(|long| Literal::byte_string(long.as_bytes()))
-        },
+        help.map(|long| (long, HelpMode::Full)),
+        |info| info.tags.long().map(|long| *long),
+        |info| info.invert.as_ref().map(|invert| invert.as_str()),
         parameter_ident,
         &format_ident!("arg"),
         &format_ident!("add_arg"),
@@ -388,17 +470,14 @@ pub fn complete_long_body(
     fields: &[ParsedFieldInfo<'_>],
     help: Option<&str>,
 ) -> TokenStream2 {
-    complete_option_body(
+    complete_flag_body(
         fields_ident,
         argument_ident,
         quote! { #option_ident.bytes() },
         fields,
-        help.map(|long| (Literal::byte_string(long.as_bytes()), HelpMode::Full)),
-        |info| {
-            info.tags
-                .long()
-                .map(|long| Literal::byte_string(long.as_bytes()))
-        },
+        help.map(|long| (long, HelpMode::Full)),
+        |info| info.tags.long().map(|long| *long),
+        |info| info.invert.as_ref().map(|invert| invert.as_str()),
         parameter_ident,
         &format_ident!("present"),
         &format_ident!("add_present"),
@@ -416,17 +495,14 @@ pub fn complete_short_body(
     fields: &[ParsedFieldInfo<'_>],
     help: Option<char>,
 ) -> TokenStream2 {
-    complete_option_body(
+    complete_flag_body(
         fields_ident,
         argument_ident,
         option_ident,
         fields,
-        help.map(|short| (Literal::byte_character(short as u8), HelpMode::Succinct)),
-        |info| {
-            info.tags
-                .short()
-                .map(|short| Literal::byte_character(*short as u8))
-        },
+        help.map(|short| (short, HelpMode::Succinct)),
+        |info| info.tags.short().map(|short| *short),
+        |_info| None,
         parameter_ident,
         &format_ident!("present"),
         &format_ident!("add_present"),
@@ -459,7 +535,7 @@ pub fn final_field_initializers(
                         ident: &field.ident,
                         default: field.default.as_ref(),
                     }),
-                    ParsedFieldInfo::Option(field) => FlattenOr::Normal(NormalFieldInfo {
+                    ParsedFieldInfo::Flag(field) => FlattenOr::Normal(NormalFieldInfo {
                         long: field.tags.long().as_deref().copied(),
                         short: field.tags.short().as_deref().copied(),
                         placeholder: &field.placeholder,

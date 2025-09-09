@@ -28,6 +28,7 @@ pub struct IdentString<'a> {
 }
 
 impl<'a> IdentString<'a> {
+    #[must_use]
     pub fn new(ident: &'a Ident) -> Self {
         Self {
             string: ident.to_string(),
@@ -35,12 +36,22 @@ impl<'a> IdentString<'a> {
         }
     }
 
+    #[inline]
+    #[must_use]
     pub fn as_str(&self) -> &str {
         self.string.as_str()
     }
 
+    #[inline]
+    #[must_use]
     pub fn raw(&self) -> &'a Ident {
         self.raw
+    }
+
+    #[inline]
+    #[must_use]
+    pub fn as_spanned_str(&self) -> SpannedValue<&str> {
+        SpannedValue::new(self.string.as_str(), self.raw.span())
     }
 }
 
@@ -61,17 +72,24 @@ pub enum FlattenOr<F, T> {
 #[derive(darling::FromAttributes, Debug)]
 #[darling(attributes(debate))]
 struct RawParsedFieldAttr {
-    long: Option<Override<SpannedValue<String>>>,
-    short: Option<Override<SpannedValue<char>>>,
-    default: Option<Override<Expr>>,
+    long: Option<SpannedValue<Override<String>>>,
+    short: Option<SpannedValue<Override<char>>>,
+    default: Option<SpannedValue<Override<Expr>>>,
     placeholder: Option<SpannedValue<String>>,
-    // invert = "no-verbose"
-    // override
+    invert: Option<SpannedValue<Override<String>>>,
+    #[darling(rename = "override")]
+    r#override: Option<SpannedValue<()>>,
+    flatten: Option<SpannedValue<()>>,
+}
 
-    // TODO: add a parse step where `flatten` must not coexist with the other
-    // variants. Consider switching from `darling` to `deluxe`, which apparently
-    // handles this.
-    flatten: Option<()>,
+macro_rules! reject_some {
+    ($message:literal; $($candidate:expr $(,)?)+) => {
+        $(
+            if let Some(ref value) = $candidate {
+                Err(syn::Error::new(value.span(), $message))
+            } else
+        )+ { Ok(()) }
+    };
 }
 
 /// Setting for a default for a field
@@ -86,8 +104,8 @@ pub enum FieldDefault {
 impl FieldDefault {
     #[inline]
     #[must_use]
-    pub fn new(default: Option<Override<Expr>>) -> Option<Self> {
-        default.map(|default| match default {
+    pub fn new(default: Option<SpannedValue<Override<Expr>>>) -> Option<Self> {
+        default.map(|default| match default.into_inner() {
             Override::Explicit(default) => Self::Expr(default),
             Override::Inherit => Self::Trait,
         })
@@ -138,24 +156,29 @@ impl FlagTags<SpannedValue<String>, SpannedValue<char>> {
 
 #[derive(Default)]
 pub struct Description {
-    pub short: String,
-    pub long: String,
+    pub succinct: String,
+    pub full: String,
 }
 
 pub struct PositionalFieldInfo<'a> {
     pub ident: IdentString<'a>,
+    pub docs: Description,
 
     /// The placeholder for this field, shown to the user in usage messages.
     /// usually all caps.
     pub placeholder: SpannedValue<String>,
     pub ty: &'a Type,
     pub default: Option<FieldDefault>,
-    pub docs: Description,
 }
 
+// NOTE: I doubt it matters, but just in case, I'm trying to keep the
+// common fields between this and `PositionalFieldInfo` in the same order,
+// because it might help optimize field access out of the `ParsedFieldInfo`
+// enum.
 pub struct FlagFieldInfo<'a> {
     /// Identifier for this field
     pub ident: IdentString<'a>,
+    pub docs: Description,
 
     /// The placeholder for this field, shown to the user in usage messages.
     pub placeholder: SpannedValue<String>,
@@ -166,19 +189,22 @@ pub struct FlagFieldInfo<'a> {
     /// Default value setting (either to use the `Default` trait, a specific
     /// expression, or none)
     pub default: Option<FieldDefault>,
-    pub docs: Description,
+
     pub tags: FlagTags<SpannedValue<String>, SpannedValue<char>>,
+
+    /// If given, we should also create a --invert tag with this name.
+    pub invert: Option<SpannedValue<String>>,
+
+    /// If given, subsequent uses of this flag override earlier ones.
+    pub overridable: bool,
 }
 
 pub struct FlattenFieldInfo<'a> {
-    /// Documentation for this field
-    pub docs: Description,
-
     /// Identifier for this field
     pub ident: IdentString<'a>,
 
-    /// Printed group name used for this field
-    pub title: SpannedValue<String>,
+    /// Documentation for this field
+    pub docs: Description,
 
     /// When this entire field is used as a placeholder (basically just for
     /// subcommands, but could be useful later)
@@ -186,6 +212,9 @@ pub struct FlattenFieldInfo<'a> {
 
     /// Type of this field
     pub ty: &'a Type,
+
+    /// Printed group name used for this field
+    pub title: SpannedValue<String>,
 }
 
 pub fn compute_docs(attrs: &[Attribute]) -> syn::Result<Description> {
@@ -252,12 +281,15 @@ pub fn compute_docs(attrs: &[Attribute]) -> syn::Result<Description> {
         body
     });
 
-    Ok(Description { short, long })
+    Ok(Description {
+        succinct: short,
+        full: long,
+    })
 }
 
 pub enum ParsedFieldInfo<'a> {
     Positional(PositionalFieldInfo<'a>),
-    Option(FlagFieldInfo<'a>),
+    Flag(FlagFieldInfo<'a>),
     Flatten(FlattenFieldInfo<'a>),
 }
 
@@ -275,8 +307,15 @@ impl<'a> ParsedFieldInfo<'a> {
             )
         })?);
 
-        // TODO: enforce that flatten doesn't coexist with other variants.
-        if let Some(()) = parsed.flatten {
+        if let Some(_) = parsed.flatten {
+            // TODO: find a less brittle way to enforce the valid mutually
+            // permissible sets here.
+            reject_some!(
+                "`flatten` is incompatible with other attributes";
+                parsed.long, parsed.short, parsed.default, parsed.placeholder,
+                parsed.invert, parsed.r#override,
+            )?;
+
             let name = ident.as_str();
 
             let group_name = SpannedValue::new(
@@ -301,42 +340,69 @@ impl<'a> ParsedFieldInfo<'a> {
 
         let long = parsed
             .long
-            .map(|long| compute_long(long.explicit(), &ident))
+            .map(|long| compute_long(unpack_spanned_override(long), &ident))
             .transpose()?;
 
         let short = parsed
             .short
-            .map(|short| compute_short(short.explicit(), &ident))
+            .map(|short| compute_short(unpack_spanned_override(short), &ident))
             .transpose()?;
 
         let placeholder = compute_placeholder(parsed.placeholder, &ident)?;
 
         let default = FieldDefault::new(parsed.default);
 
-        Ok(
-            match match (long, short) {
-                (None, None) => None,
-                (Some(long), None) => Some(FlagTags::Long(long)),
-                (None, Some(short)) => Some(FlagTags::Short(short)),
-                (Some(long), Some(short)) => Some(FlagTags::LongShort { long, short }),
-            } {
-                None => Self::Positional(PositionalFieldInfo {
-                    ident,
-                    placeholder,
-                    ty,
-                    default,
-                    docs,
-                }),
-                Some(tags) => Self::Option(FlagFieldInfo {
-                    ident,
-                    placeholder,
-                    ty,
-                    default,
-                    docs,
-                    tags,
-                }),
-            },
-        )
+        if let Some(tags) = match (long, short) {
+            (None, None) => None,
+            (Some(long), None) => Some(FlagTags::Long(long)),
+            (None, Some(short)) => Some(FlagTags::Short(short)),
+            (Some(long), Some(short)) => Some(FlagTags::LongShort { long, short }),
+        } {
+            let invert = parsed
+                .invert
+                .map(|invert| {
+                    let long = tags.long().ok_or_else(|| {
+                        syn::Error::new(
+                            invert.span(),
+                            "#[debate(invert)] requires either a --long tag \
+                            (to prepend with --no-long) or a manual name \
+                            (such as invert=\"quiet\"",
+                        )
+                    })?;
+
+                    compute_invert(unpack_spanned_override(invert), long)
+                })
+                .transpose()?;
+
+            Ok(Self::Flag(FlagFieldInfo {
+                ident,
+                placeholder,
+                ty,
+                default,
+                docs,
+                invert,
+                overridable: parsed.r#override.is_some(),
+                tags,
+            }))
+        } else {
+            reject_some!(
+                "`invert` can only be used with flags, not positionals";
+                parsed.invert
+            )?;
+
+            reject_some!(
+                "`override` can only be used with flags, not positionals";
+                parsed.r#override
+            )?;
+
+            Ok(Self::Positional(PositionalFieldInfo {
+                ident,
+                placeholder,
+                ty,
+                default,
+                docs,
+            }))
+        }
     }
 
     pub fn get_positional(
@@ -345,96 +411,164 @@ impl<'a> ParsedFieldInfo<'a> {
         match self {
             ParsedFieldInfo::Positional(info) => Some(FlattenOr::Normal(info)),
             ParsedFieldInfo::Flatten(info) => Some(FlattenOr::Flatten(info)),
-            ParsedFieldInfo::Option(_) => None,
+            ParsedFieldInfo::Flag(_) => None,
         }
     }
 }
 
+/// We use `SpannedValue<Override<T>>` in several places, because it's useful
+/// for error reporting to record the span of either the argument or (if there
+/// was no argument) the naked key. Function simplifies this down to an
+/// optional value, with the span attached to the value.
+#[inline]
+#[must_use]
+fn unpack_spanned_override<T>(value: SpannedValue<Override<T>>) -> Option<SpannedValue<T>> {
+    let span = value.span();
+
+    match value.into_inner() {
+        Override::Inherit => None,
+        Override::Explicit(value) => Some(SpannedValue::new(value, span)),
+    }
+}
+
+/// A common pattern is to have attributes resembling: `#[debate(short, long=foo)`.
+/// In the case of `short`, where the key is present but without a value,
+/// we usually derive the value from the field name. This function handles that
+/// logic, and additionally validates the value (whether user-provided or
+/// computed).
+///
+/// If the value ends up derived from the field identifier, the span is set
+/// to that identifier.
+#[must_use]
+fn derive_from_field_name<T>(
+    user_value: Option<SpannedValue<T>>,
+    field_name: SpannedValue<&str>,
+    from_field_name: impl FnOnce(&str) -> T,
+    check: impl FnOnce(&T) -> Result<(), &'static str>,
+) -> syn::Result<SpannedValue<T>> {
+    let value = user_value
+        .unwrap_or_else(|| SpannedValue::new(from_field_name(&field_name), field_name.span()));
+
+    match check(&value) {
+        Ok(()) => Ok(value),
+        Err(message) => Err(syn::Error::new(value.span(), message)),
+    }
+}
+
+/// Helper macro that checks each input expression and creates an error with
+/// a message if any fail.
+macro_rules! checks {
+    ($($check:expr => $message:literal),+ $(,)?) => {
+        $(
+            if $check { Err($message) } else
+        )+
+        { Ok(()) }
+    }
+}
+
+#[inline]
+#[must_use]
 fn compute_long(
     long: Option<SpannedValue<String>>,
     field_name: &IdentString<'_>,
 ) -> syn::Result<SpannedValue<String>> {
-    let long = long.unwrap_or_else(|| {
-        SpannedValue::new(field_name.as_str().to_kebab_case(), field_name.span())
-    });
-
-    if long.starts_with("--") {
-        Err(syn::Error::new(
-            long.span(),
-            "long parameters don't need to start with --; this is handled automatically",
-        ))
-    } else if long.starts_with('-') {
-        Err(syn::Error::new(
-            long.span(),
-            "long parameters don't start with '-'",
-        ))
-    } else if !long.starts_with(|c: char| c.is_alphabetic()) {
-        Err(syn::Error::new(
-            long.span(),
-            "long parameters should start with something alphabetic. This might be relaxed later.",
-        ))
-    } else if long.contains('=') {
-        Err(syn::Error::new(
-            long.span(),
-            "long parameters must not include an '=', as it is the argument separator",
-        ))
-    } else if long.contains(|c: char| c.is_whitespace()) {
-        Err(syn::Error::new(
-            long.span(),
-            "long parameters shouldn't include whitespace",
-        ))
-    } else {
-        Ok(long)
-    }
+    derive_from_field_name(
+        long,
+        field_name.as_spanned_str(),
+        |field| field.to_kebab_case(),
+        |long| {
+            checks! {
+                long.starts_with("--") =>
+                    "long parameters don't need to start with --; this is \
+                    handled automatically",
+                long.starts_with('-') =>
+                    "long parameters don't start with '-'",
+                !long.starts_with(|c: char| c.is_alphabetic()) =>
+                    "long parameters should start with something alphabetic. \
+                    This might be relaxed later.",
+                long.contains('=') =>
+                    "long parameters must not include an '=', as it is the \
+                    argument separator",
+                long.contains(|c: char| c.is_whitespace()) =>
+                    "long parameters shouldn't include whitespace",
+            }
+        },
+    )
 }
 
+#[inline]
+#[must_use]
 fn compute_short(
     short: Option<SpannedValue<char>>,
     field_name: &IdentString<'_>,
 ) -> syn::Result<SpannedValue<char>> {
-    let c = short.unwrap_or_else(|| {
-        // TODO: use a capital char if the lower case one is taken already
-        SpannedValue::new(
-            field_name
-                .as_str()
-                .chars()
-                .next()
-                .expect("Identifiers can't be empty"),
-            field_name.span(),
-        )
-    });
-
-    if *c == '-' {
-        Err(syn::Error::new(c.span(), "short parameter must not be '-'"))
-    } else if !c.is_ascii_graphic() {
-        Err(syn::Error::new(
-            c.span(),
-            "short parameter should be an ascii printable",
-        ))
-    } else {
-        Ok(c)
-    }
+    derive_from_field_name(
+        short,
+        field_name.as_spanned_str(),
+        |field| field.chars().next().expect("Identifiers can't be empty"),
+        |short| {
+            checks! {
+                *short == '-' => "short parameter must not be '-'",
+                !short.is_ascii_graphic() => "short parameter should be an ascii printable",
+            }
+        },
+    )
 }
 
 fn compute_placeholder(
     placeholder: Option<SpannedValue<String>>,
     field_name: &IdentString<'_>,
 ) -> syn::Result<SpannedValue<String>> {
-    let placeholder = placeholder.unwrap_or_else(|| {
-        SpannedValue::new(
-            field_name.as_str().to_shouty_snake_case(),
-            field_name.span(),
-        )
-    });
+    derive_from_field_name(
+        placeholder,
+        field_name.as_spanned_str(),
+        |field| field.to_shouty_snake_case(),
+        |placeholder| {
+            checks! {
+                placeholder.contains(|c: char| c.is_whitespace()) => "placeholder shouldn't include whitespace",
+            }
+        },
+    )
+}
 
-    if placeholder.contains(|c: char| c.is_whitespace()) {
-        Err(syn::Error::new(
-            placeholder.span(),
-            "placeholder shouldn't include whitespace",
-        ))
-    } else {
-        Ok(placeholder)
-    }
+fn compute_invert(
+    // If given, the user's preference for the flag. If omitted, we'll compute
+    // it by prefixing the `long` tag with `no-`
+    invert: Option<SpannedValue<String>>,
+
+    // The --long tag of the flag being modified
+    long: SpannedValue<&str>,
+) -> syn::Result<SpannedValue<String>> {
+    derive_from_field_name(
+        invert,
+        long,
+        |long| {
+            // Rudimentary case detection
+            let underscore = long.contains('_');
+            let dash = long.contains('-');
+            let upper = long.contains(|c: char| c.is_uppercase());
+            let lower = long.contains(|c: char| c.is_lowercase());
+
+            let word = match (upper, lower) {
+                (false, _) => "no",
+                (true, true) => "No",
+                (true, false) => "NO",
+            };
+
+            let mark = match (dash, underscore) {
+                (true, _) => "-",
+                (false, true) => "_",
+                // SeemsLikeCamelCase
+                (false, false) if lower && upper => "",
+                (false, false) => "-",
+            };
+
+            format!("{word}{mark}{long}")
+        },
+        // We assume any relevant checks already happened to the long tag.
+        // We still have to do duplicate detection, but that happens separately.
+        |_| Ok(()),
+    )
 }
 
 /// Attributes for a type. In the future this may split into separate types for
