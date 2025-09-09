@@ -32,12 +32,12 @@ pub fn struct_state_block<'a>(
 /// Create a state block, in curlies. Used both for the struct state, and
 /// for separate enum variant states
 #[must_use]
-pub fn struct_state_block_from_fields<'a>(
-    fields: impl IntoIterator<Item = &'a ParsedFieldInfo<'a>>,
+pub fn struct_state_block_from_fields(
+    fields: &[ParsedFieldInfo<'_>],
     lifetime: &Lifetime,
 ) -> TokenStream2 {
     let field_state_types = fields
-        .into_iter()
+        .iter()
         .map(|info| match *info {
             ParsedFieldInfo::Positional(PositionalFieldInfo { ty, .. })
             | ParsedFieldInfo::Flag(FlagFieldInfo { ty, .. }) => FlattenOr::Normal(ty),
@@ -52,7 +52,20 @@ pub fn struct_state_block_from_fields<'a>(
             },
         });
 
-    struct_state_block(quote! { u16 }, lifetime, field_state_types)
+    let position_tracker_type = match fields.iter().any(|field| match *field {
+        ParsedFieldInfo::Positional(_) | ParsedFieldInfo::Flatten(_) => true,
+        ParsedFieldInfo::Flag(_) => false,
+    }) {
+        true => quote! { u16 },
+        false => quote! { () },
+    };
+
+    // TODO: if there are no flattened or positional fields, there's no need
+    // for a `position` in the state. In theory we should be able to just
+    // swap it out here for a `()`, because there's no codegen that interacts
+    // with the field as an integer if there's no body of the positional
+    // handler block.
+    struct_state_block(position_tracker_type, lifetime, field_state_types)
 }
 
 /// Create a default initializer block for a structure

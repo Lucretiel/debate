@@ -4,10 +4,7 @@ use quote::quote;
 use syn::{Ident, Token, Variant, punctuated::Punctuated};
 
 use crate::{
-    common::{
-        HelpOption,
-        enumeration::{Fallback, ParsedSubcommandInfo, SubcommandVariantNormalizedMode},
-    },
+    common::enumeration::{Fallback, ParsedSubcommandInfo, SubcommandVariantNormalizedMode},
     generics::AngleBracedLifetime,
     usage::common::struct_usage_items,
 };
@@ -30,7 +27,7 @@ pub fn derive_usage_enum_subcommand(
 
         let items_for_subcommand = match variant.mode.normalized() {
             SubcommandVariantNormalizedMode::Fields(fields) => {
-                let items = struct_usage_items(fields, HelpOption::new());
+                let items = struct_usage_items(fields, None);
                 quote! { ::debate::help::UsageItems::Parameters { parameters: #items } }
             }
             SubcommandVariantNormalizedMode::Newtype(ty) => quote! {

@@ -1,3 +1,4 @@
+mod flag_set;
 mod subcommand;
 
 use darling::FromAttributes;

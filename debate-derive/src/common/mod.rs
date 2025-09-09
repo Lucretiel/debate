@@ -9,7 +9,7 @@ use darling::{
 };
 use heck::{ToKebabCase as _, ToShoutySnakeCase, ToTitleCase};
 use itertools::Itertools as _;
-use proc_macro2::TokenStream as TokenStream2;
+use proc_macro2::{Span, TokenStream as TokenStream2};
 use quote::ToTokens;
 use regex::Regex;
 use syn::{Attribute, Expr, Field, Ident, Type, spanned::Spanned as _};
@@ -116,6 +116,26 @@ pub enum FlagTags<Long, Short> {
     Long(Long),
     Short(Short),
     LongShort { long: Long, short: Short },
+}
+
+impl FlagTags<&str, char> {
+    #[inline]
+    #[must_use]
+    pub fn long(&self) -> Option<&str> {
+        match *self {
+            FlagTags::Long(long) | FlagTags::LongShort { long, .. } => Some(long),
+            FlagTags::Short(_) => None,
+        }
+    }
+
+    #[inline]
+    #[must_use]
+    pub fn short(&self) -> Option<char> {
+        match *self {
+            FlagTags::Short(short) | FlagTags::LongShort { short, .. } => Some(short),
+            FlagTags::Long(_) => None,
+        }
+    }
 }
 
 impl FlagTags<SpannedValue<String>, SpannedValue<char>> {
@@ -572,42 +592,29 @@ fn compute_invert(
 }
 
 /// Attributes for a type. In the future this may split into separate types for
+/// the different types we can tag.
 #[derive(darling::FromAttributes, Debug)]
 #[darling(attributes(debate))]
 pub struct RawParsedTypeAttr {
-    help: Option<()>,
+    help: Option<SpannedValue<()>>,
     // TODO: global long/short
 }
 
 impl RawParsedTypeAttr {
-    pub fn help_option(&self) -> HelpOption<'_> {
-        HelpOption {
-            long: self.help.map(|()| "help"),
-            short: self.help.map(|()| 'h'),
-        }
+    pub fn help_option(&self) -> Option<HelpFlag<'_>> {
+        self.help.as_ref().map(|help| HelpFlag {
+            tags: FlagTags::LongShort {
+                long: "help",
+                short: 'h',
+            },
+            span: help.span(),
+        })
     }
 }
 
 /// The set of flags that will signal a request for help
-pub struct HelpOption<'a> {
-    pub long: Option<&'a str>,
-    pub short: Option<char>,
-}
-
-impl<'a> HelpOption<'a> {
-    pub const fn new() -> Self {
-        Self {
-            long: None,
-            short: None,
-        }
-    }
-
-    pub const fn as_tags(&self) -> Option<FlagTags<&'a str, char>> {
-        match (self.long, self.short) {
-            (None, None) => None,
-            (Some(long), None) => Some(FlagTags::Long(long)),
-            (None, Some(short)) => Some(FlagTags::Short(short)),
-            (Some(long), Some(short)) => Some(FlagTags::LongShort { long, short }),
-        }
-    }
+// This should probably become a pair of spanned values
+pub struct HelpFlag<'a> {
+    pub tags: FlagTags<&'a str, char>,
+    pub span: Span,
 }

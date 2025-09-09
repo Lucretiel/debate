@@ -55,24 +55,51 @@ pub fn derive_args_struct(
     let attr = RawParsedTypeAttr::from_attributes(attrs)?;
     let help = attr.help_option();
 
+    let help_long = help.as_ref().and_then(|help| {
+        help.tags
+            .long()
+            .map(|long| SpannedValue::new(long, help.span))
+    });
+    let help_short = help.as_ref().and_then(|help| {
+        help.tags
+            .short()
+            .map(|short| SpannedValue::new(short, help.span))
+    });
+
     let fields: Vec<ParsedFieldInfo> = fields
         .iter()
         .map(ParsedFieldInfo::from_field)
         .try_collect()?;
 
     // Collision detection
-    // TODO: move collision detection to ParsedFieldInfo::from_field
-    // TODO: detect collisions with the help fields
+    // TODO: move collision detection to ParsedFieldInfo::from_field. This will
+    //   allow us to do collision detection in enums and derive(Usage)
     {
-        let mut long_tags = HashMap::new();
-        let mut short_tags = HashMap::new();
+        let mut long_tags = HashMap::from_iter(help_long.map(|long| (*long, long.span())));
+        let mut short_tags = HashMap::from_iter(help_short.map(|short| (*short, short.span())));
 
-        for tags in fields.iter().filter_map(|field| match field {
-            ParsedFieldInfo::Flag(option) => Some(&option.tags),
+        for flag in fields.iter().filter_map(|field| match field {
+            ParsedFieldInfo::Flag(flag) => Some(flag),
             ParsedFieldInfo::Positional(_) | ParsedFieldInfo::Flatten(_) => None,
         }) {
-            detect_collision(&mut long_tags, tags.long(), |tag| lazy_format!("--{tag}"))?;
-            detect_collision(&mut short_tags, tags.short(), |tag| lazy_format!("-{tag}"))?;
+            // TODO: I'm not totally satisfied with the way collision error
+            // locations are reported here. Might need to introduce the idea
+            // of a double-span for things like `#[debate(short)]foo: i32``,
+            // where we can track both the activation of the feature `short`
+            // and the specific name `foo`.
+            detect_collision(&mut long_tags, flag.tags.long(), |tag| {
+                lazy_format!("--{tag}")
+            })?;
+            detect_collision(
+                &mut long_tags,
+                flag.invert
+                    .as_ref()
+                    .map(|invert| SpannedValue::new(invert.as_str(), invert.span())),
+                |tag| lazy_format!("--{tag}"),
+            )?;
+            detect_collision(&mut short_tags, flag.tags.short(), |tag| {
+                lazy_format!("-{tag}")
+            })?;
         }
     }
 
@@ -107,7 +134,7 @@ pub fn derive_args_struct(
         &option,
         &parameter_ident,
         &fields,
-        help.long,
+        help_long.map(|help| *help),
     );
 
     let long_body = complete_long_body(
@@ -116,7 +143,7 @@ pub fn derive_args_struct(
         &option,
         &parameter_ident,
         &fields,
-        help.long,
+        help_long.map(|help| *help),
     );
 
     let short_body = complete_short_body(
@@ -125,7 +152,7 @@ pub fn derive_args_struct(
         &option,
         &parameter_ident,
         &fields,
-        help.short,
+        help_short.map(|help| *help),
     );
 
     let subcommand_context_visitor_calls =

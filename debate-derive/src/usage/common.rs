@@ -1,7 +1,7 @@
 use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
 
-use crate::common::{Description, FlagTags, FlattenFieldInfo, HelpOption, ParsedFieldInfo};
+use crate::common::{Description, FlagTags, FlattenFieldInfo, HelpFlag, ParsedFieldInfo};
 
 /// Convert a set of tags into an expression suitable for use after
 /// `::debate::help::Tags`
@@ -35,7 +35,10 @@ impl Description {
 
 /// Given the description of a struct, produce a const expression of type
 /// `&[help::Parameter]` that can be used to fill in the items for a struct or subcommand
-pub fn struct_usage_items(parsed_fields: &[ParsedFieldInfo<'_>], help: HelpOption) -> TokenStream2 {
+pub fn struct_usage_items(
+    parsed_fields: &[ParsedFieldInfo<'_>],
+    help: Option<HelpFlag>,
+) -> TokenStream2 {
     let parameters = parsed_fields.iter().map(|field| match field {
         ParsedFieldInfo::Positional(field) => {
             let placeholder = field.placeholder.as_str();
@@ -122,8 +125,8 @@ pub fn struct_usage_items(parsed_fields: &[ParsedFieldInfo<'_>], help: HelpOptio
     // Need to find a way to add this up there. It's tricky cause the iterator
     // above is for `&ParsedFieldInfo`, and it's difficult to create a
     // `ParsedFieldInfo:` for `--help`
-    let help_parameter = help.as_tags().map(|tags| {
-        let tags = compute_usage_tags(&tags);
+    let help_parameter = help.map(|help| {
+        let tags = compute_usage_tags(&help.tags);
 
         quote! {
             ::debate::help::Parameter::Option(::debate::help::ParameterOption {
