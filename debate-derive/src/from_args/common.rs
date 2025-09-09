@@ -452,7 +452,7 @@ pub fn complete_long_arg_body(
         parameter_ident,
         &format_ident!("arg"),
         &format_ident!("add_arg"),
-        &format_ident!("add_long_option"),
+        &format_ident!("add_long_argument"),
         quote! { () },
     )
 }

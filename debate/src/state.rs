@@ -91,7 +91,7 @@ pub trait State<'arg> {
     where
         E: Error<'arg, ()>;
 
-    fn add_long_option<E>(&mut self, option: &'arg Arg, argument: &'arg Arg) -> Result<(), E>
+    fn add_long_argument<E>(&mut self, option: &'arg Arg, argument: &'arg Arg) -> Result<(), E>
     where
         E: Error<'arg, ()>;
 

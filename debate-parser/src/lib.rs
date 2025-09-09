@@ -2,8 +2,8 @@
 
 /*!
 Low-level implementation of argument handling. Takes care of distinctions
-between flags, options, and positionals, that sort of thing. No type handling
-happens here. Usually this is too low level to use directly.
+between flags and positionals, that sort of thing. No type handling happens
+here. Usually this is too low level to use directly.
 */
 
 #[cfg(feature = "std")]
@@ -28,34 +28,34 @@ pub trait Visitor<'arg> {
     /// A positional parameter.
     fn visit_positional(self, argument: &'arg Arg) -> Self::Value;
 
-    /// A long option that definitely has an argument, because it was given
-    /// as `--option=argument`
-    fn visit_long_option(self, option: &'arg Arg, argument: &'arg Arg) -> Self::Value;
+    /// A long flag that definitely has an argument, because it was given
+    /// as `--flag=argument`
+    fn visit_long_argument(self, flag: &'arg Arg, argument: &'arg Arg) -> Self::Value;
 
-    /// A long option or flag, such as `--option`
-    fn visit_long(self, option: &'arg Arg, arg: impl ArgAccess<'arg>) -> Self::Value;
+    /// A long flag, such as `--flag`
+    fn visit_long(self, flag: &'arg Arg, arg: impl ArgAccess<'arg>) -> Self::Value;
 
-    /// A long option or flag, such as `-o`
-    fn visit_short(self, option: u8, arg: impl ArgAccess<'arg>) -> Self::Value;
+    /// A long flag, such as `-f`
+    fn visit_short(self, flag: u8, arg: impl ArgAccess<'arg>) -> Self::Value;
 }
 
 /**
 [`ArgAccess`] allows a visitor to decide if a given parameter needs an argument,
-based on the identity of the flag or option.
+based on the identity of the parameter.
 
 Consider `--foo bar`. Is this a pair of parameters (the flag `--foo` and the
-positional parameter `bar`) or a single option `--foo bar` that takes an
+positional parameter `bar`) or a single flag `--foo bar` that takes an
 argument? Similarly, `-ab foo` could be `-a b`, `foo`; or `-a`, `-b foo`; or
 `-a`, `-b`, `foo`. The [`ArgumentsParser`] can't independently classify a given
 argument, so instead, a visitor can request an argument via this trait only for
-options that need them and the `ArgumentParser` takes care of the parsing logic
+flags that need them and the `ArgumentParser` takes care of the parsing logic
 of actually determining where that argument comes from.
 */
 pub trait ArgAccess<'arg>: Sized {
     /**
-    Get an argument from the parser. This should only be called by options that
-    need it; flags should simply ignore it, to ensure that the next command
-    line argument can correctly be parsed independently.
+    Get an argument from the parser. This should only be called by flags that
+    need it; toggle flags should simply ignore it, to ensure that the next
+    command line argument can correctly be parsed independently.
 
     This returns [`None`] if all of the CLI arguments have been exhausted, or
     if there are known to only be positional parameters remaining (because
@@ -136,7 +136,7 @@ where
             .map(|arg| visitor.visit_positional(arg))
     }
 
-    /// Put `self` into a `Ready` state, then return a ShortArgAccess
+    /// Put `self` into a `Ready` state, then return a StandardArgAccess
     #[inline]
     fn standard_arg(&mut self) -> StandardArgAccess<'_, 'arg, I> {
         debug_assert!(!matches!(self.state, State::PositionalOnly));
@@ -158,7 +158,7 @@ where
         }
     }
 
-    /// Handle getting the argument for a `-s` short option. If there is
+    /// Handle getting the argument for a `-s` short flag. If there is
     /// remaining content in the short, it's a candidate for the argument;
     /// otherwise, the next argument in the input args is the candidate.
     #[inline]
@@ -166,11 +166,11 @@ where
     where
         V: Visitor<'arg>,
     {
-        let (&option, short) = short.split_first();
+        let (&flag, short) = short.split_first();
 
         match PopulatedSlice::new(short) {
-            None => visitor.visit_short(option, self.standard_arg()),
-            Some(short) => visitor.visit_short(option, self.short_arg(short)),
+            None => visitor.visit_short(flag, self.standard_arg()),
+            Some(short) => visitor.visit_short(flag, self.short_arg(short)),
         }
     }
 
@@ -182,11 +182,11 @@ where
             State::Ready => match self.args.next()? {
                 b"--" => self.positional_only_arg(visitor),
                 argument => Some(match argument {
-                    [b'-', b'-', option @ ..] => match split_once(option, b'=') {
-                        Some((option, argument)) => {
-                            visitor.visit_long_option(Arg::new(option), Arg::new(argument))
+                    [b'-', b'-', flag @ ..] => match split_once(flag, b'=') {
+                        Some((flag, argument)) => {
+                            visitor.visit_long_argument(Arg::new(flag), Arg::new(argument))
                         }
-                        None => visitor.visit_long(Arg::new(option), self.standard_arg()),
+                        None => visitor.visit_long(Arg::new(flag), self.standard_arg()),
                     },
                     [b'-', short @ ..] => match PopulatedSlice::new(short) {
                         None => visitor.visit_positional(Arg::new(b"-")),

@@ -293,9 +293,9 @@ where
                 .map_err(|error| E::positional(argument, error))
         }
 
-        fn visit_long_option(self, option: &'arg Arg, argument: &'arg Arg) -> Self::Value {
+        fn visit_long_argument(self, option: &'arg Arg, argument: &'arg Arg) -> Self::Value {
             self.state
-                .add_long_option(option, argument)
+                .add_long_argument(option, argument)
                 .map_err(|error| E::long_with_argument(option, argument, error))
         }
 

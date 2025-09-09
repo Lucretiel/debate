@@ -61,7 +61,7 @@ pub fn derive_args_enum_subcommand(
     let visitor = format_ident!("visitor");
 
     let add_positional_ident = format_ident!("add_positional");
-    let add_long_option_ident = format_ident!("add_long_option");
+    let add_long_argument_ident = format_ident!("add_long_argument");
     let add_long_ident = format_ident!("add_long");
     let add_short_ident = format_ident!("add_short");
 
@@ -153,7 +153,7 @@ pub fn derive_args_enum_subcommand(
     let long_option_arms = parsed_variants.variants.iter().map(|variant| {
         make_variant_arm(
             variant,
-            &add_long_option_ident,
+            &add_long_argument_ident,
             &fields_ident,
             [&option, &argument],
             quote! {  ref mut #fields_ident, .. },
@@ -323,7 +323,7 @@ pub fn derive_args_enum_subcommand(
                     }
                 }
 
-                fn add_long_option<E>(
+                fn add_long_argument<E>(
                     &mut self,
                     option: & #lifetime ::debate_parser::Arg,
                     argument: & #lifetime ::debate_parser::Arg

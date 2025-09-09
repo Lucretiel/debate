@@ -190,7 +190,7 @@ pub fn derive_args_struct(
                 )
             }
 
-            fn add_long_option<E>(
+            fn add_long_argument<E>(
                 &mut self,
                 option: & #lifetime ::debate_parser::Arg,
                 argument: & #lifetime ::debate_parser::Arg
