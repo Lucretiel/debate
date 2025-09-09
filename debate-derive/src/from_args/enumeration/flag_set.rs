@@ -1,6 +1,6 @@
 use proc_macro2::TokenStream as TokenStream2;
 use quote::{format_ident, quote};
-use syn::{Ident, Lifetime, Token, Variant, punctuated::Punctuated};
+use syn::{Attribute, Ident, Lifetime, Token, Variant, punctuated::Punctuated};
 
 use crate::generics::AngleBracedLifetime;
 
@@ -9,8 +9,14 @@ pub fn derive_args_enum_flag_set(
     variants: &Punctuated<Variant, Token![,]>,
     lifetime: &Lifetime,
     type_lifetime: Option<&AngleBracedLifetime>,
+    attrs: &[Attribute],
 ) -> syn::Result<TokenStream2> {
     let state_ident = format_ident!("__{name}State");
+
+    // Ideally we'd use a hash map for this, but it would have weird keys
+    // (because we need to check both short and long keys), and we never
+    // expect people to have SO MANY flags that it would matter much anyway
+    let mut computed_flags = Vec::new();
 
     /*
     Let's talk algorithm.

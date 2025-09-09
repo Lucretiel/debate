@@ -4,7 +4,9 @@ use quote::quote;
 use syn::{Ident, Token, Variant, punctuated::Punctuated};
 
 use crate::{
-    common::enumeration::{Fallback, ParsedSubcommandInfo, SubcommandVariantNormalizedMode},
+    common::enumeration::subcommand::{
+        Fallback, ParsedSubcommandInfo, SubcommandVariantNormalizedMode,
+    },
     generics::AngleBracedLifetime,
     usage::common::struct_usage_items,
 };

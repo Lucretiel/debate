@@ -69,7 +69,7 @@ pub enum FlattenOr<F, T> {
 /// Attributes for a field. "Raw" because it doesn't yet do various
 /// correctness checks, such as ensuring `flatten` is unique, or that `invert`
 /// only appears on flags.
-#[derive(darling::FromAttributes, Debug)]
+#[derive(darling::FromAttributes)]
 #[darling(attributes(debate))]
 struct RawParsedFieldAttr {
     long: Option<SpannedValue<Override<String>>>,
@@ -112,6 +112,7 @@ impl FieldDefault {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FlagTags<Long, Short> {
     Long(Long),
     Short(Short),

@@ -5,16 +5,15 @@ use syn::{Ident, Lifetime, Token, Variant, punctuated::Punctuated};
 use crate::{
     common::{
         ParsedFieldInfo,
-        enumeration::{
+        enumeration::subcommand::{
             Fallback, ParsedSubcommandInfo, ParsedSubcommandVariant, SubcommandVariantMode,
             SubcommandVariantNormalizedMode,
         },
     },
     from_args::common::{
-        complete_long_body, complete_long_arg_body, complete_short_body,
-        final_field_initializers, get_subcommand_field_visitor_calls, struct_state_block,
-        struct_state_block_from_fields, struct_state_init_block_from_field_count,
-        visit_positional_arms_for_fields,
+        complete_long_arg_body, complete_long_body, complete_short_body, final_field_initializers,
+        get_subcommand_field_visitor_calls, struct_state_block, struct_state_block_from_fields,
+        struct_state_init_block_from_field_count, visit_positional_arms_for_fields,
     },
     generics::AngleBracedLifetime,
 };
