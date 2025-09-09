@@ -99,7 +99,7 @@ fn indexed_fields<'a>(
 }
 
 #[must_use]
-fn option_fields<'a>(
+fn flag_fields<'a>(
     fields: &'a [ParsedFieldInfo<'a>],
 ) -> impl Iterator<Item = (Index, &'a FlagFieldInfo<'a>)> {
     indexed_fields(fields).filter_map(|(index, field)| match field {
@@ -134,7 +134,7 @@ fn positional_flatten_fields<'a>(
         .map(|(position, (index, field))| (index, Literal::usize_unsuffixed(position), field))
 }
 
-/// Create an expression that applies an incoming `argument` to a given parameter
+/// Create an expression that applies an incoming `argument` to a given field
 /// by calling either `Parameter::initial_method` or `Parameter::follow_up_method`,
 /// depending on whether the field is present already. This expression's type
 /// is always `Result<(), impl ParameterError>`. The field is
@@ -142,6 +142,8 @@ fn positional_flatten_fields<'a>(
 ///
 /// If `Parameter::follow_up_method` is omitted, then we assume this is an
 /// overridable field and that we should always use `initial_method`
+
+#[must_use]
 pub fn apply_arg_to_field(
     fields_ident: &Ident,
     argument_ident: &Ident,
@@ -178,6 +180,8 @@ pub fn apply_arg_to_field(
 /// Given an expression that returns a Result<(), E>, wrap it such that `Ok`
 /// is RETURNED, `DetectUnrecognized::Unrecognized` is propagated as the value
 /// of the expression, and other errors are returned as an error via `wrap_error`
+
+#[must_use]
 pub fn handle_propagated_error(
     expr: impl ToTokens,
     unrecognized_bind: impl ToTokens,
@@ -198,9 +202,8 @@ pub fn handle_propagated_error(
     }
 }
 
-/// Create an expression that calls a state method on a given field, then
-/// handles the error returned by it (specifically, it uses DetectUnrecognized
-/// to allow arguments to be retried).
+#[inline]
+#[must_use]
 pub fn handle_flatten(
     expr: impl ToTokens,
     field_name: &str,
@@ -222,6 +225,7 @@ pub fn handle_flatten(
 ///     *position = {/* handle argument for this field */}
 /// }
 /// ```
+#[must_use]
 pub fn visit_positional_arms_for_fields(
     fields_ident: &Ident,
     argument_ident: &Ident,
@@ -343,7 +347,7 @@ fn complete_flag_body<'a, Tag: MakeScrutinee>(
         }
     });
 
-    let local_arms = option_fields(fields).flat_map(|(index, field)| {
+    let local_arms = flag_fields(fields).flat_map(|(index, field)| {
         let field_name = field.ident.as_str();
 
         let arm = get_tag(field).map(|tag| {
@@ -428,7 +432,7 @@ fn complete_flag_body<'a, Tag: MakeScrutinee>(
     }
 }
 
-pub fn complete_long_option_body(
+pub fn complete_long_arg_body(
     fields_ident: &Ident,
     argument_ident: &Ident,
     option_ident: &Ident,

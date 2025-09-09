@@ -11,7 +11,7 @@ use crate::{
         },
     },
     from_args::common::{
-        complete_long_body, complete_long_option_body, complete_short_body,
+        complete_long_body, complete_long_arg_body, complete_short_body,
         final_field_initializers, get_subcommand_field_visitor_calls, struct_state_block,
         struct_state_block_from_fields, struct_state_init_block_from_field_count,
         visit_positional_arms_for_fields,
@@ -159,7 +159,7 @@ pub fn derive_args_enum_subcommand(
             [&option, &argument],
             quote! {  ref mut #fields_ident, .. },
             |fields| {
-                complete_long_option_body(
+                complete_long_arg_body(
                     &fields_ident,
                     &argument,
                     &option,
