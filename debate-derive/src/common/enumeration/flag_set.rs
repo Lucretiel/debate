@@ -54,7 +54,7 @@ impl<'a> ToTokens for FlagSetType<'a> {
 }
 
 // TODO: most of this needs a span so that we can report errors when there
-// are conflicts.
+// are conflicts. `default` and `override` do, at least.
 struct FlagSetFlag<'a> {
     docs: Description,
     placeholder: SpannedValue<String>,
@@ -62,6 +62,9 @@ struct FlagSetFlag<'a> {
     default: Option<FieldDefault>,
     tags: FlagTags<SpannedValue<String>, SpannedValue<char>>,
     overridable: bool,
+
+    // TODO: vibes are telling me to move this out to a separate struct
+    // (maybe instead have it be `flags: Vec<(FlagSetFlag, Vec<Ident>)>`)
     variants: Vec<&'a Ident>,
 }
 
