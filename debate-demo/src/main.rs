@@ -26,7 +26,7 @@ struct DebateDemo<'a> {
     verbose: bool,
 
     /// The second path
-    #[debate(short)]
+    #[debate(short, override)]
     second_path: Option<PathBuf>,
 
     /**
@@ -43,7 +43,7 @@ struct DebateDemo<'a> {
      * Maecenas eu nisi a nisi rutrum elementum. Nulla finibus nisi et nunc
      * auctor ornare. Vivamus fringilla id quam in venenatis.
      */
-    #[debate(long = "cool-value", default)]
+    #[debate(long = "cool-value", default, invert)]
     value: i32,
 
     #[debate(flatten)]

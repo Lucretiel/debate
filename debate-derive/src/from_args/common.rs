@@ -343,27 +343,21 @@ fn complete_flag_body<'a, Tag: MakeScrutinee>(
         }
     });
 
-    let local_arms = option_fields(fields)
-        .filter_map(move |(index, field)| {
-            get_tag(field)
-                .map(|tag| tag.make_scrutinee())
-                .map(|scrutinee| (field, scrutinee, index))
-        })
-        .map(move |(field, scrutinee, index)| {
-            let field_name = field.ident.as_str();
+    let local_arms = option_fields(fields).flat_map(|(index, field)| {
+        let field_name = field.ident.as_str();
 
-            let add_parameter_method = match field.overridable {
-                true => None,
-                false => Some(add_parameter_method),
-            };
-
+        let arm = get_tag(field).map(|tag| {
+            let scrutinee = tag.make_scrutinee();
             let expr = apply_arg_to_field(
                 fields_ident,
                 argument_ident,
                 &index,
                 trait_ident,
                 parameter_method,
-                add_parameter_method,
+                match field.overridable {
+                    true => None,
+                    false => Some(add_parameter_method),
+                },
             );
 
             quote! {
@@ -376,41 +370,27 @@ fn complete_flag_body<'a, Tag: MakeScrutinee>(
             }
         });
 
-    let invert_arms = option_fields(fields)
-        .filter_map(move |(index, field)| {
-            get_invert_tag(field)
-                .map(|tag| tag.make_scrutinee())
-                .map(|scrutinee| (field, scrutinee, index))
-        })
-        .map(move |(field, scrutinee, index)| {
-            let field_name = field.ident.as_str();
+        let invert_arm = get_invert_tag(field).map(|invert| {
+            let scrutinee = invert.make_scrutinee();
 
-            // A lot of this error handling is redundant; we always return an
-            // error in --long=option and never return an option in `--long`.
-            // It simplifies our codegen, however, to just delegate to the
-            // implementation for `()`. Probably worth revisiting this design
-            // in the future.
-            //
-            // One option, of course, would be to omit inverters entirely
-            // when generating long=arg flags. However, this would cause the
-            // error to be "unrecognized argument" instead of "flag got arg".
-            // TODO: deduplicate this with `apply_arg_to_field`
             quote! {
                 #scrutinee => match ::debate::parameter::Parameter::#parameter_method(
                     #argument_ident
                 ) {
+                    // TODO: deduplicate this with `apply_arg_to_field`
                     ::core::result::Result::Ok(()) => {
                         #fields_ident.#index = ::core::option::Option::None;
                         ::core::result::Result::Ok(())
                     }
                     ::core::result::Result::Err(err) => ::core::result::Result::Err(
-                        // Technically this isn't a parameter error, the
-                        // parameter didn't really get a say in this.
                         ::debate::state::Error::parameter(#field_name, err)
                     )
-                }
+                },
             }
         });
+
+        [arm, invert_arm]
+    });
 
     let flatten_arms = flatten_fields(fields).map(|(index, info)| {
         let body = handle_flatten(
@@ -435,7 +415,6 @@ fn complete_flag_body<'a, Tag: MakeScrutinee>(
         match (#option_expr) {
             #help_arm
             #(#local_arms)*
-            #(#invert_arms)*
             _ => {
                 #(#flatten_arms)*
 
