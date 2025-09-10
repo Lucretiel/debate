@@ -1,4 +1,7 @@
-use std::{collections::HashSet, ops::ControlFlow};
+use std::{
+    collections::{HashMap, HashSet},
+    ops::ControlFlow,
+};
 
 use darling::{
     FromAttributes,
@@ -232,8 +235,9 @@ pub struct FlagSetFlag<'a> {
     /// of its location in that variant (if relevant)
     pub variants: Vec<(&'a IdentString<'a>, Option<usize>)>,
 
-    /// Precomputed set of all the variants where this flag DOESN'T appear
-    pub excluded: HashSet<&'a str>,
+    /// Precomputed set of all the variants where this flag DOESN'T appear,
+    /// along with their indices.
+    pub excluded: HashMap<&'a str, usize>,
 
     /// The actual info about the flag itself
     pub info: GroupedFlagFieldInfo<'a>,
@@ -276,7 +280,7 @@ fn add_or_update_flag<'a, Type>(
     field: Option<&'a IdentString<'a>>,
     variant: &'a IdentString<'a>,
     index: Option<usize>,
-    all_variants: &HashSet<&'a str>,
+    all_variants: &HashMap<&'a str, usize>,
 ) -> syn::Result<()>
 where
     Type: Copy + Into<FlagSetType<'a>>,
@@ -371,6 +375,8 @@ pub fn compute_grouped_flags<'a>(
     let all_variants = variants
         .iter()
         .map(|variant| variant.ident.as_str())
+        .enumerate()
+        .map(|(index, name)| (name, index))
         .collect();
 
     variants.iter().try_for_each(|variant| match variant.mode {

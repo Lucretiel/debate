@@ -9,7 +9,8 @@ use crate::{
         FlagSetType, FlagSetVariant, ParsedFlagSetInfo, VariantMode, compute_grouped_flags,
     },
     from_args::common::{
-        MakeScrutinee, apply_arg_to_field, apply_new_arg_to_generic_field, indexed,
+        MakeScrutinee, apply_arg_to_field, apply_new_arg_to_generic_field, complete_long_body,
+        indexed,
     },
     generics::AngleBracedLifetime,
 };
@@ -164,81 +165,140 @@ pub fn derive_args_enum_flag_set(
     let long_flags = indexed(&parsed_flags)
         .find_map(|(index, flag)| flag.info.tags.long().map(|long| (index, long, flag)));
 
-    let add_long_arms = long_flags.clone().map(|(index, long, flag)| {
-        let scrutinee = long.make_scrutinee();
+    // let add_long_arms = long_flags.clone().map(|(index, long, flag)| {
+    //     let scrutinee = long.make_scrutinee();
 
-        // Reject each variant that this flag is NOT a member of. Note that
-        // this is creating something like a cubic complexity operation in
-        // the worst case (for each flag, for each variant, for each variant
-        // in the flag); worth targeting if performance becomes a concern.
-        // Not worried about it for now because we expect most flags not to
-        // be members of many variants. It's also a strong candidate for
-        // computation to cache (or maybe even perform during parsing).
+    //     // Reject each variant that this flag is NOT a member of.
+    //     // TODO: make this deteministic (indexmap?)
+    //     let update_rejections = flag
+    //         .excluded
+    //         .values()
+    //         .take_while(|_| any_multi_flags)
+    //         .map(|&index| Index::from(index))
+    //         .map(|index| {
+    //             quote! {
+    //                 rejection_set.#index = true;
+    //             }
+    //         });
 
-        let variant_arms = flag.variants.iter().map(|&(variant_ident, index)| {
-            let body = match index {
-                None => match flag.info.overridable {
-                    true => apply_new_arg_to_generic_field(
-                        &fields_ident,
-                        &argument,
-                        &Index::from(0),
-                        &parameter_ident,
-                        &present_ident,
-                        |value| quote! {#value},
-                    ),
-                    false => quote! {
-                        ::debate::parameter::Parameter::add_present(
-                            &mut #fields_ident.0,
-                            #argument,
-                        )
-                    },
-                },
-                Some(index) => apply_arg_to_field(
-                    &fields_ident,
-                    &argument,
-                    &Index::from(index),
-                    &parameter_ident,
-                    &present_ident,
-                    match flag.info.overridable {
-                        true => None,
-                        false => Some(&add_present_ident),
-                    },
-                ),
-            };
+    //     let variant_arms = flag.variants.iter().map(|&(variant_ident, index)| {
+    //         let body = match index {
+    //             None => match flag.info.overridable {
+    //                 true => apply_new_arg_to_generic_field(
+    //                     &fields_ident,
+    //                     &argument,
+    //                     &Index::from(0),
+    //                     &parameter_ident,
+    //                     &present_ident,
+    //                     |value| quote! {#value},
+    //                 ),
+    //                 false => quote! {
+    //                     ::debate::parameter::Parameter::add_present(
+    //                         &mut #fields_ident.0,
+    //                         #argument,
+    //                     )
+    //                 },
+    //             },
+    //             Some(index) => apply_arg_to_field(
+    //                 &fields_ident,
+    //                 &argument,
+    //                 &Index::from(index),
+    //                 &parameter_ident,
+    //                 &present_ident,
+    //                 match flag.info.overridable {
+    //                     true => None,
+    //                     false => Some(&add_present_ident),
+    //                 },
+    //             ),
+    //         };
+
+    //         quote! {
+    //             #variant_ident { ref mut #fields_ident } => match (#body) {
+    //                 ::core::result::Result::Ok(()) => ::core::result::Result::Ok(()),
+    //                 ::core::result::Result::Err(err) => ::core::result::Result::Err(
+    //                     ::debate::state::Error::parameter("TODO NAME ME", err)
+    //                 ),
+    //             }
+    //         }
+    //     });
+
+    //     quote! {
+    //         #scrutinee => match *self {
+    //             Self :: #superposition_ident { ref mut fields, ref mut rejection_set, .. } => {
+    //                 // Step 1: check the rejection set for a conflict
+    //                 // Step 2: update the rejection set with all newly rejeced variants
+    //                 // Step 3: check if this flag transitions us to a known state.
+    //                 //   if so:
+    //                 //     transition to that state. Bring any relevant arguments along.
+    //                 //     parse the argument with `present`.
+    //                 //   otherwise:
+    //                 //     parse the argument with `apply_arg_to_field` into the
+    //                 //     superposition fields.
+    //                 // Steps to compute conflict: keep track of the previously
+    //                 // false rejection set items. If the rejection set becomes
+    //                 // fully rejected, pick the first previously false one,
+    //                 // and use it.
+    //                 // Ideally this logic is not repeated in every scrutinee
+    //                 // arm; we'd find a way to shunt it down towards the end.
+
+    //                 #(#update_rejections*)
+
+    //             },
+
+    //             #(Self :: #variant_arms,)*
+
+    //             // We recognized the flag, but it's conflicting with a selected
+    //             // state
+    //             _ => ::core::result::Result::Err(
+    //                 // Again: unrecognized is wrong here
+    //                 ::debate::state::Error::unrecognized(todo!())
+    //             ),
+    //         }
+    //     }
+    // });
+
+    let add_long_arms = parsed.variants.iter().map(|variant| match variant.mode {
+        VariantMode::Plain(field) => {
+            let ident = variant.ident;
+            let arm = field.tags.long().map(|long| {
+                quote! {
+                    todo!()
+                }
+            });
 
             quote! {
-                #variant_ident { ref mut #fields_ident } => match (#body) {
-                    ::core::result::Result::Ok(()) => ::core::result::Result::Ok(()),
-                    ::core::result::Result::Err(err) => ::core::result::Result::Err(
-                        ::debate::state::Error::parameter("TODO NAME ME", err)
+                #ident => match #flag {
+                    #arm,
+
+                    // We recognized the flag, but it's conflicting with a
+                    // selected state
+                    _ => ::core::result::Result::Err(
+                        // Again: unrecognized is wrong here
+                        ::debate::state::Error::unrecognized(todo!())
                     ),
                 }
             }
-        });
+        }
 
-        quote! {
-            #scrutinee => match *self {
-                Self :: #superposition_ident { ref mut fields, ref mut rejection_set, .. } => {
-                    // Step 1: check the rejection set for a conflict
-                    // Step 2: update the rejection set with all newly rejeced variants
-                    // Step 3: check if this flag transitions us to a known state.
-                    //   if so:
-                    //     transition to that state. Bring any relevant arguments along.
-                    //     parse the argument with `present`.
-                    //   otherwise:
-                    //     parse the argument with `apply_arg_to_field` into the
-                    //     superposition fields.
+        VariantMode::Struct(fields) => {
+            let ident = variant.ident;
 
-                },
+            // TODO: find a way to use complete_long_body here. Will certainly
+            // involve introducing a trait somewhere to make it more generic.
+            // We also need to find a way to switch between unrecognized flags
+            // (which need to propagate their argument back to the caller)
+            // and conflicting flags (which do not).
+            let body = complete_long_body(
+                &fields_ident,
+                &argument,
+                &flag,
+                &parameter_ident,
+                fields,
+                None,
+            );
 
-                #(Self :: #variant_arms,)*
-
-                // We recognized the flag, but it's conflicting with a selected
-                // state
-                _ => ::core::result::Result::Err(
-                    // Again: unrecognized is wrong here
-                    ::debate::state::Error::unrecognized(todo!())
-                ),
+            quote! {
+                #ident { ref mut fields } => #body
             }
         }
     });
@@ -287,9 +347,53 @@ pub fn derive_args_enum_flag_set(
             where
                 E: ::debate::state::Error<#lifetime, ()>
             {
-                let #fields_ident = &mut self.fields;
+                /*
+                Idea: match the pair, like this:
 
-                #long_option_body
+                match (flag, state) {
+                    (flag, Superposition) => handle_superposition(flag),
+                    (flag1, State1) => handle(),
+                    (flag2, State2) => handle(),
+                    (flag3, State1) => handle(),
+                    (flag3, State2) => handle(),
+                    (flag1 | flag2 | flag3, _) => Error(conflict),
+                    _ => Error(unrecognized)
+                }
+
+                The alternative is nested matches, like this:
+
+                match state {
+                    Superposition => handle_superposition(flag),
+                    state => match flag {
+                        flag1 => match state {
+                            State1 => handle(),
+                            _ => Error(conflict)
+                        }
+                        flag2 => match state {
+                           State2 => handle(),
+                            _ => Error(conflict)
+                        }
+                        flag3 => match state {
+                           State1 => handle(),
+                           State2 => handle(),
+                            _ => Error(conflict)}
+                        }
+                        _ => Error(unrecognized)
+                    }
+                }
+
+                The first version is probably better for a handful of reasons;
+                among them is that the conflict error will itself probably
+                require a switch over the state to produce a good error message,
+                which we'd really rather not duplicate.
+                 */
+                match *self {
+                    Self :: #superposition_ident {ref mut #fields_ident, ref mut rejection_set } {
+
+                    }
+
+                    #(#)
+                }
             }
 
             fn add_long<A, E>(
