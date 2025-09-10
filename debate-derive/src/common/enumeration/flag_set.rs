@@ -186,6 +186,8 @@ impl<'a> ParsedFlagSetInfo<'a> {
                                 .map(IdentString::new)
                                 .expect("all fields in a struct variant have names");
 
+                            // TODO: collision detection for flags within the
+                            // same struct.
                             create_flag(
                                 auto_long,
                                 auto_short,
@@ -380,6 +382,10 @@ where
     Ok(())
 }
 
+/// Given the parsed variants, create the flat, deduplicated list of flags
+/// within those variants. This is where various consistency checks happen
+/// (duplicate flags must be mostly identical) and where things like the
+/// exclusion sets are calculated.
 pub fn compute_grouped_flags<'a>(
     variants: &'a [FlagSetVariant<'a>],
 ) -> syn::Result<Vec<FlagSetFlag<'a>>> {
