@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use std::path::{Path, PathBuf};
 
 use debate_derive::{self, FromArgs, ParameterUsage, Usage, Value};
@@ -16,7 +18,7 @@ use debate_derive::{self, FromArgs, ParameterUsage, Usage, Value};
 /// amet dui quis, pulvinar faucibus ligula.
 #[derive(Debug, FromArgs, Usage)]
 #[debate(help)]
-struct DebateDemo<'a> {
+struct DebateDemo<'arg> {
     /// The path
     #[debate(short, long = "foo", override)]
     path: &'a Path,
@@ -50,7 +52,7 @@ struct DebateDemo<'a> {
     alphabet_options: Alphabet,
 
     #[debate(flatten)]
-    subcommand: Subcommand,
+    subcommand: Subcommand<'arg>,
 
     /**
     An optional positional number.
@@ -136,7 +138,7 @@ enum FlagChoice {
 
 #[derive(FromArgs, Usage, Debug)]
 #[debate(subcommand)]
-enum Subcommand {
+enum Subcommand<'arg> {
     #[debate(fallback)]
     None,
 
@@ -157,7 +159,7 @@ enum Subcommand {
     },
 
     /// Add an item to the project
-    Add { item: String },
+    Add { item: &'a str },
 
     /// Run the project's tests
     Test(TestArgs),
