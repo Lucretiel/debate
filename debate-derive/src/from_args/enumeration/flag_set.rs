@@ -134,11 +134,10 @@ pub fn derive_args_enum_flag_set(
         .take_while(|_| any_multi_flags)
         .map(|_| quote! { false });
 
-    // TODO: determine if a state variant is reachable and don't bother
-    // creating a state for it if it's not. A state variant is only reachable
-    // if all its flags exists as a subset of NO other variants, because
-    // it's never possible for the rejection set to filter down to only that
-    // one state.
+    // We could try to filter out state variants that are never reachable
+    // during argument parsing (for instance, their set of flags is a subset
+    // of another flag). In practice I expect this to be radically uncommon
+    // and not worth going out of our way for.
     let state_variants = parsed.variants.iter().map(|variant| {
         let ident = variant.ident.raw();
 
