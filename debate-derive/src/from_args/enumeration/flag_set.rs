@@ -6,7 +6,8 @@ use syn::{Ident, Lifetime, Token, Variant, punctuated::Punctuated};
 
 use crate::{
     common::enumeration::flag_set::{
-        FlagSetType, FlagSetVariant, ParsedFlagSetInfo, VariantMode, compute_grouped_flags,
+        FlagSetFlagInfo, FlagSetType, FlagSetVariant, ParsedFlagSetInfo, VariantMode,
+        compute_grouped_flags,
     },
     from_args::common::{complete_long_body, indexed},
     generics::AngleBracedLifetime,
@@ -96,10 +97,10 @@ pub fn derive_args_enum_flag_set(
     let flag = format_ident!("flag");
     let visitor = format_ident!("visitor");
 
-    let state_ident = format_ident!("__{name}State");
-
     let any_multi_flags = parsed_flags.iter().any(|flag| flag.variants.len() > 1);
 
+    // Note that anything that interacts with the flag flags list or with the
+    // viability set is conditional on `any_multi_flags`.
     let flag_types = parsed_flags
         .iter()
         .take_while(|_| any_multi_flags)
@@ -138,9 +139,8 @@ pub fn derive_args_enum_flag_set(
             // We don't use options for units and newtypes; there's only one
             // possible flag that triggers these states, so it's guaranteed
             // that its argument is real when we arrived to it.
-            VariantMode::Plain(flag) => match flag.ty {
-                FlagSetType::Unit => quote! { #ident { #fields_ident: ( (), ), } },
-                FlagSetType::Typed(ty) => quote! { #ident { #fields_ident: ( #ty, ), } },
+            VariantMode::Plain(FlagSetFlagInfo { ty, .. }) => quote! {
+                #ident { #fields_ident: ( #ty, ), }
             },
 
             VariantMode::Struct(fields) => {

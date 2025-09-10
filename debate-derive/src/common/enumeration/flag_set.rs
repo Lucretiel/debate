@@ -36,12 +36,9 @@ pub struct FlagSetFlagInfo<Type> {
     pub overridable: Option<SpannedValue<()>>,
 }
 
-pub type PlainFlagFieldInfo<'a> = FlagSetFlagInfo<FlagSetType<'a>>;
-pub type StructFlagFieldInfo<'a> = FlagSetFlagInfo<&'a Type>;
-
 pub enum VariantMode<'a> {
-    Plain(PlainFlagFieldInfo<'a>),
-    Struct(Vec<(IdentString<'a>, StructFlagFieldInfo<'a>)>),
+    Plain(FlagSetFlagInfo<FlagSetType<'a>>),
+    Struct(Vec<(IdentString<'a>, FlagSetFlagInfo<&'a Type>)>),
 }
 
 pub struct FlagSetVariant<'a> {
