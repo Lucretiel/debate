@@ -206,7 +206,6 @@ impl<'a> ParsedFlagSetInfo<'a> {
             })
             .try_collect()?;
 
-        // TODO: compute a non-colliding ident here
         let superposition = create_non_colliding_ident(
             "Superposition",
             variants.iter().map(|variant| &variant.ident),
@@ -217,16 +216,6 @@ impl<'a> ParsedFlagSetInfo<'a> {
             variants,
         })
     }
-}
-
-// Currently these omit spans. In the future, `add_or_update_flag` should
-// have better error messages, which will require putting back those spans.
-pub struct GroupedFlagFieldInfo<'a> {
-    pub docs: &'a Description,
-    pub placeholder: &'a str,
-    pub ty: FlagSetType<'a>,
-    pub tags: FlagTags<&'a str, char>,
-    pub overridable: bool,
 }
 
 pub struct FlagSetFlag<'a> {
@@ -242,8 +231,26 @@ pub struct FlagSetFlag<'a> {
     /// along with their indices.
     pub excluded: HashMap<&'a str, usize>,
 
-    /// The actual info about the flag itself
-    pub info: GroupedFlagFieldInfo<'a>,
+    /// Documentation for this flag. If the flag appears more than once in
+    /// different variants, we choose the longest description.
+    pub docs: &'a Description,
+
+    /// Placeholder for the flag. Must be identical in all instances.
+    pub placeholder: &'a str,
+
+    /// Type of the flag (or Unit, for a unit enum). We don't check consistency
+    /// between types; we rely on the compilers own type-checking to both
+    /// check the type and produce a better error message about the wrong
+    /// type
+    pub ty: FlagSetType<'a>,
+
+    /// Computed tags for this flag. Possibly enabled by a debate attribute
+    /// on the enum itself, in addition to the flag
+    pub tags: FlagTags<&'a str, char>,
+
+    /// If true, subsequent instances of this flag override earlier ones.
+    ///  this setting must be identical for all instances.
+    pub overridable: bool,
 }
 
 /// Compare a pair of tags. In the past this returned useful spans of where
@@ -294,8 +301,8 @@ where
     let short = flag.tags.short();
 
     let existing_flag = try_find(set.iter_mut(), |existing| {
-        let existing_long = existing.info.tags.long();
-        let existing_short = existing.info.tags.short();
+        let existing_long = existing.tags.long();
+        let existing_short = existing.tags.short();
 
         match (
             compare_tags(long, existing_long),
@@ -318,12 +325,12 @@ where
                 // TODO: find a way to use the `checks!` macro here. It seems
                 // impossible because you can't use `#[macro_export]` in a
                 // proc macro crate, even to reuse a macro internally.
-                if flag.placeholder.as_str() != existing.info.placeholder {
+                if flag.placeholder.as_str() != existing.placeholder {
                     // Nit: placeholders are just a docs convention. In theory
                     // we should be able to detect and use a custom placeholder
                     // and reject only distinctions between custom placeholders.
                     Err("this instance has a different placeholder")
-                } else if flag.overridable.is_some() != existing.info.overridable {
+                } else if flag.overridable.is_some() != existing.overridable {
                     Err("this instance has a different `override` setting")
                 } else {
                     Ok(true)
@@ -347,13 +354,11 @@ where
                 origin,
                 variants: Vec::new(),
                 excluded: all_variants.clone(),
-                info: GroupedFlagFieldInfo {
-                    docs: const { &Description::empty() },
-                    placeholder: &flag.placeholder,
-                    ty: flag.ty.into(),
-                    tags: flag.tags.simplify(),
-                    overridable: flag.overridable.is_some(),
-                },
+                docs: const { &Description::empty() },
+                placeholder: &flag.placeholder,
+                ty: flag.ty.into(),
+                tags: flag.tags.simplify(),
+                overridable: flag.overridable.is_some(),
             });
 
             set.last_mut().expect("we just pushed an item into the set")
@@ -363,8 +368,8 @@ where
     existing_flag.variants.push((variant, index));
     existing_flag.excluded.remove(variant.as_str());
 
-    if existing_flag.info.docs.full.len() > flag.docs.full.len() {
-        existing_flag.info.docs = &flag.docs;
+    if existing_flag.docs.full.len() > flag.docs.full.len() {
+        existing_flag.docs = &flag.docs;
     };
 
     Ok(())

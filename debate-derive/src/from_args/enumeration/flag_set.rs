@@ -103,7 +103,7 @@ pub fn derive_args_enum_flag_set(
     let flag_types = parsed_flags
         .iter()
         .take_while(|_| any_multi_flags)
-        .map(|flag| &flag.info.ty)
+        .map(|flag| &flag.ty)
         .map(|flag_type| {
             quote! {
                 ::core::option::Option< #flag_type >
@@ -160,7 +160,7 @@ pub fn derive_args_enum_flag_set(
     });
 
     let long_flags = indexed(&parsed_flags)
-        .find_map(|(index, flag)| flag.info.tags.long().map(|long| (index, long, flag)));
+        .find_map(|(index, flag)| flag.tags.long().map(|long| (index, long, flag)));
 
     // let add_long_arms = long_flags.clone().map(|(index, long, flag)| {
     //     let scrutinee = long.make_scrutinee();
