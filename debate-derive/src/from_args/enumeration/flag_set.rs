@@ -144,15 +144,13 @@ pub fn derive_args_enum_flag_set(
             },
 
             VariantMode::Struct(fields) => {
-                let field_types = fields.iter().map(|(_, field)| field.ty).map(|field_type| {
-                    quote! {
-                        ::core::option::Option< #field_type >
-                    }
-                });
+                let field_types = fields.iter().map(|(_, field)| field.ty);
 
                 quote! {
                     #ident {
-                        #fields_ident: ( #(#field_types,)* ),
+                        #fields_ident: ( #(
+                            ::core::option::Option< #field_types >,
+                        )* ),
                     }
                 }
             }
