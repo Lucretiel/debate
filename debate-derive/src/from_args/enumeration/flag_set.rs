@@ -120,6 +120,8 @@ pub fn derive_args_enum_flag_set(
             }
         });
 
+    // TODO: if there are at most 64 variants (lol), use a u64 for the
+    // rejection set.
     let rejection_set_types = parsed
         .variants
         .iter()
@@ -132,6 +134,11 @@ pub fn derive_args_enum_flag_set(
         .take_while(|_| any_multi_flags)
         .map(|_| quote! { false });
 
+    // TODO: determine if a state variant is reachable and don't bother
+    // creating a state for it if it's not. A state variant is only reachable
+    // if all its flags exists as a subset of NO other variants, because
+    // it's never possible for the rejection set to filter down to only that
+    // one state.
     let state_variants = parsed.variants.iter().map(|variant| {
         let ident = variant.ident.raw();
 
@@ -223,6 +230,8 @@ pub fn derive_args_enum_flag_set(
     //                 // Step 1: check the rejection set for a conflict
     //                 // Step 2: update the rejection set with all newly rejeced variants
     //                 // Step 3: check if this flag transitions us to a known state.
+    //                 //   when doing this check, check the flag itself first (it might
+    //                 //   be unique), and fall back to the rejection set.
     //                 //   if so:
     //                 //     transition to that state. Bring any relevant arguments along.
     //                 //     parse the argument with `present`.
