@@ -284,6 +284,11 @@ fn try_find<I: IntoIterator, E>(
         .transpose()
 }
 
+/// For a given instance of a flag, add it to the `set` and perform various
+/// consistency checks on it. It's fine for flags to appear in more than
+/// one variant of a flag set, but if they do, they must have identical tags
+/// (both short and long), as well as a handful other other things that are
+/// shared.
 fn add_or_update_flag<'a, Type>(
     set: &mut Vec<FlagSetFlag<'a>>,
     flag: &'a FlagSetFlagInfo<Type>,
