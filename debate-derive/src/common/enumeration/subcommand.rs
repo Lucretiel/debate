@@ -1,7 +1,6 @@
 use darling::FromAttributes as _;
 use heck::ToKebabCase as _;
 use itertools::Itertools as _;
-use quote::format_ident;
 use syn::{Fields, Ident, Type, Variant, spanned::Spanned as _};
 
 use crate::common::{Description, IdentString, ParsedFieldInfo, compute_docs};

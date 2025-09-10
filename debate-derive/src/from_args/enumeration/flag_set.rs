@@ -1,17 +1,14 @@
 use std::collections::HashMap;
 
-use proc_macro2::{Literal, TokenStream as TokenStream2};
+use proc_macro2::TokenStream as TokenStream2;
 use quote::{format_ident, quote};
-use syn::{Attribute, Ident, Index, Lifetime, Token, Variant, punctuated::Punctuated};
+use syn::{Ident, Lifetime, Token, Variant, punctuated::Punctuated};
 
 use crate::{
     common::enumeration::flag_set::{
         FlagSetType, FlagSetVariant, ParsedFlagSetInfo, VariantMode, compute_grouped_flags,
     },
-    from_args::common::{
-        MakeScrutinee, apply_arg_to_field, apply_new_arg_to_generic_field, complete_long_body,
-        indexed,
-    },
+    from_args::common::{complete_long_body, indexed},
     generics::AngleBracedLifetime,
 };
 
@@ -348,44 +345,36 @@ pub fn derive_args_enum_flag_set(
                 E: ::debate::state::Error<#lifetime, ()>
             {
                 /*
-                Idea: match the pair, like this:
-
-                match (flag, state) {
-                    (flag, Superposition) => handle_superposition(flag),
-                    (flag1, State1) => handle(),
-                    (flag2, State2) => handle(),
-                    (flag3, State1) => handle(),
-                    (flag3, State2) => handle(),
-                    (flag1 | flag2 | flag3, _) => Error(conflict),
-                    _ => Error(unrecognized)
-                }
-
-                The alternative is nested matches, like this:
+                Current vision for the match
 
                 match state {
                     Superposition => handle_superposition(flag),
-                    state => match flag {
-                        flag1 => match state {
-                            State1 => handle(),
-                            _ => Error(conflict)
-                        }
-                        flag2 => match state {
-                           State2 => handle(),
-                            _ => Error(conflict)
-                        }
-                        flag3 => match state {
-                           State1 => handle(),
-                           State2 => handle(),
-                            _ => Error(conflict)}
-                        }
-                        _ => Error(unrecognized)
+                    State1 => match flag {
+                        flag1 => handle(),
+                        flag1 | flag2 => conflict(),
+                        _ => unrecognized,
+                    }
+                    State2 => match flag {
+                        flag1 => handle()
+                        flag1 | flag2 => conflict(),
+                        _ => unrecognized,
+                    }
+                    State3 => match flag {
+                        flag1 => handle(),
+                        flag2 => handle(),
+                        flag1 | flag2 => conflict(),
+                        _ => unrecognized,
                     }
                 }
 
-                The first version is probably better for a handful of reasons;
-                among them is that the conflict error will itself probably
-                require a switch over the state to produce a good error message,
-                which we'd really rather not duplicate.
+                This gives us the easiest story when it comes to emitting
+                conflict information in the state branches, and the best
+                opportunity to potentially reuse `complete_flag_body`.
+
+                We could trust the optimizer to remove the duplicate tags
+                in the conflict cases; that'll mostly depend on how easy it
+                is to manually compute the reduced set. It will be VERY easy
+                to just list them all there along with a suppressed warning.
                  */
                 match *self {
                     Self :: #superposition_ident {ref mut #fields_ident, ref mut rejection_set } {

@@ -1,7 +1,4 @@
-use std::{
-    collections::{HashMap, HashSet},
-    ops::ControlFlow,
-};
+use std::{collections::HashMap, ops::ControlFlow};
 
 use darling::{
     FromAttributes,
@@ -9,12 +6,12 @@ use darling::{
 };
 use itertools::Itertools as _;
 use proc_macro2::{Delimiter, Group, Span, TokenStream, TokenTree};
-use quote::{ToTokens, format_ident, quote};
+use quote::ToTokens;
 use syn::{Attribute, Expr, Ident, Type, Variant, spanned::Spanned};
 
 use crate::common::{
-    Description, FieldDefault, FlagFieldInfo, FlagTags, IdentString, compute_docs,
-    compute_placeholder, compute_tags,
+    Description, FieldDefault, FlagTags, IdentString, compute_docs, compute_placeholder,
+    compute_tags,
 };
 
 use super::create_non_colliding_ident;
