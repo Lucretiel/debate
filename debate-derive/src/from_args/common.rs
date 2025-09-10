@@ -3,11 +3,11 @@ use quote::{ToTokens, format_ident, quote};
 use syn::{Ident, Index, Lifetime};
 
 use crate::common::{
-    FieldDefault, FlagFieldInfo, FlattenFieldInfo, FlattenOr, IdentString, ParsedFieldInfo,
-    PositionalFieldInfo,
+    FieldDefault, FlagFieldInfo, FlagTags, FlattenFieldInfo, FlattenOr, IdentString,
+    ParsedFieldInfo, PositionalFieldInfo,
 };
 
-enum HelpMode {
+pub enum HelpMode {
     Succinct,
     Full,
 }
@@ -254,7 +254,6 @@ pub fn handle_flatten(
 pub fn visit_positional_arms_for_fields(
     fields_ident: &Ident,
     argument_ident: &Ident,
-    trait_ident: &Ident,
     arg_ident: &Ident,
     add_arg_ident: &Ident,
     fields: &[ParsedFieldInfo<'_>],
@@ -268,7 +267,7 @@ pub fn visit_positional_arms_for_fields(
                     fields_ident,
                     argument_ident,
                     &idx,
-                    trait_ident,
+                    &format_ident!("PositionalParameter"),
                     arg_ident,
                     Some(add_arg_ident),
                 );
@@ -322,7 +321,8 @@ pub trait MakeScrutinee {
 
 impl MakeScrutinee for char {
     fn make_scrutinee(self) -> Literal {
-        // I hate using `as` here, but we did already guarantee it's an
+        // I hate using `as` here, but we did already guarantee it's an ascii
+        // byte, I guess? Maybe `FlagTags` can pre-compute the scrutinee.
         Literal::byte_character(u8::try_from(self).expect("short flag wasn't an ascii character"))
     }
 }
@@ -333,25 +333,57 @@ impl MakeScrutinee for &str {
     }
 }
 
-/// Shared logic for creating the match block that handles options of all
-/// kinds.
+pub trait FlagField<'a> {
+    fn name(&self) -> &str;
+    fn tags(&self) -> FlagTags<&'a str, char>;
+    fn invert(&self) -> Option<FlagTags<&'a str, char>>;
+    fn overridable(&self) -> bool;
+}
+
+impl<'a> FlagField<'a> for &'a FlagFieldInfo<'_> {
+    #[inline(always)]
+    fn name(&self) -> &str {
+        self.ident.as_str()
+    }
+
+    #[inline(always)]
+    fn tags(&self) -> FlagTags<&'a str, char> {
+        self.tags.simplify()
+    }
+
+    #[inline(always)]
+    fn invert(&self) -> Option<FlagTags<&'a str, char>> {
+        self.invert
+            .as_ref()
+            .map(|long| FlagTags::Long(long.as_str()))
+    }
+
+    #[inline(always)]
+    fn overridable(&self) -> bool {
+        self.overridable
+    }
+}
+
+/// Shared logic for creating the match block that handles options for
+/// pretty much anything. Abstracts over struct-like entities and flagset
+/// logic.
 #[expect(clippy::too_many_arguments)]
 #[must_use]
-fn complete_flag_body<'a, Tag: MakeScrutinee>(
+pub fn complete_flag_body<'a, Flag: FlagField<'a>, Tag: MakeScrutinee>(
     fields_ident: &Ident,
     argument_ident: &Ident,
     option_expr: impl ToTokens,
 
-    fields: &'a [ParsedFieldInfo<'a>],
     help: Option<(Tag, HelpMode)>,
-    get_tag: impl Fn(&'a FlagFieldInfo<'a>) -> Option<Tag>,
-    get_invert_tag: impl Fn(&'a FlagFieldInfo<'a>) -> Option<Tag>,
+    flag_fields: impl Iterator<Item = (Index, Flag)>,
+    recognizable_tags: impl IntoIterator<Item = Tag>,
 
-    trait_ident: &Ident,
+    get_tag: impl Fn(FlagTags<&'a str, char>) -> Option<Tag>,
+
     parameter_method: &Ident,
     add_parameter_method: &Ident,
 
-    flatten_state_method: &Ident,
+    flatten_exprs: impl IntoIterator<Item = TokenStream2>,
     flatten_rebind_argument: impl ToTokens,
 ) -> TokenStream2 {
     let help_arm = help.map(|(help, mode)| {
@@ -372,20 +404,21 @@ fn complete_flag_body<'a, Tag: MakeScrutinee>(
         }
     });
 
-    // TODO: this part can be deduplicated with a bunch of the stuff in
-    // flag_set
-    let local_arms = flag_fields(fields).flat_map(|(index, field)| {
-        let field_name = field.ident.as_str();
+    let parameter = format_ident!("Parameter");
 
-        let arm = get_tag(field).map(|tag| {
+    let local_arms = flag_fields.flat_map(|(index, field)| {
+        let field_name = field.name();
+        let get_tag = &get_tag;
+
+        let arm = get_tag(field.tags()).map(|tag| {
             let scrutinee = tag.make_scrutinee();
             let expr = apply_arg_to_field(
                 fields_ident,
                 argument_ident,
                 &index,
-                trait_ident,
+                &parameter,
                 parameter_method,
-                match field.overridable {
+                match field.overridable() {
                     true => None,
                     false => Some(add_parameter_method),
                 },
@@ -401,9 +434,8 @@ fn complete_flag_body<'a, Tag: MakeScrutinee>(
             }
         });
 
-        let invert_arm = get_invert_tag(field).map(|invert| {
-            let scrutinee = invert.make_scrutinee();
-
+        let invert_arm = field.invert().and_then(get_tag).map(|tag| {
+            let scrutinee = tag.make_scrutinee();
             quote! {
                 #scrutinee => match ::debate::parameter::Parameter::#parameter_method(
                     #argument_ident
@@ -423,8 +455,61 @@ fn complete_flag_body<'a, Tag: MakeScrutinee>(
         [arm, invert_arm]
     });
 
-    let flatten_arms = flatten_fields(fields).map(|(index, info)| {
-        let body = handle_flatten(
+    let mut recognizable_tags = recognizable_tags
+        .into_iter()
+        .map(|tag| tag.make_scrutinee());
+
+    let conflict_arm = recognizable_tags.next().map(|recognize| {
+        quote! {
+            #recognize #(| #recognizable_tags)* => todo!("handle conflict"),
+        }
+    });
+
+    let flatten_exprs = flatten_exprs.into_iter();
+
+    quote! {
+        match (#option_expr) {
+            #help_arm
+            #(#local_arms)*
+            _ => {
+                #(
+                    let #flatten_rebind_argument = #flatten_exprs;
+                )*
+
+                match (#option_expr) {
+                    #conflict_arm
+                    _ => ::core::result::Result::Err(
+                        ::debate::state::Error::unrecognized(
+                            #flatten_rebind_argument
+                        )
+                    )
+                }
+            }
+        }
+    }
+}
+
+/// Shared logic for creating the match block that handles options for
+/// struct-like entities
+#[expect(clippy::too_many_arguments)]
+#[inline]
+#[must_use]
+fn complete_struct_flag_body<'a, Tag: MakeScrutinee>(
+    fields_ident: &Ident,
+    argument_ident: &Ident,
+    option_expr: impl ToTokens,
+
+    fields: &'a [ParsedFieldInfo<'_>],
+    help: Option<(Tag, HelpMode)>,
+    get_tag: impl Fn(FlagTags<&'a str, char>) -> Option<Tag>,
+
+    parameter_method: &Ident,
+    add_parameter_method: &Ident,
+    flatten_state_method: &Ident,
+    flatten_rebind_argument: impl ToTokens,
+) -> TokenStream2 {
+    let flatten_exprs = flatten_fields(fields).map(|(index, info)| {
+        handle_flatten(
             quote! {
                 ::debate::state::State::#flatten_state_method(
                     &mut fields.#index,
@@ -435,48 +520,41 @@ fn complete_flag_body<'a, Tag: MakeScrutinee>(
             info.ident.as_str(),
             argument_ident,
             argument_ident,
-        );
-
-        quote! {
-            let #flatten_rebind_argument = #body;
-        }
+        )
     });
 
-    quote! {
-        match (#option_expr) {
-            #help_arm
-            #(#local_arms)*
-            _ => {
-                #(#flatten_arms)*
-
-                ::core::result::Result::Err(
-                    ::debate::state::Error::unrecognized(
-                        #flatten_rebind_argument
-                    )
-                )
-            }
-        }
-    }
+    complete_flag_body(
+        fields_ident,
+        argument_ident,
+        option_expr,
+        help,
+        flag_fields(fields),
+        [],
+        get_tag,
+        parameter_method,
+        add_parameter_method,
+        flatten_exprs,
+        flatten_rebind_argument,
+    )
 }
 
+#[inline]
+#[must_use]
 pub fn complete_long_arg_body(
     fields_ident: &Ident,
     argument_ident: &Ident,
     option_ident: &Ident,
-    parameter_ident: &Ident,
 
     fields: &[ParsedFieldInfo<'_>],
     help: Option<&str>,
 ) -> TokenStream2 {
-    complete_flag_body(
+    complete_struct_flag_body(
         fields_ident,
         argument_ident,
         quote! { #option_ident.bytes() },
         fields,
         help.map(|long| (long, HelpMode::Full)),
-        |info| info.tags.long().map(|long| *long),
-        |info| info.invert.as_ref().map(|invert| invert.as_str()),
-        parameter_ident,
+        |tags| tags.long(),
         &format_ident!("arg"),
         &format_ident!("add_arg"),
         &format_ident!("add_long_argument"),
@@ -484,24 +562,23 @@ pub fn complete_long_arg_body(
     )
 }
 
+#[inline]
+#[must_use]
 pub fn complete_long_body(
     fields_ident: &Ident,
     argument_ident: &Ident,
     option_ident: &Ident,
-    parameter_ident: &Ident,
 
     fields: &[ParsedFieldInfo<'_>],
     help: Option<&str>,
 ) -> TokenStream2 {
-    complete_flag_body(
+    complete_struct_flag_body(
         fields_ident,
         argument_ident,
         quote! { #option_ident.bytes() },
         fields,
         help.map(|long| (long, HelpMode::Full)),
-        |info| info.tags.long().map(|long| *long),
-        |info| info.invert.as_ref().map(|invert| invert.as_str()),
-        parameter_ident,
+        |tags| tags.long(),
         &format_ident!("present"),
         &format_ident!("add_present"),
         &format_ident!("add_long"),
@@ -509,24 +586,23 @@ pub fn complete_long_body(
     )
 }
 
+#[inline]
+#[must_use]
 pub fn complete_short_body(
     fields_ident: &Ident,
     argument_ident: &Ident,
     option_ident: &Ident,
-    parameter_ident: &Ident,
 
     fields: &[ParsedFieldInfo<'_>],
     help: Option<char>,
 ) -> TokenStream2 {
-    complete_flag_body(
+    complete_struct_flag_body(
         fields_ident,
         argument_ident,
         option_ident,
         fields,
         help.map(|short| (short, HelpMode::Succinct)),
-        |info| info.tags.short().map(|short| *short),
-        |_info| None,
-        parameter_ident,
+        |tags| tags.short(),
         &format_ident!("present"),
         &format_ident!("add_present"),
         &format_ident!("add_short"),

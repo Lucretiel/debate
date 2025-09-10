@@ -120,10 +120,10 @@ pub enum FlagTags<Long, Short> {
     LongShort { long: Long, short: Short },
 }
 
-impl FlagTags<&str, char> {
+impl<'a> FlagTags<&'a str, char> {
     #[inline]
     #[must_use]
-    pub fn long(&self) -> Option<&str> {
+    pub fn long(&self) -> Option<&'a str> {
         match *self {
             FlagTags::Long(long) | FlagTags::LongShort { long, .. } => Some(long),
             FlagTags::Short(_) => None,
@@ -140,7 +140,7 @@ impl FlagTags<&str, char> {
     }
 }
 
-impl FlagTags<SpannedValue<&str>, SpannedValue<char>> {
+impl<'a> FlagTags<SpannedValue<&'a str>, SpannedValue<char>> {
     #[inline]
     #[must_use]
     pub fn long(&self) -> Option<SpannedValue<&str>> {
@@ -200,7 +200,7 @@ impl FlagTags<SpannedValue<String>, SpannedValue<char>> {
     // Shed the spanned value stuff if we don't need it
     #[inline]
     #[must_use]
-    pub fn simplify(&self) -> FlagTags<&str, char> {
+    pub fn simplify(&self) -> FlagTags<&'_ str, char> {
         match self {
             FlagTags::Long(long) => FlagTags::Long(long.as_str()),
             FlagTags::Short(short) => FlagTags::Short(**short),

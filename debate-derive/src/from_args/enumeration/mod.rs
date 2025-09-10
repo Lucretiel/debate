@@ -16,12 +16,14 @@ pub fn derive_args_enum(
 ) -> syn::Result<TokenStream2> {
     let attr = ValueEnumAttr::from_attributes(attrs)?;
 
-    if attr.subcommand.is_some() {
-        subcommand::derive_args_enum_subcommand(name, variants, lifetime, type_lifetime)
-    } else {
-        todo!(
-            "not implemented yet; this will be a mutually exclusive group \
-            of flags. Use `#[debate(subcommand)] to make a subcommand"
-        )
+    match attr.subcommand {
+        Some(_) => subcommand::derive_args_enum_subcommand(name, variants, lifetime, type_lifetime),
+        None => flag_set::derive_args_enum_flag_set(
+            name,
+            variants,
+            lifetime,
+            type_lifetime,
+            &ValueEnumAttr::from_attributes(attrs)?,
+        ),
     }
 }

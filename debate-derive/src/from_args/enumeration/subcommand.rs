@@ -53,9 +53,6 @@ pub fn derive_args_enum_subcommand(
     let add_arg_ident = format_ident!("add_arg");
     let fields_ident = format_ident!("fields");
 
-    let parameter_ident = format_ident!("Parameter");
-    let positional_parameter_ident = format_ident!("PositionalParameter");
-
     let argument = format_ident!("argument");
     let option = format_ident!("option");
     let visitor = format_ident!("visitor");
@@ -133,7 +130,6 @@ pub fn derive_args_enum_subcommand(
                 let local_positional_arms = visit_positional_arms_for_fields(
                     &fields_ident,
                     &argument,
-                    &positional_parameter_ident,
                     &arg_ident,
                     &add_arg_ident,
                     fields,
@@ -157,16 +153,7 @@ pub fn derive_args_enum_subcommand(
             &fields_ident,
             [&option, &argument],
             quote! {  ref mut #fields_ident, .. },
-            |fields| {
-                complete_long_arg_body(
-                    &fields_ident,
-                    &argument,
-                    &option,
-                    &parameter_ident,
-                    fields,
-                    None,
-                )
-            },
+            |fields| complete_long_arg_body(&fields_ident, &argument, &option, fields, None),
         )
     });
 
@@ -177,16 +164,7 @@ pub fn derive_args_enum_subcommand(
             &fields_ident,
             [&option, &argument],
             quote! { ref mut #fields_ident, .. },
-            |fields| {
-                complete_long_body(
-                    &fields_ident,
-                    &argument,
-                    &option,
-                    &parameter_ident,
-                    fields,
-                    None,
-                )
-            },
+            |fields| complete_long_body(&fields_ident, &argument, &option, fields, None),
         )
     });
 
@@ -197,16 +175,7 @@ pub fn derive_args_enum_subcommand(
             &fields_ident,
             [&option, &argument],
             quote! {ref mut #fields_ident, ..},
-            |fields| {
-                complete_short_body(
-                    &fields_ident,
-                    &argument,
-                    &option,
-                    &parameter_ident,
-                    fields,
-                    None,
-                )
-            },
+            |fields| complete_short_body(&fields_ident, &argument, &option, fields, None),
         )
     });
 

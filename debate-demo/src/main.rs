@@ -21,7 +21,7 @@ use debate_derive::{self, FromArgs, ParameterUsage, Usage, Value};
 struct DebateDemo<'arg> {
     /// The path
     #[debate(short, long = "foo", override)]
-    path: &'a Path,
+    path: &'arg Path,
 
     /// Whether or not we're running in verbose mode
     #[debate(short, long)]
@@ -130,6 +130,8 @@ enum BuildMode {
     Release,
 }
 
+#[derive(FromArgs, Debug)]
+#[debate(long)]
 enum FlagChoice {
     OutDir(PathBuf),
     WorkingDir,
@@ -159,7 +161,7 @@ enum Subcommand<'arg> {
     },
 
     /// Add an item to the project
-    Add { item: &'a str },
+    Add { item: &'arg str },
 
     /// Run the project's tests
     Test(TestArgs),

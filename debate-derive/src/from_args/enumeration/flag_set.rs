@@ -1,19 +1,141 @@
 use std::collections::HashMap;
 
+use itertools::Itertools;
 use proc_macro2::TokenStream as TokenStream2;
-use quote::{format_ident, quote};
+use quote::{ToTokens, format_ident, quote};
 use syn::{Ident, Lifetime, Token, Variant, punctuated::Punctuated};
 
 use crate::{
-    common::enumeration::flag_set::{
-        FlagSetFlagInfo, FlagSetType, FlagSetVariant, ParsedFlagSetInfo, VariantMode,
-        compute_grouped_flags,
+    common::{
+        FlagTags, IdentString,
+        enumeration::flag_set::{
+            FlagSetFlagInfo, FlagSetVariant, ParsedFlagSetInfo, VariantMode, compute_grouped_flags,
+        },
     },
-    from_args::common::{complete_long_body, indexed},
+    from_args::common::{FlagField, MakeScrutinee, complete_flag_body, indexed},
     generics::AngleBracedLifetime,
 };
 
 use super::ValueEnumAttr;
+
+// TODO: have this return an Fn so we can pre-compute the alternations
+fn state_variant_tail_arms(flags: impl Iterator<Item = impl MakeScrutinee>) -> TokenStream2 {
+    let alternations = flags.map(|flag| flag.make_scrutinee());
+
+    quote! {
+        #(| #alternations)* => todo!("conflict error").
+        _ => todo!("unrecognized error"),
+    }
+}
+
+impl<'a, T> FlagField<'a> for &'a (IdentString<'_>, FlagSetFlagInfo<T>) {
+    #[inline(always)]
+    fn name(&self) -> &str {
+        self.0.as_str()
+    }
+
+    #[inline(always)]
+    fn tags(&self) -> FlagTags<&'a str, char> {
+        self.1.tags.simplify()
+    }
+
+    #[inline(always)]
+    fn invert(&self) -> Option<FlagTags<&'a str, char>> {
+        None
+    }
+
+    #[inline(always)]
+    fn overridable(&self) -> bool {
+        self.1.overridable.is_some()
+    }
+}
+
+fn complete_flagset_flag_body<'a, Tag: MakeScrutinee, Type>(
+    fields_ident: &Ident,
+    argument_ident: &Ident,
+    option_expr: impl ToTokens,
+
+    fields: &'a [(IdentString<'_>, FlagSetFlagInfo<Type>)],
+    all_tag_scrutinees: impl IntoIterator<Item = Tag>,
+    get_tag: impl Fn(FlagTags<&'a str, char>) -> Option<Tag>,
+
+    parameter_method: &Ident,
+    add_parameter_method: &Ident,
+) -> TokenStream2 {
+    complete_flag_body(
+        fields_ident,
+        argument_ident,
+        option_expr,
+        None,
+        indexed(fields),
+        all_tag_scrutinees,
+        get_tag,
+        parameter_method,
+        add_parameter_method,
+        [],
+        argument_ident,
+    )
+}
+
+fn complete_long_arg_body<'a, Type>(
+    fields_ident: &Ident,
+    argument_ident: &Ident,
+    option_ident: &Ident,
+
+    fields: &'a [(IdentString<'_>, FlagSetFlagInfo<Type>)],
+    all_tag_scrutinees: impl IntoIterator<Item = &'a str>,
+) -> TokenStream2 {
+    complete_flagset_flag_body(
+        fields_ident,
+        argument_ident,
+        quote! { #option_ident.bytes() },
+        fields,
+        all_tag_scrutinees,
+        |tags| tags.long(),
+        &format_ident!("arg"),
+        &format_ident!("add_arg"),
+    )
+}
+
+fn complete_long_body<'a, Type>(
+    fields_ident: &Ident,
+    argument_ident: &Ident,
+    option_ident: &Ident,
+
+    fields: &'a [(IdentString<'_>, FlagSetFlagInfo<Type>)],
+    all_tag_scrutinees: impl IntoIterator<Item = &'a str>,
+) -> TokenStream2 {
+    complete_flagset_flag_body(
+        fields_ident,
+        argument_ident,
+        quote! { #option_ident.bytes() },
+        fields,
+        all_tag_scrutinees,
+        |tags| tags.long(),
+        &format_ident!("present"),
+        &format_ident!("add_present"),
+    )
+}
+
+fn complete_short_body<'a, Type>(
+    fields_ident: &Ident,
+    argument_ident: &Ident,
+    option_ident: &Ident,
+
+    fields: &'a [(IdentString<'_>, FlagSetFlagInfo<Type>)],
+    all_tag_scrutinees: impl IntoIterator<Item = char>,
+) -> TokenStream2 {
+    complete_flagset_flag_body(
+        fields_ident,
+        argument_ident,
+        option_ident,
+        fields,
+        all_tag_scrutinees,
+        |tags| tags.short(),
+        &format_ident!("present"),
+        &format_ident!("add_present"),
+    )
+}
 
 pub fn derive_args_enum_flag_set(
     name: &Ident,
@@ -145,11 +267,14 @@ pub fn derive_args_enum_flag_set(
             // We don't use options for units and newtypes; there's only one
             // possible flag that triggers these states, so it's guaranteed
             // that its argument is real when we arrived to it.
-            VariantMode::Plain(FlagSetFlagInfo { ty, .. }) => quote! {
+            VariantMode::Plain(FlagSetFlagInfo { ref ty, .. }) => quote! {
+                // Don't forget that the `ty` for a unit variant is `()`,
+                // which has a correct implementation of Parameter for our
+                // needs
                 #ident { #fields_ident: ( #ty, ), }
             },
 
-            VariantMode::Struct(fields) => {
+            VariantMode::Struct(ref fields) => {
                 let field_types = fields.iter().map(|(_, field)| field.ty);
 
                 quote! {
@@ -260,9 +385,23 @@ pub fn derive_args_enum_flag_set(
     //     }
     // });
 
+    // We do a rare pre-emptive collect because this operation is nakedly
+    // quadratic so we want to minimize repeated computation. In the future
+    // we'd even like to pre-compute the scrutinees directly, but for now we
+    // still like the type safety
+    let all_long_scrutinees = parsed_flags
+        .iter()
+        .filter_map(|flag| flag.tags.long())
+        .collect_vec();
+
+    let all_short_scrutinees = parsed_flags
+        .iter()
+        .filter_map(|flag| flag.tags.short())
+        .collect_vec();
+
     let add_long_arms = parsed.variants.iter().map(|variant| match variant.mode {
-        VariantMode::Plain(field) => {
-            let ident = variant.ident;
+        VariantMode::Plain(ref field) => {
+            let ident = &variant.ident;
             let arm = field.tags.long().map(|long| {
                 quote! {
                     todo!()
@@ -283,21 +422,18 @@ pub fn derive_args_enum_flag_set(
             }
         }
 
-        VariantMode::Struct(fields) => {
-            let ident = variant.ident;
+        VariantMode::Struct(ref fields) => {
+            let ident = &variant.ident;
 
-            // TODO: find a way to use complete_long_body here. Will certainly
-            // involve introducing a trait somewhere to make it more generic.
-            // We also need to find a way to switch between unrecognized flags
-            // (which need to propagate their argument back to the caller)
-            // and conflicting flags (which do not).
+            // In the future, consider filtering the set of long tags in
+            // the recognizable set. For now we assume that the optimizer can
+            // take care of it for us.
             let body = complete_long_body(
                 &fields_ident,
                 &argument,
                 &flag,
-                &parameter_ident,
-                fields,
-                None,
+                &fields,
+                all_long_scrutinees.iter().copied(),
             );
 
             quote! {
@@ -350,44 +486,11 @@ pub fn derive_args_enum_flag_set(
             where
                 E: ::debate::state::Error<#lifetime, ()>
             {
-                /*
-                Current vision for the match
-
-                match state {
-                    Superposition => handle_superposition(flag),
-                    State1 => match flag {
-                        flag1 => handle(),
-                        flag1 | flag2 => conflict(),
-                        _ => unrecognized,
-                    }
-                    State2 => match flag {
-                        flag1 => handle()
-                        flag1 | flag2 => conflict(),
-                        _ => unrecognized,
-                    }
-                    State3 => match flag {
-                        flag1 => handle(),
-                        flag2 => handle(),
-                        flag1 | flag2 => conflict(),
-                        _ => unrecognized,
-                    }
-                }
-
-                This gives us the easiest story when it comes to emitting
-                conflict information in the state branches, and the best
-                opportunity to potentially reuse `complete_flag_body`.
-
-                We could trust the optimizer to remove the duplicate tags
-                in the conflict cases; that'll mostly depend on how easy it
-                is to manually compute the reduced set. It will be VERY easy
-                to just list them all there along with a suppressed warning.
-                 */
                 match *self {
-                    Self :: #superposition_ident {ref mut #fields_ident, ref mut rejection_set } {
+                    Self :: #superposition_ident {ref mut #fields_ident, ref mut rejection_set } => {
 
                     }
-
-                    #(#)
+                    #(#add_long_arms,)*
                 }
             }
 
@@ -400,9 +503,11 @@ pub fn derive_args_enum_flag_set(
                 A: ::debate::parameter::ArgAccess<#lifetime>,
                 E: ::debate::state::Error<#lifetime, A>
             {
-                let #fields_ident = &mut self.fields;
+                  match *self {
+                    Self :: #superposition_ident {ref mut #fields_ident, ref mut rejection_set } => {
 
-                #long_body
+                    }
+                }
             }
 
             fn add_short<A, E>(
@@ -414,9 +519,11 @@ pub fn derive_args_enum_flag_set(
                 A: ::debate::parameter::ArgAccess<#lifetime>,
                 E: ::debate::state::Error<#lifetime, A>
             {
-                let #fields_ident = &mut self.fields;
+                  match *self {
+                    Self :: #superposition_ident {ref mut #fields_ident, ref mut rejection_set } => {
 
-                #short_body
+                    }
+                }
             }
         }
     })

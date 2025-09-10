@@ -308,6 +308,9 @@ where
         let existing_long = existing.tags.long();
         let existing_short = existing.tags.short();
 
+        // TODO: there's a major bug here, where if a pair of tags each have
+        // an ABSENT short, it should be permitted for them to have different
+        // longs
         match (
             compare_tags(long, existing_long),
             compare_tags(short, existing_short),

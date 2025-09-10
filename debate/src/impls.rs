@@ -7,14 +7,14 @@ use core::hash::Hash;
 
 use debate_parser::Arg;
 
-use crate::help::{ParameterUsage, ParameterValueKind, Repetition, Requirement, Usage};
+use crate::build;
+use crate::help::{ParameterUsage, ParameterValueKind, Repetition, Requirement};
 use crate::parameter::{
     ArgAccess, Error as ParameterError, Parameter, ParsedValue, PositionalParameter, RequiredError,
     Value,
 };
 use crate::state;
 use crate::util::{DetectUnrecognized, arg_as_str};
-use crate::{build, help};
 
 macro_rules! from_str {
     ($(

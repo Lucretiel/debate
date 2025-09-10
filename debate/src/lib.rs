@@ -1,4 +1,5 @@
 #![no_std]
+#![feature(try_trait_v2)]
 
 #[cfg(feature = "std")]
 extern crate std;

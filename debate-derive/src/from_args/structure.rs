@@ -108,9 +108,6 @@ pub fn derive_args_struct(
     let add_arg_ident = format_ident!("add_arg");
     let fields_ident = format_ident!("fields");
 
-    let parameter_ident = format_ident!("Parameter");
-    let positional_parameter_ident = format_ident!("PositionalParameter");
-
     let state_ident = format_ident!("__{name}State");
     let argument = format_ident!("argument");
     let option = format_ident!("option");
@@ -122,7 +119,6 @@ pub fn derive_args_struct(
     let visit_positional_arms = visit_positional_arms_for_fields(
         &fields_ident,
         &argument,
-        &positional_parameter_ident,
         &arg_ident,
         &add_arg_ident,
         &fields,
@@ -132,7 +128,6 @@ pub fn derive_args_struct(
         &fields_ident,
         &argument,
         &option,
-        &parameter_ident,
         &fields,
         help_long.map(|help| *help),
     );
@@ -141,7 +136,6 @@ pub fn derive_args_struct(
         &fields_ident,
         &argument,
         &option,
-        &parameter_ident,
         &fields,
         help_long.map(|help| *help),
     );
@@ -150,7 +144,6 @@ pub fn derive_args_struct(
         &fields_ident,
         &argument,
         &option,
-        &parameter_ident,
         &fields,
         help_short.map(|help| *help),
     );
