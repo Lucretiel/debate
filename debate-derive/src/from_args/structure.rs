@@ -166,7 +166,7 @@ pub fn derive_args_struct(
 
         // Sadly we can't derive debug, because default is only implemented for
         // tuples up to 12 elements.
-        impl<#lifetime> ::core::default::Default for #state_ident <#lifetime> {
+        impl ::core::default::Default for #state_ident <'_> {
             fn default() -> Self {
                 Self #state_init_block
             }

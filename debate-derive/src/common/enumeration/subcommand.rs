@@ -6,6 +6,8 @@ use syn::{Fields, Ident, Type, Variant, spanned::Spanned as _};
 
 use crate::common::{Description, IdentString, ParsedFieldInfo, compute_docs};
 
+use super::create_non_colliding_ident;
+
 /// Ident of the unselected subcommand (that is, the enum variant)
 pub enum Fallback<'a> {
     /// The user explicitly included this variant with `debate(fallback)`
@@ -142,20 +144,10 @@ impl<'a> ParsedSubcommandInfo<'a> {
 
         let fallback = match fallback {
             Some(fallback) => Fallback::Explicit(fallback),
-            None => {
-                let mut base_ident = format_ident!("Fallback");
-
-                // Performance nitpick: == on an identifier is internally doing
-                // to_string
-                while parsed_variants
-                    .iter()
-                    .any(|variant| *variant.ident.raw() == base_ident)
-                {
-                    base_ident = format_ident!("_{base_ident}");
-                }
-
-                Fallback::Internal(base_ident)
-            }
+            None => Fallback::Internal(create_non_colliding_ident(
+                "Fallback",
+                parsed_variants.iter().map(|variant| &variant.ident),
+            )),
         };
 
         Ok(Self {

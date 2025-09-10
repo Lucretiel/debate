@@ -22,6 +22,7 @@ macro_rules! regex {
 }
 
 /// A borrowed identifier that also has its string pre-computed for easy reuse.
+#[derive(Clone)]
 pub struct IdentString<'a> {
     raw: &'a Ident,
     string: String,
@@ -139,6 +140,26 @@ impl FlagTags<&str, char> {
     }
 }
 
+impl FlagTags<SpannedValue<&str>, SpannedValue<char>> {
+    #[inline]
+    #[must_use]
+    pub fn long(&self) -> Option<SpannedValue<&str>> {
+        match *self {
+            FlagTags::Long(long) | FlagTags::LongShort { long, .. } => Some(long),
+            FlagTags::Short(_) => None,
+        }
+    }
+
+    #[inline]
+    #[must_use]
+    pub fn short(&self) -> Option<SpannedValue<char>> {
+        match *self {
+            FlagTags::Short(short) | FlagTags::LongShort { short, .. } => Some(short),
+            FlagTags::Long(_) => None,
+        }
+    }
+}
+
 impl FlagTags<SpannedValue<String>, SpannedValue<char>> {
     #[inline]
     #[must_use]
@@ -160,6 +181,22 @@ impl FlagTags<SpannedValue<String>, SpannedValue<char>> {
         }
     }
 
+    /// Borrowed form of these tags, preserving the spans
+    #[inline]
+    #[must_use]
+    pub fn borrowed(&self) -> FlagTags<SpannedValue<&str>, SpannedValue<char>> {
+        match *self {
+            FlagTags::Long(ref long) => {
+                FlagTags::Long(SpannedValue::new(long.as_str(), long.span()))
+            }
+            FlagTags::Short(short) => FlagTags::Short(short),
+            FlagTags::LongShort { ref long, short } => FlagTags::LongShort {
+                long: SpannedValue::new(long.as_str(), long.span()),
+                short,
+            },
+        }
+    }
+
     // Shed the spanned value stuff if we don't need it
     #[inline]
     #[must_use]
@@ -175,10 +212,18 @@ impl FlagTags<SpannedValue<String>, SpannedValue<char>> {
     }
 }
 
-#[derive(Default)]
 pub struct Description {
     pub succinct: String,
     pub full: String,
+}
+
+impl Description {
+    pub const fn empty() -> Self {
+        Self {
+            succinct: String::new(),
+            full: String::new(),
+        }
+    }
 }
 
 pub struct PositionalFieldInfo<'a> {
@@ -291,7 +336,7 @@ pub fn compute_docs(attrs: &[Attribute]) -> syn::Result<Description> {
     });
 
     let Some(first) = paragraphs.next() else {
-        return Ok(Description::default());
+        return Ok(Description::empty());
     };
 
     let short = first.clone();
@@ -359,26 +404,10 @@ impl<'a> ParsedFieldInfo<'a> {
             }));
         }
 
-        let long = parsed
-            .long
-            .map(|long| compute_long(unpack_spanned_override(long), &ident))
-            .transpose()?;
-
-        let short = parsed
-            .short
-            .map(|short| compute_short(unpack_spanned_override(short), &ident))
-            .transpose()?;
-
         let placeholder = compute_placeholder(parsed.placeholder, &ident)?;
-
         let default = FieldDefault::new(parsed.default);
 
-        if let Some(tags) = match (long, short) {
-            (None, None) => None,
-            (Some(long), None) => Some(FlagTags::Long(long)),
-            (None, Some(short)) => Some(FlagTags::Short(short)),
-            (Some(long), Some(short)) => Some(FlagTags::LongShort { long, short }),
-        } {
+        if let Some(tags) = compute_tags(parsed.long, parsed.short, &ident)? {
             let invert = parsed
                 .invert
                 .map(|invert| {
@@ -526,7 +555,13 @@ fn compute_short(
     derive_from_field_name(
         short,
         field_name.as_spanned_str(),
-        |field| field.chars().next().expect("Identifiers can't be empty"),
+        |field| {
+            field
+                .chars()
+                .next()
+                .expect("Identifiers can't be empty")
+                .to_ascii_lowercase()
+        },
         |short| {
             checks! {
                 *short == '-' => "short parameter must not be '-'",
@@ -536,6 +571,30 @@ fn compute_short(
     )
 }
 
+#[must_use]
+pub fn compute_tags(
+    long: Option<SpannedValue<Override<String>>>,
+    short: Option<SpannedValue<Override<char>>>,
+    ident: &IdentString<'_>,
+) -> syn::Result<Option<FlagTags<SpannedValue<String>, SpannedValue<char>>>> {
+    let long = long
+        .map(|long| compute_long(unpack_spanned_override(long), &ident))
+        .transpose()?;
+
+    let short = short
+        .map(|short| compute_short(unpack_spanned_override(short), &ident))
+        .transpose()?;
+
+    Ok(match (long, short) {
+        (None, None) => None,
+        (Some(long), None) => Some(FlagTags::Long(long)),
+        (None, Some(short)) => Some(FlagTags::Short(short)),
+        (Some(long), Some(short)) => Some(FlagTags::LongShort { long, short }),
+    })
+}
+
+#[inline]
+#[must_use]
 fn compute_placeholder(
     placeholder: Option<SpannedValue<String>>,
     field_name: &IdentString<'_>,
@@ -552,6 +611,8 @@ fn compute_placeholder(
     )
 }
 
+#[inline]
+#[must_use]
 fn compute_invert(
     // If given, the user's preference for the flag. If omitted, we'll compute
     // it by prefixing the `long` tag with `no-`

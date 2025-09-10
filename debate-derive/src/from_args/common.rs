@@ -88,10 +88,12 @@ pub fn struct_state_init_block_from_field_count<'a>(num_fields: usize) -> TokenS
     }
 }
 
+/// Basically the same as `enumerate`, but the items are paired with a
+/// `syn::Index` instead, suitable for use to look stuff up in a tuple.
 #[must_use]
-fn indexed_fields<'a>(
-    fields: &'a [ParsedFieldInfo<'a>],
-) -> impl Iterator<Item = (Index, &'a ParsedFieldInfo<'a>)> + DoubleEndedIterator {
+pub fn indexed<'a, T>(
+    fields: &'a [T],
+) -> impl Iterator<Item = (Index, &'a T)> + DoubleEndedIterator + Clone {
     fields
         .iter()
         .enumerate()
@@ -102,7 +104,7 @@ fn indexed_fields<'a>(
 fn flag_fields<'a>(
     fields: &'a [ParsedFieldInfo<'a>],
 ) -> impl Iterator<Item = (Index, &'a FlagFieldInfo<'a>)> {
-    indexed_fields(fields).filter_map(|(index, field)| match field {
+    indexed(fields).filter_map(|(index, field)| match field {
         ParsedFieldInfo::Flag(field) => Some((index, field)),
         ParsedFieldInfo::Positional(_) | ParsedFieldInfo::Flatten(_) => None,
     })
@@ -112,7 +114,7 @@ fn flag_fields<'a>(
 fn flatten_fields<'a>(
     fields: &'a [ParsedFieldInfo<'a>],
 ) -> impl Iterator<Item = (Index, &'a FlattenFieldInfo<'a>)> + DoubleEndedIterator {
-    indexed_fields(fields).filter_map(|(index, field)| match field {
+    indexed(fields).filter_map(|(index, field)| match field {
         ParsedFieldInfo::Flatten(field) => Some((index, field)),
         ParsedFieldInfo::Flag(_) | ParsedFieldInfo::Positional(_) => None,
     })
@@ -128,10 +130,34 @@ fn positional_flatten_fields<'a>(
         FlattenOr<&'a FlattenFieldInfo<'a>, &'a PositionalFieldInfo<'a>>,
     ),
 > {
-    indexed_fields(fields)
+    indexed(fields)
         .filter_map(|(idx, field)| field.get_positional().map(|info| (idx, info)))
         .enumerate()
         .map(|(position, (index, field))| (index, Literal::usize_unsuffixed(position), field))
+}
+
+#[inline]
+#[must_use]
+pub fn apply_new_arg_to_generic_field(
+    fields_ident: &Ident,
+    argument_ident: &Ident,
+    field_index: &Index,
+    parameter_trait: &Ident,
+    initial_method: &Ident,
+    decorate_value: impl FnOnce(&Ident) -> TokenStream2,
+) -> TokenStream2 {
+    let value = format_ident!("value");
+    let decorated_value = decorate_value(&value);
+
+    quote! {
+        match ::debate::parameter::#parameter_trait::#initial_method(#argument_ident) {
+            ::core::result::Result::Err(err) => ::core::result::Result::Err(err),
+            ::core::result::Result::Ok(#value) => {
+                #fields_ident.#field_index = #decorated_value;
+                ::core::result::Result::Ok(())
+            }
+        }
+    }
 }
 
 /// Create an expression that applies an incoming `argument` to a given field
@@ -152,15 +178,14 @@ pub fn apply_arg_to_field(
     initial_method: &Ident,
     follow_up_method: Option<&Ident>,
 ) -> TokenStream2 {
-    let parse_argument_expr = quote! {
-        match ::debate::parameter::#parameter_trait::#initial_method(#argument_ident) {
-            ::core::result::Result::Err(err) => ::core::result::Result::Err(err),
-            ::core::result::Result::Ok(value) => {
-                #fields_ident.#field_index = ::core::option::Option::Some(value);
-                ::core::result::Result::Ok(())
-            }
-        }
-    };
+    let parse_argument_expr = apply_new_arg_to_generic_field(
+        fields_ident,
+        argument_ident,
+        field_index,
+        parameter_trait,
+        initial_method,
+        |value| quote! { ::core::option::Option::Some(#value) },
+    );
 
     let Some(follow_up_method) = follow_up_method else {
         return parse_argument_expr;
@@ -171,7 +196,7 @@ pub fn apply_arg_to_field(
             ::core::option::Option::None => #parse_argument_expr,
             ::core::option::Option::Some(ref mut old) => ::debate::parameter::#parameter_trait::#follow_up_method(
                 old,
-                argument
+                #argument_ident,
             ),
         }
     }
@@ -291,7 +316,7 @@ pub fn visit_positional_arms_for_fields(
 /// Trait to convert a flag's tag into a `Literal` expression scrutinee in
 /// a `match` arm. Currently, we do bytewise matching, so strings become
 /// byte arrays and characters become u8 byte literals.
-trait MakeScrutinee {
+pub trait MakeScrutinee {
     fn make_scrutinee(self) -> Literal;
 }
 
@@ -347,6 +372,8 @@ fn complete_flag_body<'a, Tag: MakeScrutinee>(
         }
     });
 
+    // TODO: this part can be deduplicated with a bunch of the stuff in
+    // flag_set
     let local_arms = flag_fields(fields).flat_map(|(index, field)| {
         let field_name = field.ident.as_str();
 
@@ -519,7 +546,7 @@ pub fn final_field_initializers(
         default: Option<&'a FieldDefault>,
     }
 
-    indexed_fields(fields)
+    indexed(fields)
         .map(|(index, field)| {
             (
                 index,
