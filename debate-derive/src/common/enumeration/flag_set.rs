@@ -24,7 +24,7 @@ struct RawParsedFlagSetFlagAttr {
     default: Option<SpannedValue<Override<Expr>>>,
     placeholder: Option<SpannedValue<String>>,
     #[darling(rename = "override")]
-    r#override: Option<SpannedValue<()>>,
+    overridable: Option<SpannedValue<()>>,
 }
 
 pub struct FlagSetFlagInfo<Type> {
@@ -94,8 +94,9 @@ fn compute_flag_set_tags(
     compute_tags(long, short, ident)?.ok_or_else(|| {
         syn::Error::new(
             ident.span(),
-            "flag must have a short or long name. Add #[debate(short, long)] to \
-            the top-level enum to automatically add it to all flags.",
+            "flag must have a short or long name. Add #[debate(short)] or \
+            #[debate(long)] to the top-level enum to automatically add it to \
+            all flags.",
         )
     })
 }
@@ -116,7 +117,7 @@ fn create_flag<'a, Type>(
         ty,
         default: FieldDefault::new(attr.default),
         tags: compute_flag_set_tags(auto_long, auto_short, attr.long, attr.short, ident)?,
-        overridable: attr.r#override,
+        overridable: attr.overridable,
     })
 }
 
@@ -128,9 +129,10 @@ fn create_whole_flag_from_variant<'a>(
     ty: FlagSetType<'a>,
     attrs: &'a [Attribute],
 ) -> syn::Result<FlagSetVariant<'a>> {
-    let mode = VariantMode::Plain(create_flag(auto_long, auto_short, &ident, ty, attrs)?);
-
-    Ok(FlagSetVariant { ident, mode })
+    Ok(FlagSetVariant {
+        mode: VariantMode::Plain(create_flag(auto_long, auto_short, &ident, ty, attrs)?),
+        ident,
+    })
 }
 
 impl<'a> ParsedFlagSetInfo<'a> {
@@ -141,62 +143,66 @@ impl<'a> ParsedFlagSetInfo<'a> {
     ) -> syn::Result<Self> {
         let variants: Vec<FlagSetVariant<'a>> = variants
             .into_iter()
-            .map(|variant| {
+            .map(|variant| -> syn::Result<FlagSetVariant<'a>> {
                 let variant_ident = IdentString::new(&variant.ident);
 
-                // TODO: deduplicate newtype / unit fields, they're nearly
-                // identical
-                match variant.fields {
-                    syn::Fields::Unit => create_whole_flag_from_variant(
+                let mode = match variant.fields {
+                    syn::Fields::Unit => VariantMode::Plain(create_flag(
                         auto_long,
                         auto_short,
-                        variant_ident,
+                        &variant_ident,
                         FlagSetType::Unit,
                         &variant.attrs,
+                    )?),
+
+                    syn::Fields::Unnamed(ref fields) => VariantMode::Plain(create_flag(
+                        auto_long,
+                        auto_short,
+                        &variant_ident,
+                        FlagSetType::Typed(
+                            fields
+                                .unnamed
+                                .iter()
+                                .exactly_one()
+                                .map(|field| &field.ty)
+                                .map_err(|_| {
+                                    syn::Error::new(
+                                        fields.span(),
+                                        "must have exactly one field (the flag argument)",
+                                    )
+                                })?,
+                        ),
+                        &variant.attrs,
+                    )?),
+
+                    syn::Fields::Named(ref fields) => VariantMode::Struct(
+                        fields
+                            .named
+                            .iter()
+                            .map(|field| {
+                                let field_ident = field
+                                    .ident
+                                    .as_ref()
+                                    .map(IdentString::new)
+                                    .expect("all fields in a struct variant have names");
+
+                                create_flag(
+                                    auto_long,
+                                    auto_short,
+                                    &field_ident,
+                                    &field.ty,
+                                    &field.attrs,
+                                )
+                                .map(|flag| (field_ident, flag))
+                            })
+                            .try_collect()?,
                     ),
+                };
 
-                    syn::Fields::Unnamed(ref fields) => {
-                        let field = fields.unnamed.iter().exactly_one().map_err(|_| {
-                            syn::Error::new(
-                                fields.span(),
-                                "must have exactly one field (the flag argument)",
-                            )
-                        })?;
-
-                        create_whole_flag_from_variant(
-                            auto_long,
-                            auto_short,
-                            variant_ident,
-                            FlagSetType::Typed(&field.ty),
-                            &variant.attrs,
-                        )
-                    }
-                    syn::Fields::Named(ref fields) => fields
-                        .named
-                        .iter()
-                        .map(|field| {
-                            let field_ident = field
-                                .ident
-                                .as_ref()
-                                .map(IdentString::new)
-                                .expect("all fields in a struct variant have names");
-
-                            let info = create_flag(
-                                auto_long,
-                                auto_short,
-                                &field_ident,
-                                &field.ty,
-                                &field.attrs,
-                            )?;
-
-                            Ok((field_ident, info))
-                        })
-                        .try_collect()
-                        .map(|fields| FlagSetVariant {
-                            ident: variant_ident,
-                            mode: VariantMode::Struct(fields),
-                        }),
-                }
+                Ok(FlagSetVariant {
+                    ident: variant_ident,
+                    mode,
+                })
             })
             .try_collect()?;
 
