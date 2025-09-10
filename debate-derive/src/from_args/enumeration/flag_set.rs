@@ -71,13 +71,13 @@ pub fn derive_args_enum_flag_set(
     states, it isn't sufficient to just try each one in sequence; we have to
     actively track which set the user is opting into, and consider only those.
 
-    For each viable variant, we'll attempt to construct it, falling through
-    if any of its non-optional fields are absent.
+    After we're done receiving new arguments, we'll attempt to construct the
+    final enum. We do this by attempting to construct each viable variant in
+    sequence, falling through to each next viable variant when there are
+    Missing Required Value errors.
 
     If ALL of the flags are unique, then we won't even bother tracking the
     viability set; it's a large array of bools and a cost we don't need to pay.
-
-    TODO: figure out error reporting for this.
     */
 
     // Reuse these everywhere
