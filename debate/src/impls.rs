@@ -7,12 +7,14 @@ use core::hash::Hash;
 
 use debate_parser::Arg;
 
-use crate::help::{ParameterUsage, ParameterValueKind, Repetition, Requirement};
+use crate::help::{ParameterUsage, ParameterValueKind, Repetition, Requirement, Usage};
 use crate::parameter::{
     ArgAccess, Error as ParameterError, Parameter, ParsedValue, PositionalParameter, RequiredError,
     Value,
 };
-use crate::util::arg_as_str;
+use crate::state;
+use crate::util::{DetectUnrecognized, arg_as_str};
+use crate::{build, help};
 
 macro_rules! from_str {
     ($(
@@ -200,4 +202,87 @@ collections! {
     collections::HashSet[T: Eq + Hash] .insert,
     collections::LinkedList[T] .push_back,
     collections::VecDeque[T] .push_back,
+}
+
+impl<'arg, T> build::BuildFromArgs<'arg> for Option<T>
+where
+    T: build::BuildFromArgs<'arg>,
+{
+    type State = Option<T::State>;
+
+    fn build<E>(state: Self::State) -> Result<Self, E>
+    where
+        E: build::Error,
+    {
+        state.map(|state| T::build(state)).transpose()
+    }
+}
+
+// Helper for doing type inference in the macro
+#[inline(always)]
+fn init_option_state<T: Default>(_state: &Option<T>) -> T {
+    T::default()
+}
+
+macro_rules !implement_option {
+    ( $this:ident . $method:ident ( $($arg:expr),+ $(,)? ) ) => {
+        match $this {
+            Some(state) => state.$method($($arg,)+),
+            None => {
+                let mut state = init_option_state($this);
+
+                let res = match state.$method($($arg,)+) {
+                    Err(DetectUnrecognized::Unrecognized(arg)) => return Err(E::unrecognized(arg)),
+                    Err(DetectUnrecognized::Error(err)) => Err(err),
+                    Ok(()) => Ok(()),
+                };
+
+                * $this = Some(state);
+
+                res
+            }
+        }
+    }
+}
+
+impl<'arg, T> state::State<'arg> for Option<T>
+where
+    T: state::State<'arg> + Default,
+{
+    fn add_positional<E>(&mut self, argument: &'arg Arg) -> Result<(), E>
+    where
+        E: state::Error<'arg, ()>,
+    {
+        implement_option!(self.add_positional(argument))
+    }
+
+    fn add_long_argument<E>(&mut self, option: &'arg Arg, argument: &'arg Arg) -> Result<(), E>
+    where
+        E: state::Error<'arg, ()>,
+    {
+        implement_option!(self.add_long_argument(option, argument))
+    }
+
+    fn add_long<A, E>(&mut self, option: &'arg Arg, argument: A) -> Result<(), E>
+    where
+        A: crate::parameter::ArgAccess<'arg>,
+        E: state::Error<'arg, A>,
+    {
+        implement_option!(self.add_long(option, argument))
+    }
+
+    fn add_short<A, E>(&mut self, option: u8, argument: A) -> Result<(), E>
+    where
+        A: crate::parameter::ArgAccess<'arg>,
+        E: state::Error<'arg, A>,
+    {
+        implement_option!(self.add_short(option, argument))
+    }
+
+    fn get_subcommand_path<V: state::SubcommandVisitor>(&self, visitor: V) -> Result<V::Output, V> {
+        match self {
+            None => Err(visitor),
+            Some(state) => state.get_subcommand_path(visitor),
+        }
+    }
 }

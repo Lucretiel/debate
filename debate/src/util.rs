@@ -65,10 +65,13 @@ where
     }
 
     fn flattened(field: &'static str, error: Self) -> Self {
-        Self::Error(match error {
-            DetectUnrecognized::Unrecognized(_) => todo!(),
-            DetectUnrecognized::Error(err) => E::flattened(field, err),
-        })
+        // Currently we get rid of flattens for unrecognized. This kind of
+        // makes sense because unrecognition is a property of the entire state
+        // tree, not any particular part of it.
+        match error {
+            Self::Unrecognized(arg) => Self::Unrecognized(arg),
+            Self::Error(err) => Self::Error(E::flattened(field, err)),
+        }
     }
 
     fn unknown_subcommand(expected: &'static [&'static str]) -> Self {
