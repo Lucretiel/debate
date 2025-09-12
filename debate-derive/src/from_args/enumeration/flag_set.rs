@@ -105,6 +105,9 @@ fn handle_long_superposition_argument<'a, Tag: MakeScrutinee>(
         .map(|(tag, index, flag): (Tag, Index, &FlagSetFlag<'_>)| {
             let scrutinee = tag.make_scrutinee();
 
+            // TODO: if this is gonna be an unconditional transition, there's
+            // no need to update the exclusions, we only need to make sure
+            // the state we want to be is acceptable.
             let update_exclusions = flag
                 .excluded
                 .values()
