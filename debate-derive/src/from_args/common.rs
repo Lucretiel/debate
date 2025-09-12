@@ -136,26 +136,23 @@ fn positional_flatten_fields<'a>(
         .map(|(position, (index, field))| (index, Literal::usize_unsuffixed(position), field))
 }
 
-#[inline]
-#[must_use]
-pub fn apply_new_arg_to_generic_field(
-    fields_ident: &Ident,
-    argument_ident: &Ident,
-    field_index: &Index,
-    parameter_trait: &Ident,
-    initial_method: &Ident,
-    decorate_value: impl FnOnce(&Ident) -> TokenStream2,
-) -> TokenStream2 {
-    let value = format_ident!("value");
-    let decorated_value = decorate_value(&value);
+#[derive(Clone, Copy)]
+pub enum FieldNature<'a> {
+    /// Option<T>, and additionally has invert tags
+    Invertable(FlagTags<&'a str, char>),
 
-    quote! {
-        match ::debate::parameter::#parameter_trait::#initial_method(#argument_ident) {
-            ::core::result::Result::Err(err) => ::core::result::Result::Err(err),
-            ::core::result::Result::Ok(#value) => {
-                #fields_ident.#field_index = #decorated_value;
-                ::core::result::Result::Ok(())
-            }
+    /// Option<T>
+    Optional,
+
+    /// T
+    Extant,
+}
+
+impl<'a> FieldNature<'a> {
+    pub fn invert_tags(&self) -> Option<FlagTags<&'a str, char>> {
+        match *self {
+            FieldNature::Invertable(tags) => Some(tags),
+            FieldNature::Optional | FieldNature::Extant => None,
         }
     }
 }
@@ -170,35 +167,53 @@ pub fn apply_new_arg_to_generic_field(
 /// overridable field and that we should always use `initial_method`
 
 #[must_use]
-pub fn apply_arg_to_field(
+fn apply_arg_to_field(
     fields_ident: &Ident,
     argument_ident: &Ident,
     field_index: &Index,
     parameter_trait: &Ident,
     initial_method: &Ident,
     follow_up_method: Option<&Ident>,
+    nature: &FieldNature<'_>,
 ) -> TokenStream2 {
-    let parse_argument_expr = apply_new_arg_to_generic_field(
-        fields_ident,
-        argument_ident,
-        field_index,
-        parameter_trait,
-        initial_method,
-        |value| quote! { ::core::option::Option::Some(#value) },
-    );
+    let decorated_value = match nature {
+        FieldNature::Extant => quote! { value },
+        FieldNature::Invertable(_) | FieldNature::Optional => {
+            quote! { ::core::option::Option::Some(value) }
+        }
+    };
+
+    let new_argument_expr = quote! {
+        match ::debate::parameter::#parameter_trait::#initial_method(#argument_ident) {
+            ::core::result::Result::Err(err) => ::core::result::Result::Err(err),
+            ::core::result::Result::Ok(value) => {
+                #fields_ident.#field_index = #decorated_value;
+                ::core::result::Result::Ok(())
+            }
+        }
+    };
 
     let Some(follow_up_method) = follow_up_method else {
-        return parse_argument_expr;
+        return new_argument_expr;
+    };
+
+    let existing_argument_expr = quote! {
+        ::debate::parameter::#parameter_trait::#follow_up_method(
+            old,
+            #argument_ident,
+        )
+    };
+
+    let match_body = match nature {
+        FieldNature::Extant => quote! { ref mut old => #existing_argument_expr, },
+        FieldNature::Invertable(_) | FieldNature::Optional => quote! {
+            ::core::option::Option::None => #new_argument_expr,
+            ::core::option::Option::Some(ref mut old) => #existing_argument_expr,
+        },
     };
 
     quote! {
-        match #fields_ident.#field_index {
-            ::core::option::Option::None => #parse_argument_expr,
-            ::core::option::Option::Some(ref mut old) => ::debate::parameter::#parameter_trait::#follow_up_method(
-                old,
-                #argument_ident,
-            ),
-        }
+        match #fields_ident.#field_index { #match_body }
     }
 }
 
@@ -270,6 +285,7 @@ pub fn visit_positional_arms_for_fields(
                     &format_ident!("PositionalParameter"),
                     arg_ident,
                     Some(add_arg_ident),
+                    &FieldNature::Optional,
                 );
 
                 handle_propagated_error(
@@ -336,8 +352,8 @@ impl MakeScrutinee for &str {
 pub trait FlagField<'a> {
     fn name(&self) -> &str;
     fn tags(&self) -> FlagTags<&'a str, char>;
-    fn invert(&self) -> Option<FlagTags<&'a str, char>>;
     fn overridable(&self) -> bool;
+    fn nature(&self) -> FieldNature<'a>;
 }
 
 impl<'a> FlagField<'a> for &'a FlagFieldInfo<'_> {
@@ -352,15 +368,16 @@ impl<'a> FlagField<'a> for &'a FlagFieldInfo<'_> {
     }
 
     #[inline(always)]
-    fn invert(&self) -> Option<FlagTags<&'a str, char>> {
-        self.invert
-            .as_ref()
-            .map(|long| FlagTags::Long(long.as_str()))
+    fn overridable(&self) -> bool {
+        self.overridable
     }
 
     #[inline(always)]
-    fn overridable(&self) -> bool {
-        self.overridable
+    fn nature(&self) -> FieldNature<'a> {
+        match self.invert {
+            Some(ref long) => FieldNature::Invertable(FlagTags::Long(long)),
+            None => FieldNature::Optional,
+        }
     }
 }
 
@@ -368,6 +385,9 @@ impl<'a> FlagField<'a> for &'a FlagFieldInfo<'_> {
 /// pretty much anything. Abstracts over struct-like entities and flagset
 /// logic.
 #[expect(clippy::too_many_arguments)]
+// Might swap this out for a struct someday, to make it easier to read.
+// This versuon is kinda nice cause you don't have to have explicit generic
+// parameters for all the `impl Trait` arguments.
 #[must_use]
 pub fn complete_flag_body<'a, Flag: FlagField<'a>, Tag: MakeScrutinee>(
     fields_ident: &Ident,
@@ -376,13 +396,12 @@ pub fn complete_flag_body<'a, Flag: FlagField<'a>, Tag: MakeScrutinee>(
 
     help: Option<(Tag, HelpMode)>,
     flag_fields: impl Iterator<Item = (Index, Flag)>,
-    recognizable_tags: impl IntoIterator<Item = Tag>,
-
     get_tag: impl Fn(FlagTags<&'a str, char>) -> Option<Tag>,
 
     parameter_method: &Ident,
     add_parameter_method: &Ident,
 
+    conflict_arm: TokenStream2,
     flatten_exprs: impl IntoIterator<Item = TokenStream2>,
     flatten_rebind_argument: impl ToTokens,
 ) -> TokenStream2 {
@@ -409,6 +428,7 @@ pub fn complete_flag_body<'a, Flag: FlagField<'a>, Tag: MakeScrutinee>(
     let local_arms = flag_fields.flat_map(|(index, field)| {
         let field_name = field.name();
         let get_tag = &get_tag;
+        let nature = field.nature();
 
         let arm = get_tag(field.tags()).map(|tag| {
             let scrutinee = tag.make_scrutinee();
@@ -422,6 +442,7 @@ pub fn complete_flag_body<'a, Flag: FlagField<'a>, Tag: MakeScrutinee>(
                     true => None,
                     false => Some(add_parameter_method),
                 },
+                &nature,
             );
 
             quote! {
@@ -434,7 +455,9 @@ pub fn complete_flag_body<'a, Flag: FlagField<'a>, Tag: MakeScrutinee>(
             }
         });
 
-        let invert_arm = field.invert().and_then(get_tag).map(|tag| {
+        // We assume that a flag with an Extant nature never has an invert,
+        // since the whole point of invert is to reset the flag to None.
+        let invert_arm = nature.invert_tags().and_then(get_tag).map(|tag| {
             let scrutinee = tag.make_scrutinee();
             quote! {
                 #scrutinee => match ::debate::parameter::Parameter::#parameter_method(
@@ -453,16 +476,6 @@ pub fn complete_flag_body<'a, Flag: FlagField<'a>, Tag: MakeScrutinee>(
         });
 
         [arm, invert_arm]
-    });
-
-    let mut recognizable_tags = recognizable_tags
-        .into_iter()
-        .map(|tag| tag.make_scrutinee());
-
-    let conflict_arm = recognizable_tags.next().map(|recognize| {
-        quote! {
-            #recognize #(| #recognizable_tags)* => todo!("handle conflict"),
-        }
     });
 
     let flatten_exprs = flatten_exprs.into_iter();
@@ -529,10 +542,10 @@ fn complete_struct_flag_body<'a, Tag: MakeScrutinee>(
         option_expr,
         help,
         flag_fields(fields),
-        [],
         get_tag,
         parameter_method,
         add_parameter_method,
+        quote! {},
         flatten_exprs,
         flatten_rebind_argument,
     )

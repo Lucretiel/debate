@@ -134,9 +134,27 @@ enum BuildMode {
 #[debate(long)]
 enum FlagChoice {
     OutDir(PathBuf),
+
+    #[debate(override, short)]
     WorkingDir,
+
     OutFile(PathBuf),
+
+    Loud {
+        loud: (),
+    },
+    Louder {
+        loud: (),
+        shouter: String,
+    },
 }
+
+// #[derive(FromArgs, Debug)]
+// #[debate(long)]
+// enum FlagChoice {
+//     Loud { loud: (), shouter: String },
+//     Quiet { quiet: (), requester: String },
+// }
 
 #[derive(FromArgs, Usage, Debug)]
 #[debate(subcommand)]

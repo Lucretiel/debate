@@ -3,32 +3,128 @@ use std::collections::HashMap;
 use itertools::Itertools;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::{ToTokens, format_ident, quote};
-use syn::{Ident, Lifetime, Token, Variant, punctuated::Punctuated};
+use syn::{Ident, Index, Lifetime, Token, Variant, punctuated::Punctuated};
 
 use crate::{
     common::{
         FlagTags, IdentString,
         enumeration::flag_set::{
-            FlagSetFlagInfo, FlagSetVariant, ParsedFlagSetInfo, VariantMode, compute_grouped_flags,
+            FlagFieldInfo, FlagSetFlag, FlagSetFlagInfo, FlagSetVariant, ParsedFlagSetInfo,
+            PlainFlagInfo, VariantMode, compute_grouped_flags,
         },
     },
-    from_args::common::{FlagField, MakeScrutinee, complete_flag_body, indexed},
+    from_args::common::{FieldNature, FlagField, MakeScrutinee, complete_flag_body, indexed},
     generics::AngleBracedLifetime,
 };
 
 use super::ValueEnumAttr;
 
-// TODO: have this return an Fn so we can pre-compute the alternations
-fn state_variant_tail_arms(flags: impl Iterator<Item = impl MakeScrutinee>) -> TokenStream2 {
-    let alternations = flags.map(|flag| flag.make_scrutinee());
+// There doesn't exist a rejection set or superposition field states. Just
+// transition immediately.
+fn handle_simple_long_superposition_argument(
+    fields_ident: &Ident,
+    flags: &[FlagSetFlag<'_>],
+) -> TokenStream2 {
+    let arms = indexed(flags)
+        .filter_map(|(index, flag)| flag.tags.long().map(move |long| (long, index, flag)))
+        .map(|(long, index, flag): (&str, Index, &FlagSetFlag<'_>)| {
+            let scrutinee = long.make_scrutinee();
+
+            // TODO: using `exactly_one` here is probably going to be the
+            // secret to generalizing between this and regular superpositions.
+            let destination = flag.variants.first().unwrap();
+
+            quote! {
+                #scrutinee => {
+
+                }
+            }
+        });
 
     quote! {
-        #(| #alternations)* => todo!("conflict error").
-        _ => todo!("unrecognized error"),
+        match flag.bytes() {
+
+        }
     }
 }
 
-impl<'a, T> FlagField<'a> for &'a (IdentString<'_>, FlagSetFlagInfo<T>) {
+fn handle_long_superposition_argument(
+    fields_ident: &Ident,
+    flags: &[FlagSetFlag<'_>],
+) -> TokenStream2 {
+    // Step 1: check the rejection set for a conflict
+    // Step 2: update the rejection set with all newly rejeced variants
+    // Step 3: check if this flag transitions us to a known state.
+    //   when doing this check, check the flag itself first (it might
+    //   be unique), and fall back to the rejection set.
+    //   if so:
+    //     transition to that state. Bring any relevant arguments along.
+    //     parse the argument with `present`.
+    //   otherwise:
+    //     parse the argument with `apply_arg_to_field` into the
+    //     superposition fields.
+    // Steps to compute conflict: keep track of the previously
+    // false rejection set items. If the rejection set becomes
+    // fully rejected, pick the first previously false one,
+    // and use it.
+
+    let arms = indexed(flags)
+        .filter_map(|(index, flag)| flag.tags.long().map(move |long| (long, index, flag)))
+        .map(|(long, index, flag): (&str, Index, &FlagSetFlag<'_>)| {
+            let scrutinee = long.make_scrutinee();
+
+            let update_exclusions = flag
+                .excluded
+                .values()
+                .map(|&i| Index::from(i))
+                .map(|index| quote! { rejection_set.#index = true; });
+
+            quote! {
+                #scrutinee => {
+                    #update_exclusions
+
+                    if Self::total_rejection(&rejection_set) {
+                        todo!("conflict")
+                    }
+
+                    // TODO: transition to a known state
+
+
+                }
+            }
+        });
+
+    quote! {
+        match flag.bytes() {
+
+        }
+    }
+}
+
+impl<'a> FlagField<'a> for &'a FlagSetFlagInfo<FlagFieldInfo<'a>> {
+    #[inline(always)]
+    fn name(&self) -> &str {
+        self.info.ident.as_str()
+    }
+
+    #[inline(always)]
+    fn tags(&self) -> FlagTags<&'a str, char> {
+        self.tags.simplify()
+    }
+
+    #[inline(always)]
+    fn overridable(&self) -> bool {
+        self.overridable.is_some()
+    }
+
+    #[inline(always)]
+    fn nature(&self) -> FieldNature<'a> {
+        FieldNature::Optional
+    }
+}
+
+/// For plain flags, we pair them with the variant they came from.
+impl<'a> FlagField<'a> for &(&'a IdentString<'a>, &'a FlagSetFlagInfo<PlainFlagInfo<'a>>) {
     #[inline(always)]
     fn name(&self) -> &str {
         self.0.as_str()
@@ -40,51 +136,74 @@ impl<'a, T> FlagField<'a> for &'a (IdentString<'_>, FlagSetFlagInfo<T>) {
     }
 
     #[inline(always)]
-    fn invert(&self) -> Option<FlagTags<&'a str, char>> {
-        None
-    }
-
-    #[inline(always)]
     fn overridable(&self) -> bool {
         self.1.overridable.is_some()
     }
+
+    #[inline(always)]
+    fn nature(&self) -> FieldNature<'a> {
+        FieldNature::Extant
+    }
 }
 
-fn complete_flagset_flag_body<'a, Tag: MakeScrutinee, Type>(
+fn conflict_detection_arm(
+    recognized_tags: impl IntoIterator<Item = impl MakeScrutinee>,
+) -> TokenStream2 {
+    let mut tags = recognized_tags.into_iter().map(|tag| tag.make_scrutinee());
+
+    match tags.next() {
+        None => quote! {},
+        Some(recognize) => quote! {
+            #recognize #(| #tags)* => todo!("handle conflict")
+        },
+    }
+}
+
+// We use slices everywhere here because we call `indexed` on them, and we
+// want to enforce (more or less) that we're using the complete set, from
+// a slice, rather than a filtered set from an iterator.
+
+fn complete_flagset_flag_body<'a, Tag: MakeScrutinee, T>(
     fields_ident: &Ident,
     argument_ident: &Ident,
     option_expr: impl ToTokens,
 
-    fields: &'a [(IdentString<'_>, FlagSetFlagInfo<Type>)],
+    fields: &'a [T],
     all_tag_scrutinees: impl IntoIterator<Item = Tag>,
     get_tag: impl Fn(FlagTags<&'a str, char>) -> Option<Tag>,
 
     parameter_method: &Ident,
     add_parameter_method: &Ident,
-) -> TokenStream2 {
+) -> TokenStream2
+where
+    &'a T: FlagField<'a>,
+{
     complete_flag_body(
         fields_ident,
         argument_ident,
         option_expr,
         None,
         indexed(fields),
-        all_tag_scrutinees,
         get_tag,
         parameter_method,
         add_parameter_method,
+        conflict_detection_arm(all_tag_scrutinees),
         [],
         argument_ident,
     )
 }
 
-fn complete_long_arg_body<'a, Type>(
+fn complete_long_arg_body<'a, T>(
     fields_ident: &Ident,
     argument_ident: &Ident,
     option_ident: &Ident,
 
-    fields: &'a [(IdentString<'_>, FlagSetFlagInfo<Type>)],
+    fields: &'a [T],
     all_tag_scrutinees: impl IntoIterator<Item = &'a str>,
-) -> TokenStream2 {
+) -> TokenStream2
+where
+    &'a T: FlagField<'a>,
+{
     complete_flagset_flag_body(
         fields_ident,
         argument_ident,
@@ -97,14 +216,17 @@ fn complete_long_arg_body<'a, Type>(
     )
 }
 
-fn complete_long_body<'a, Type>(
+fn complete_long_body<'a, T>(
     fields_ident: &Ident,
     argument_ident: &Ident,
     option_ident: &Ident,
 
-    fields: &'a [(IdentString<'_>, FlagSetFlagInfo<Type>)],
+    fields: &'a [T],
     all_tag_scrutinees: impl IntoIterator<Item = &'a str>,
-) -> TokenStream2 {
+) -> TokenStream2
+where
+    &'a T: FlagField<'a>,
+{
     complete_flagset_flag_body(
         fields_ident,
         argument_ident,
@@ -117,14 +239,17 @@ fn complete_long_body<'a, Type>(
     )
 }
 
-fn complete_short_body<'a, Type>(
+fn complete_short_body<'a, T>(
     fields_ident: &Ident,
     argument_ident: &Ident,
     option_ident: &Ident,
 
-    fields: &'a [(IdentString<'_>, FlagSetFlagInfo<Type>)],
+    fields: &'a [T],
     all_tag_scrutinees: impl IntoIterator<Item = char>,
-) -> TokenStream2 {
+) -> TokenStream2
+where
+    &'a T: FlagField<'a>,
+{
     complete_flagset_flag_body(
         fields_ident,
         argument_ident,
@@ -223,24 +348,19 @@ pub fn derive_args_enum_flag_set(
 
     // Note that anything that interacts with the flag flags list or with the
     // viability set is conditional on `any_multi_flags`.
-    let flag_types = parsed_flags
-        .iter()
-        .take_while(|_| any_multi_flags)
-        .map(|flag| &flag.ty)
-        .map(|flag_type| {
-            quote! {
-                ::core::option::Option< #flag_type >
-            }
-        });
+    let flag_types = parsed_flags.iter().map(|flag| {
+        let ty = &flag.ty;
 
-    let flag_inits = parsed_flags
-        .iter()
-        .take_while(|_| any_multi_flags)
-        .map(|_| {
-            quote! {
-                ::core::option::Option::None
-            }
-        });
+        match flag.variants.len() {
+            1 => quote! { () },
+            _ => quote! { ::core::option::Option< #ty > },
+        }
+    });
+
+    let flag_inits = parsed_flags.iter().map(|flag| match flag.variants.len() {
+        1 => quote! { () },
+        _ => quote! { ::core::option::Option::None },
+    });
 
     // TODO: if there are at most 64 variants (lol), use a u64 for the
     // rejection set.
@@ -267,15 +387,17 @@ pub fn derive_args_enum_flag_set(
             // We don't use options for units and newtypes; there's only one
             // possible flag that triggers these states, so it's guaranteed
             // that its argument is real when we arrived to it.
-            VariantMode::Plain(FlagSetFlagInfo { ref ty, .. }) => quote! {
+            VariantMode::Plain(ref flag) => {
+                let ty = flag.info.ty();
+
                 // Don't forget that the `ty` for a unit variant is `()`,
                 // which has a correct implementation of Parameter for our
                 // needs
-                #ident { #fields_ident: ( #ty, ), }
-            },
+                quote! { #ident { #fields_ident: ( #ty, ), } }
+            }
 
             VariantMode::Struct(ref fields) => {
-                let field_types = fields.iter().map(|(_, field)| field.ty);
+                let field_types = fields.iter().map(|field| &field.info.ty);
 
                 quote! {
                     #ident {
@@ -291,100 +413,6 @@ pub fn derive_args_enum_flag_set(
     let long_flags = indexed(&parsed_flags)
         .find_map(|(index, flag)| flag.tags.long().map(|long| (index, long, flag)));
 
-    // let add_long_arms = long_flags.clone().map(|(index, long, flag)| {
-    //     let scrutinee = long.make_scrutinee();
-
-    //     // Reject each variant that this flag is NOT a member of.
-    //     // TODO: make this deteministic (indexmap?)
-    //     let update_rejections = flag
-    //         .excluded
-    //         .values()
-    //         .take_while(|_| any_multi_flags)
-    //         .map(|&index| Index::from(index))
-    //         .map(|index| {
-    //             quote! {
-    //                 rejection_set.#index = true;
-    //             }
-    //         });
-
-    //     let variant_arms = flag.variants.iter().map(|&(variant_ident, index)| {
-    //         let body = match index {
-    //             None => match flag.info.overridable {
-    //                 true => apply_new_arg_to_generic_field(
-    //                     &fields_ident,
-    //                     &argument,
-    //                     &Index::from(0),
-    //                     &parameter_ident,
-    //                     &present_ident,
-    //                     |value| quote! {#value},
-    //                 ),
-    //                 false => quote! {
-    //                     ::debate::parameter::Parameter::add_present(
-    //                         &mut #fields_ident.0,
-    //                         #argument,
-    //                     )
-    //                 },
-    //             },
-    //             Some(index) => apply_arg_to_field(
-    //                 &fields_ident,
-    //                 &argument,
-    //                 &Index::from(index),
-    //                 &parameter_ident,
-    //                 &present_ident,
-    //                 match flag.info.overridable {
-    //                     true => None,
-    //                     false => Some(&add_present_ident),
-    //                 },
-    //             ),
-    //         };
-
-    //         quote! {
-    //             #variant_ident { ref mut #fields_ident } => match (#body) {
-    //                 ::core::result::Result::Ok(()) => ::core::result::Result::Ok(()),
-    //                 ::core::result::Result::Err(err) => ::core::result::Result::Err(
-    //                     ::debate::state::Error::parameter("TODO NAME ME", err)
-    //                 ),
-    //             }
-    //         }
-    //     });
-
-    //     quote! {
-    //         #scrutinee => match *self {
-    //             Self :: #superposition_ident { ref mut fields, ref mut rejection_set, .. } => {
-    //                 // Step 1: check the rejection set for a conflict
-    //                 // Step 2: update the rejection set with all newly rejeced variants
-    //                 // Step 3: check if this flag transitions us to a known state.
-    //                 //   when doing this check, check the flag itself first (it might
-    //                 //   be unique), and fall back to the rejection set.
-    //                 //   if so:
-    //                 //     transition to that state. Bring any relevant arguments along.
-    //                 //     parse the argument with `present`.
-    //                 //   otherwise:
-    //                 //     parse the argument with `apply_arg_to_field` into the
-    //                 //     superposition fields.
-    //                 // Steps to compute conflict: keep track of the previously
-    //                 // false rejection set items. If the rejection set becomes
-    //                 // fully rejected, pick the first previously false one,
-    //                 // and use it.
-    //                 // Ideally this logic is not repeated in every scrutinee
-    //                 // arm; we'd find a way to shunt it down towards the end.
-
-    //                 #(#update_rejections*)
-
-    //             },
-
-    //             #(Self :: #variant_arms,)*
-
-    //             // We recognized the flag, but it's conflicting with a selected
-    //             // state
-    //             _ => ::core::result::Result::Err(
-    //                 // Again: unrecognized is wrong here
-    //                 ::debate::state::Error::unrecognized(todo!())
-    //             ),
-    //         }
-    //     }
-    // });
-
     // We do a rare pre-emptive collect because this operation is nakedly
     // quadratic so we want to minimize repeated computation. In the future
     // we'd even like to pre-compute the scrutinees directly, but for now we
@@ -399,68 +427,122 @@ pub fn derive_args_enum_flag_set(
         .filter_map(|flag| flag.tags.short())
         .collect_vec();
 
-    let add_long_arms = parsed.variants.iter().map(|variant| match variant.mode {
-        VariantMode::Plain(ref field) => {
-            let ident = &variant.ident;
-            let arm = field.tags.long().map(|long| {
-                quote! {
-                    todo!()
-                }
-            });
-
-            quote! {
-                #ident => match #flag {
-                    #arm,
-
-                    // We recognized the flag, but it's conflicting with a
-                    // selected state
-                    _ => ::core::result::Result::Err(
-                        // Again: unrecognized is wrong here
-                        ::debate::state::Error::unrecognized(todo!())
-                    ),
-                }
-            }
-        }
-
-        VariantMode::Struct(ref fields) => {
-            let ident = &variant.ident;
-
-            // In the future, consider filtering the set of long tags in
-            // the recognizable set. For now we assume that the optimizer can
-            // take care of it for us.
-            let body = complete_long_body(
+    // TODO: deduplicate these. The trouble is figuring out how to abscract
+    // `complete_long_arg_body`, which has two generic instantiations.
+    let add_long_arg_arms = parsed.variants.iter().map(|variant| {
+        let body = match variant.mode {
+            VariantMode::Plain(ref field) => complete_long_arg_body(
+                &fields_ident,
+                &argument,
+                &flag,
+                &[(&variant.ident, field)],
+                all_long_scrutinees.iter().copied(),
+            ),
+            VariantMode::Struct(ref fields) => complete_long_arg_body(
                 &fields_ident,
                 &argument,
                 &flag,
                 &fields,
                 all_long_scrutinees.iter().copied(),
-            );
+            ),
+        };
 
-            quote! {
-                #ident { ref mut fields } => #body
-            }
+        let ident = &variant.ident;
+        quote! {
+            #ident { ref mut #fields_ident } => #body
         }
     });
+
+    let add_long_arms = parsed.variants.iter().map(|variant| {
+        let body = match variant.mode {
+            VariantMode::Plain(ref field) => complete_long_body(
+                &fields_ident,
+                &argument,
+                &flag,
+                &[(&variant.ident, field)],
+                all_long_scrutinees.iter().copied(),
+            ),
+            VariantMode::Struct(ref fields) => complete_long_body(
+                &fields_ident,
+                &argument,
+                &flag,
+                &fields,
+                all_long_scrutinees.iter().copied(),
+            ),
+        };
+
+        let ident = &variant.ident;
+        quote! {
+            #ident { ref mut #fields_ident } => #body
+        }
+    });
+
+    let add_short_arms = parsed.variants.iter().map(|variant| {
+        let body = match variant.mode {
+            VariantMode::Plain(ref field) => complete_short_body(
+                &fields_ident,
+                &argument,
+                &flag,
+                &[(&variant.ident, field)],
+                all_short_scrutinees.iter().copied(),
+            ),
+            VariantMode::Struct(ref fields) => complete_short_body(
+                &fields_ident,
+                &argument,
+                &flag,
+                fields,
+                all_short_scrutinees.iter().copied(),
+            ),
+        };
+
+        let ident = &variant.ident;
+        quote! {
+            #ident { ref mut #fields_ident } => #body
+        }
+    });
+
+    let rejection_set_type = quote! {
+         ( #(#rejection_set_types,)* )
+    };
 
     Ok(quote! {
         enum #state_ident <#lifetime> {
             // In the generic state, we haven't selected a specific variant yet
             #superposition_ident {
-                fields: ( #(#flag_types,)* ),
-                rejection_set: ( #(#rejection_set_types,)* ),
+                #fields_ident: ( #(#flag_types,)* ),
+                rejection_set: #rejection_set_type,
                 phantom: ::core::marker::PhantomData<& #lifetime ()>,
             },
 
             #(#state_variants,)*
         }
 
+        impl #state_ident<'_> {
+            fn total_rejection(set: &#rejection_set_type) -> bool {
+                todo!()
+            }
+        }
+
         impl ::core::default::Default for #state_ident <'_> {
             fn default() -> Self {
                 Self :: #superposition_ident {
-                    all_flags: ( #(#flag_inits,)* ),
+                    #fields_ident: ( #(#flag_inits,)* ),
                     rejection_set: ( #(#rejection_set_inits,)* ),
                     phantom: ::core::marker::PhantomData,
                 }
+            }
+        }
+
+        impl <#lifetime> #state_ident < #lifetime {
+            fn handle_long_argument_during_superposition<A, EA, E>(
+                &mut self,
+                #flag: & #lifetime ::debate_parser::Arg,
+                #argument: A,
+            ) -> ::core::result::Result<(), E>
+            where
+                E: ::debate::state::Error<#lifetime, EA>
+            {
+
             }
         }
 
@@ -487,10 +569,10 @@ pub fn derive_args_enum_flag_set(
                 E: ::debate::state::Error<#lifetime, ()>
             {
                 match *self {
-                    Self :: #superposition_ident {ref mut #fields_ident, ref mut rejection_set } => {
+                    Self :: #superposition_ident {ref mut #fields_ident, ref mut rejection_set, .. } => {
 
                     }
-                    #(#add_long_arms,)*
+                    #(#add_long_arg_arms,)*
                 }
             }
 
@@ -503,10 +585,11 @@ pub fn derive_args_enum_flag_set(
                 A: ::debate::parameter::ArgAccess<#lifetime>,
                 E: ::debate::state::Error<#lifetime, A>
             {
-                  match *self {
-                    Self :: #superposition_ident {ref mut #fields_ident, ref mut rejection_set } => {
+                match *self {
+                    Self :: #superposition_ident {ref mut #fields_ident, ref mut rejection_set, .. } => {
 
                     }
+                    #(#add_long_arms,)*
                 }
             }
 
@@ -519,10 +602,11 @@ pub fn derive_args_enum_flag_set(
                 A: ::debate::parameter::ArgAccess<#lifetime>,
                 E: ::debate::state::Error<#lifetime, A>
             {
-                  match *self {
-                    Self :: #superposition_ident {ref mut #fields_ident, ref mut rejection_set } => {
+                match *self {
+                    Self :: #superposition_ident {ref mut #fields_ident, ref mut rejection_set, .. } => {
 
                     }
+                    #(#add_short_arms,)*
                 }
             }
         }

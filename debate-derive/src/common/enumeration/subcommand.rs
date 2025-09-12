@@ -3,7 +3,7 @@ use heck::ToKebabCase as _;
 use itertools::Itertools as _;
 use syn::{Fields, Ident, Type, Variant, spanned::Spanned as _};
 
-use crate::common::{Description, IdentString, ParsedFieldInfo, compute_docs};
+use crate::common::{Description, IdentString, ParsedFieldInfo, compute_docs, error_pair};
 
 use super::create_non_colliding_ident;
 
@@ -84,14 +84,12 @@ impl<'a> ParsedSubcommandInfo<'a> {
 
             if let Some(()) = attr.fallback {
                 if let Some(fallback) = fallback {
-                    let mut err = syn::Error::new(
+                    return Err(error_pair(
                         variant.span(),
                         "can't have more than one fallback variant",
-                    );
-
-                    err.combine(syn::Error::new(fallback.span(), "previous fallback here"));
-
-                    return Err(err);
+                        fallback.span(),
+                        "previous fallback here",
+                    ));
                 }
 
                 if !matches!(variant.fields, Fields::Unit) {

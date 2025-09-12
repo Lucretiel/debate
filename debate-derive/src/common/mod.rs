@@ -1,7 +1,7 @@
 pub mod enumeration;
 pub mod value;
 
-use std::{borrow::Cow, sync::OnceLock};
+use std::{borrow::Cow, fmt::Display, sync::OnceLock};
 
 use darling::{
     FromAttributes as _,
@@ -140,26 +140,6 @@ impl<'a> FlagTags<&'a str, char> {
     }
 }
 
-impl<'a> FlagTags<SpannedValue<&'a str>, SpannedValue<char>> {
-    #[inline]
-    #[must_use]
-    pub fn long(&self) -> Option<SpannedValue<&str>> {
-        match *self {
-            FlagTags::Long(long) | FlagTags::LongShort { long, .. } => Some(long),
-            FlagTags::Short(_) => None,
-        }
-    }
-
-    #[inline]
-    #[must_use]
-    pub fn short(&self) -> Option<SpannedValue<char>> {
-        match *self {
-            FlagTags::Short(short) | FlagTags::LongShort { short, .. } => Some(short),
-            FlagTags::Long(_) => None,
-        }
-    }
-}
-
 impl FlagTags<SpannedValue<String>, SpannedValue<char>> {
     #[inline]
     #[must_use]
@@ -178,22 +158,6 @@ impl FlagTags<SpannedValue<String>, SpannedValue<char>> {
         match *self {
             FlagTags::Short(short) | FlagTags::LongShort { short, .. } => Some(short),
             FlagTags::Long(_) => None,
-        }
-    }
-
-    /// Borrowed form of these tags, preserving the spans
-    #[inline]
-    #[must_use]
-    pub fn borrowed(&self) -> FlagTags<SpannedValue<&str>, SpannedValue<char>> {
-        match *self {
-            FlagTags::Long(ref long) => {
-                FlagTags::Long(SpannedValue::new(long.as_str(), long.span()))
-            }
-            FlagTags::Short(short) => FlagTags::Short(short),
-            FlagTags::LongShort { ref long, short } => FlagTags::LongShort {
-                long: SpannedValue::new(long.as_str(), long.span()),
-                short,
-            },
         }
     }
 
@@ -679,4 +643,15 @@ impl RawParsedTypeAttr {
 pub struct HelpFlag<'a> {
     pub tags: FlagTags<&'a str, char>,
     pub span: Span,
+}
+
+pub fn error_pair(
+    origin1: Span,
+    message1: impl Display,
+    origin2: Span,
+    message2: impl Display,
+) -> syn::Error {
+    let mut error = syn::Error::new(origin1, message1);
+    error.combine(syn::Error::new(origin2, message2));
+    error
 }

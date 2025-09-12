@@ -11,7 +11,7 @@ use quote::{format_ident, quote};
 use syn::Lifetime;
 use syn::{Attribute, Field, Ident, Token, punctuated::Punctuated};
 
-use crate::common::{ParsedFieldInfo, RawParsedTypeAttr};
+use crate::common::{ParsedFieldInfo, RawParsedTypeAttr, error_pair};
 use crate::from_args::common::{
     complete_long_arg_body, complete_long_body, complete_short_body, final_field_initializers,
     get_subcommand_field_visitor_calls, struct_state_block_from_fields,
@@ -26,16 +26,12 @@ fn detect_collision<T: Hash + Eq + Copy, M: Display>(
 ) -> syn::Result<()> {
     match new_tag {
         Some(tag) => match known_tags.entry(*tag) {
-            Entry::Occupied(entry) => {
-                let mut err1 = syn::Error::new(
-                    tag.span(),
-                    lazy_format!("duplicate option {tag}", tag = message(*tag)),
-                );
-                let err2 = syn::Error::new(*entry.get(), "original use here");
-
-                err1.combine(err2);
-                Err(err1)
-            }
+            Entry::Occupied(entry) => Err(error_pair(
+                tag.span(),
+                lazy_format!("duplicate option {tag}", tag = message(*tag)),
+                *entry.get(),
+                "original use here",
+            )),
             Entry::Vacant(entry) => {
                 entry.insert(tag.span());
                 Ok(())

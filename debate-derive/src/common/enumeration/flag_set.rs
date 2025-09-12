@@ -11,7 +11,7 @@ use syn::{Attribute, Expr, Ident, Type, Variant, spanned::Spanned};
 
 use crate::common::{
     Description, FieldDefault, FlagTags, IdentString, compute_docs, compute_placeholder,
-    compute_tags,
+    compute_tags, error_pair,
 };
 
 use super::create_non_colliding_ident;
@@ -27,18 +27,92 @@ struct RawParsedFlagSetFlagAttr {
     overridable: Option<SpannedValue<()>>,
 }
 
-pub struct FlagSetFlagInfo<Type> {
+#[derive(Clone, Copy)]
+pub enum Family<Info> {
+    Solitary(Info),
+    Sibling,
+}
+
+impl<Info> Family<Info> {
+    pub fn merge(&mut self, other: Family<()>, info: Info) {
+        if matches!(other, Solitary(())) {
+            *self = Solitary(info)
+        }
+    }
+}
+
+use Family::*;
+
+pub struct FlagSetFlagInfo<Info> {
     pub docs: Description,
     pub placeholder: SpannedValue<String>,
-    pub ty: Type,
+    pub info: Info,
     pub default: Option<FieldDefault>,
     pub tags: FlagTags<SpannedValue<String>, SpannedValue<char>>,
     pub overridable: Option<SpannedValue<()>>,
 }
 
+trait FlagSetFlagExtra<'a> {
+    fn as_flag_set_type(&self) -> FlagSetType<'a>;
+    fn field(&self) -> Option<&IdentString<'a>>;
+}
+
+pub struct FlagFieldInfo<'a> {
+    pub ty: &'a Type,
+    pub ident: IdentString<'a>,
+}
+
+impl<'a> FlagSetFlagExtra<'a> for FlagFieldInfo<'a> {
+    fn as_flag_set_type(&self) -> FlagSetType<'a> {
+        FlagSetType::Typed(self.ty)
+    }
+
+    fn field(&self) -> Option<&IdentString<'a>> {
+        Some(&self.ident)
+    }
+}
+
+pub enum PlainFlagInfo<'a> {
+    Unit,
+    Newtype(&'a Type),
+    Struct(FlagFieldInfo<'a>),
+}
+
+impl<'a> PlainFlagInfo<'a> {
+    pub fn ty(&self) -> FlagSetType<'a> {
+        match *self {
+            PlainFlagInfo::Unit => FlagSetType::Unit,
+            PlainFlagInfo::Newtype(ty) => FlagSetType::Typed(ty),
+            PlainFlagInfo::Struct(ref info) => FlagSetType::Typed(info.ty),
+        }
+    }
+}
+
+impl<'a> FlagSetFlagExtra<'a> for PlainFlagInfo<'a> {
+    fn as_flag_set_type(&self) -> FlagSetType<'a> {
+        self.ty()
+    }
+
+    fn field(&self) -> Option<&IdentString<'a>> {
+        match *self {
+            Self::Unit => None,
+            Self::Newtype(_) => None,
+            Self::Struct(ref info) => Some(&info.ident),
+        }
+    }
+}
+
+impl<'a> From<FlagFieldInfo<'a>> for PlainFlagInfo<'a> {
+    fn from(info: FlagFieldInfo<'a>) -> Self {
+        Self::Struct(info)
+    }
+}
+
 pub enum VariantMode<'a> {
-    Plain(FlagSetFlagInfo<FlagSetType<'a>>),
-    Struct(Vec<(IdentString<'a>, FlagSetFlagInfo<&'a Type>)>),
+    /// A plain variant is a unit variant, a newtype variant, OR a struct
+    /// variant with exactly one field
+    Plain(FlagSetFlagInfo<PlainFlagInfo<'a>>),
+    Struct(Vec<FlagSetFlagInfo<FlagFieldInfo<'a>>>),
 }
 
 pub struct FlagSetVariant<'a> {
@@ -50,12 +124,6 @@ pub struct FlagSetVariant<'a> {
 pub enum FlagSetType<'a> {
     Unit,
     Typed(&'a Type),
-}
-
-impl<'a> From<&'a Type> for FlagSetType<'a> {
-    fn from(ty: &'a Type) -> Self {
-        Self::Typed(ty)
-    }
 }
 
 impl ToTokens for FlagSetType<'_> {
@@ -98,38 +166,35 @@ fn compute_flag_set_tags(
     })
 }
 
-fn create_flag<'a, Type>(
-    auto_long: Option<&Span>,
-    auto_short: Option<&Span>,
+// This should be a function, but there are tricky borrow issues that are
+// theoretically resolvable with excessive traits but I can't be bothered
+macro_rules! create_flag {
+    (
+        $auto_long:ident,
+        $auto_short:ident,
 
-    ident: &IdentString<'a>,
-    ty: Type,
-    attrs: &'a [Attribute],
-) -> syn::Result<FlagSetFlagInfo<Type>> {
-    let attr = RawParsedFlagSetFlagAttr::from_attributes(attrs)?;
+        source: $source:expr,
+        info: $info:expr,
+        attrs: $attrs:expr,
+    ) => {
+        RawParsedFlagSetFlagAttr::from_attributes($attrs).and_then(|attr| {
+            Ok(FlagSetFlagInfo {
+                docs: compute_docs($attrs)?,
+                placeholder: compute_placeholder(attr.placeholder, $source)?,
 
-    Ok(FlagSetFlagInfo {
-        docs: compute_docs(attrs)?,
-        placeholder: compute_placeholder(attr.placeholder, ident)?,
-        ty,
-        default: FieldDefault::new(attr.default),
-        tags: compute_flag_set_tags(auto_long, auto_short, attr.long, attr.short, ident)?,
-        overridable: attr.overridable,
-    })
-}
-
-fn create_whole_flag_from_variant<'a>(
-    auto_long: Option<&Span>,
-    auto_short: Option<&Span>,
-
-    ident: IdentString<'a>,
-    ty: FlagSetType<'a>,
-    attrs: &'a [Attribute],
-) -> syn::Result<FlagSetVariant<'a>> {
-    Ok(FlagSetVariant {
-        mode: VariantMode::Plain(create_flag(auto_long, auto_short, &ident, ty, attrs)?),
-        ident,
-    })
+                default: FieldDefault::new(attr.default),
+                tags: compute_flag_set_tags(
+                    $auto_long,
+                    $auto_short,
+                    attr.long,
+                    attr.short,
+                    $source,
+                )?,
+                overridable: attr.overridable,
+                info: $info,
+            })
+        })
+    };
 }
 
 impl<'a> ParsedFlagSetInfo<'a> {
@@ -144,58 +209,80 @@ impl<'a> ParsedFlagSetInfo<'a> {
                 let variant_ident = IdentString::new(&variant.ident);
 
                 let mode = match variant.fields {
-                    syn::Fields::Unit => create_flag(
+                    syn::Fields::Unit => create_flag!(
                         auto_long,
                         auto_short,
-                        &variant_ident,
-                        FlagSetType::Unit,
-                        &variant.attrs,
+                        source: &variant_ident,
+                        info: PlainFlagInfo::Unit,
+                        attrs: &variant.attrs,
                     )
                     .map(VariantMode::Plain),
 
-                    syn::Fields::Unnamed(ref fields) => create_flag(
+                    syn::Fields::Unnamed(ref fields) => create_flag!(
                         auto_long,
                         auto_short,
-                        &variant_ident,
-                        fields
+                        source: &variant_ident,
+                        info: fields
                             .unnamed
                             .iter()
                             .exactly_one()
                             .map(|field| &field.ty)
-                            .map(FlagSetType::Typed)
+                            .map(PlainFlagInfo::Newtype)
                             .map_err(|_| {
                                 syn::Error::new(
                                     fields.span(),
                                     "must have exactly one field (the flag argument)",
                                 )
                             })?,
-                        &variant.attrs,
+                        attrs: &variant.attrs,
                     )
                     .map(VariantMode::Plain),
 
-                    syn::Fields::Named(ref fields) => fields
+                    syn::Fields::Named(ref fields) => match fields
                         .named
                         .iter()
+                        // Pre-compute the IdentString for each field
                         .map(|field| {
-                            let field_ident = field
-                                .ident
-                                .as_ref()
-                                .map(IdentString::new)
-                                .expect("all fields in a struct variant have names");
-
-                            // TODO: collision detection for flags within the
-                            // same struct.
-                            create_flag(
-                                auto_long,
-                                auto_short,
-                                &field_ident,
-                                &field.ty,
-                                &field.attrs,
+                            (
+                                field
+                                    .ident
+                                    .as_ref()
+                                    .map(IdentString::new)
+                                    .expect("all fields in a struct variant have names"),
+                                field,
                             )
-                            .map(|flag| (field_ident, flag))
                         })
-                        .try_collect()
-                        .map(VariantMode::Struct),
+                        .exactly_one()
+                    {
+                        Ok((ident, field)) => create_flag!(
+                            auto_long,
+                            auto_short,
+                            source: &ident,
+                            info: PlainFlagInfo::Struct(FlagFieldInfo {
+                                ty: &field.ty, ident,
+                            }),
+                            attrs: &field.attrs,
+                        )
+                        .map(VariantMode::Plain),
+
+                        Err(fields) => fields
+                            .map(|(ident, field)| {
+                                create_flag!(
+                                    auto_long,
+                                    auto_short,
+                                    source: &ident,
+                                    info: FlagFieldInfo {
+                                        ident, ty: &field.ty,
+                                    },
+                                    attrs: &field.attrs,
+                                )
+
+                                // TODO: collision detection for flags within the
+                                // same struct.
+                            })
+                            .try_collect()
+                            .map(VariantMode::Struct),
+                    },
                 };
 
                 mode.map(|mode| FlagSetVariant {
@@ -250,16 +337,59 @@ pub struct FlagSetFlag<'a> {
     /// If true, subsequent instances of this flag override earlier ones.
     ///  this setting must be identical for all instances.
     pub overridable: bool,
+
+    /// Record if there are *any* solitary instances of this flag. This is
+    /// used to prevent more than one solitary instance of the flag being
+    /// created. This includes the span of the variant that produced the
+    /// solitary version of this flag, for error reporting purposes.
+    pub family: Family<&'a IdentString<'a>>,
 }
 
-/// Compare a pair of tags. In the past this returned useful spans of where
-/// the comparison failures were, but for now it's a simple boolean op.
-fn compare_tags<T: Eq>(left: Option<SpannedValue<T>>, right: Option<T>) -> bool {
-    match (left, right) {
-        (None, None) => true,
-        (Some(_), None) => false,
-        (None, Some(_)) => false,
-        (Some(left), Some(right)) => *left == right,
+enum TagComparison {
+    Match,
+    Different,
+    LongMismatch,
+    ShortMismatch,
+}
+
+fn compare_tags(left: &FlagTags<&str, char>, right: &FlagTags<&str, char>) -> TagComparison {
+    use FlagTags::*;
+
+    match (*left, *right) {
+        // Tags are identical
+        (Long(left), Long(right)) if left == right => TagComparison::Match,
+        (Short(left), Short(right)) if left == right => TagComparison::Match,
+        (
+            LongShort {
+                long: l1,
+                short: s1,
+            },
+            LongShort {
+                long: l2,
+                short: s2,
+            },
+        ) if l1 == l2 && s1 == s2 => TagComparison::Match,
+
+        // Partial mismatch is an error (long matches, short differs)
+        (Long(left), LongShort { long: right, .. })
+        | (LongShort { long: left, .. }, Long(right))
+        | (LongShort { long: left, .. }, LongShort { long: right, .. })
+            if left == right =>
+        {
+            TagComparison::ShortMismatch
+        }
+
+        // Partial mismatch is an error (short matches, long differs)
+        (Short(left), LongShort { short: right, .. })
+        | (LongShort { short: left, .. }, Short(right))
+        | (LongShort { short: left, .. }, LongShort { short: right, .. })
+            if left == right =>
+        {
+            TagComparison::LongMismatch
+        }
+
+        // The tags are entirely different
+        _ => TagComparison::Different,
     }
 }
 
@@ -288,70 +418,63 @@ fn try_find<I: IntoIterator, E>(
 /// one variant of a flag set, but if they do, they must have identical tags
 /// (both short and long), as well as a handful other other things that are
 /// shared.
-fn add_or_update_flag<'a, Type>(
+fn add_or_update_flag<'a, Info>(
     set: &mut Vec<FlagSetFlag<'a>>,
-    flag: &'a FlagSetFlagInfo<Type>,
-    field: Option<&'a IdentString<'a>>,
+    flag: &'a FlagSetFlagInfo<Info>,
+    family: Family<()>,
     variant: &'a IdentString<'a>,
     index: Option<usize>,
     all_variants: &HashMap<&'a str, usize>,
 ) -> syn::Result<()>
 where
-    Type: Copy + Into<FlagSetType<'a>>,
+    Info: FlagSetFlagExtra<'a>,
 {
-    let origin = field.unwrap_or(variant);
+    let origin = flag.info.field().unwrap_or(variant);
+    let tags = flag.tags.simplify();
 
-    let long = flag.tags.long();
-    let short = flag.tags.short();
+    let mismatch_error = |existing_span, message| {
+        error_pair(
+            origin.span(),
+            "multiple instances of the same tag must be (mostly) identical",
+            existing_span,
+            message,
+        )
+    };
 
     let existing_flag = try_find(set.iter_mut(), |existing| {
-        let existing_long = existing.tags.long();
-        let existing_short = existing.tags.short();
+        let mismatch_error = |message| mismatch_error(existing.origin.span(), message);
 
-        // TODO: there's a major bug here, where if a pair of tags each have
-        // an ABSENT short, it should be permitted for them to have different
-        // longs
-        match (
-            compare_tags(long, existing_long),
-            compare_tags(short, existing_short),
-        ) {
-            (false, true) => Err("this instance has a different --long"),
-            (true, false) => Err("this instance has a different -s short"),
+        match compare_tags(&tags, &existing.tags) {
+            TagComparison::LongMismatch => {
+                Err(mismatch_error("this instance has a different --long"))
+            }
+            TagComparison::ShortMismatch => {
+                Err(mismatch_error("this instance has a different -s short"))
+            }
 
-            // Total mismatch, these aren't even the same flag
-            (false, false) => Ok(false),
-
-            // Found a match. Other parts of it need to be checked for
-            // consistency.
-            (true, true) => {
-                // We check its placeholder and its override setting.
-                // The docs will be merged (longer docs preferred).
-                // We don't bother checking the type because that'll show up
-                // separately when the rust compiler itself attemtps to compile
-                // the generated code.
-                // TODO: find a way to use the `checks!` macro here. It seems
-                // impossible because you can't use `#[macro_export]` in a
-                // proc macro crate, even to reuse a macro internally.
-                if flag.placeholder.as_str() != existing.placeholder {
+            TagComparison::Different => Ok(false),
+            TagComparison::Match => {
+                if let (Solitary(()), Solitary(existing_variant)) = (family, existing.family) {
+                    Err(error_pair(
+                        variant.span(),
+                        "this variant will never be selected (another variant has the same flags)",
+                        existing_variant.span(),
+                        "this variant's flag is identical",
+                    ))
+                } else if flag.placeholder.as_str() != existing.placeholder {
                     // Nit: placeholders are just a docs convention. In theory
                     // we should be able to detect and use a custom placeholder
                     // and reject only distinctions between custom placeholders.
-                    Err("this instance has a different placeholder")
+                    Err(mismatch_error("this instance has a different placeholder"))
                 } else if flag.overridable.is_some() != existing.overridable {
-                    Err("this instance has a different `override` setting")
+                    Err(mismatch_error(
+                        "this instance has a different `override` setting",
+                    ))
                 } else {
                     Ok(true)
                 }
             }
         }
-        .map_err(|message| {
-            let mut error = syn::Error::new(
-                origin.span(),
-                "multiple instances of the same tag must be (mostly) identical",
-            );
-            error.combine(syn::Error::new(existing.origin.span(), message));
-            error
-        })
     })?;
 
     let existing_flag = match existing_flag {
@@ -363,9 +486,10 @@ where
                 excluded: all_variants.clone(),
                 docs: const { &Description::empty() },
                 placeholder: &flag.placeholder,
-                ty: flag.ty.into(),
-                tags: flag.tags.simplify(),
+                ty: flag.info.as_flag_set_type(),
+                tags,
                 overridable: flag.overridable.is_some(),
+                family: Family::Sibling,
             });
 
             set.last_mut().expect("we just pushed an item into the set")
@@ -374,6 +498,7 @@ where
 
     existing_flag.variants.push((variant, index));
     existing_flag.excluded.remove(variant.as_str());
+    existing_flag.family.merge(family, variant);
 
     if existing_flag.docs.full.len() > flag.docs.full.len() {
         existing_flag.docs = &flag.docs;
@@ -399,23 +524,25 @@ pub fn compute_grouped_flags<'a>(
         .collect();
 
     variants.iter().try_for_each(|variant| match variant.mode {
-        VariantMode::Plain(ref flag) => {
-            add_or_update_flag(&mut flags, &flag, None, &variant.ident, None, &all_variants)
-        }
+        VariantMode::Plain(ref flag) => add_or_update_flag(
+            &mut flags,
+            &flag,
+            Family::Solitary(()),
+            &variant.ident,
+            None,
+            &all_variants,
+        ),
         VariantMode::Struct(ref fields) => {
-            fields
-                .iter()
-                .enumerate()
-                .try_for_each(|(index, (ident, flag))| {
-                    add_or_update_flag(
-                        &mut flags,
-                        flag,
-                        Some(ident),
-                        &variant.ident,
-                        Some(index),
-                        &all_variants,
-                    )
-                })
+            fields.iter().enumerate().try_for_each(|(index, flag)| {
+                add_or_update_flag(
+                    &mut flags,
+                    flag,
+                    Family::Sibling,
+                    &variant.ident,
+                    Some(index),
+                    &all_variants,
+                )
+            })
         }
     })?;
 

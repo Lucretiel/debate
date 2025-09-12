@@ -1,5 +1,6 @@
 use core::{
     fmt,
+    iter::FusedIterator,
     ops::{Index, IndexMut},
     str::from_utf8,
 };
@@ -305,18 +306,34 @@ impl<I: Iterator> Iterator for NonEmptyIter<I> {
             f,
         )
     }
+}
 
-    fn try_fold<B, F, R>(&mut self, init: B, mut f: F) -> R
+impl<I: DoubleEndedIterator> DoubleEndedIterator for NonEmptyIter<I> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        match self.rest.next_back() {
+            Some(item) => Some(item),
+            None => self.first.take(),
+        }
+    }
+
+    fn rfold<B, F>(self, init: B, mut f: F) -> B
     where
         Self: Sized,
-        F: FnMut(B, Self::Item) -> R,
-        R: core::ops::Try<Output = B>,
+        F: FnMut(B, Self::Item) -> B,
     {
-        let accum = match self.first.take() {
-            Some(item) => f(init, item)?,
-            None => init,
-        };
+        let accum = self.rest.rfold(init, &mut f);
 
-        self.rest.try_fold(accum, f)
+        match self.first {
+            None => accum,
+            Some(first) => f(accum, first),
+        }
+    }
+}
+
+impl<I: FusedIterator> FusedIterator for NonEmptyIter<I> {}
+
+impl<I: ExactSizeIterator> ExactSizeIterator for NonEmptyIter<I> {
+    fn len(&self) -> usize {
+        self.rest.len() + (self.first.is_some() as usize)
     }
 }

@@ -1,7 +1,7 @@
 pub mod flag_set;
 pub mod subcommand;
 
-use std::borrow::Cow;
+use std::{borrow::Cow, fmt::Display};
 
 use darling::{FromAttributes, util::SpannedValue};
 use proc_macro2::Span;
