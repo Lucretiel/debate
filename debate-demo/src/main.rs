@@ -140,9 +140,6 @@ enum FlagChoice {
 
     OutFile(PathBuf),
 
-    Loud {
-        loud: (),
-    },
     Louder {
         loud: (),
         shouter: String,

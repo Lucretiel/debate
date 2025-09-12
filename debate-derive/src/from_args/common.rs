@@ -167,7 +167,7 @@ impl<'a> FieldNature<'a> {
 /// overridable field and that we should always use `initial_method`
 
 #[must_use]
-fn apply_arg_to_field(
+pub fn apply_arg_to_field(
     fields_ident: &Ident,
     argument_ident: &Ident,
     field_index: &Index,

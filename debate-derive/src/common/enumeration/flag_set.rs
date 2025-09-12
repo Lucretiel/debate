@@ -54,7 +54,8 @@ pub struct FlagSetFlagInfo<Info> {
 
 trait FlagSetFlagExtra<'a> {
     fn as_flag_set_type(&self) -> FlagSetType<'a>;
-    fn field(&self) -> Option<&IdentString<'a>>;
+    fn field(&'a self) -> Option<&IdentString<'a>>;
+    fn site(&self) -> FlagSetFlagSite<'_>;
 }
 
 pub struct FlagFieldInfo<'a> {
@@ -69,6 +70,10 @@ impl<'a> FlagSetFlagExtra<'a> for FlagFieldInfo<'a> {
 
     fn field(&self) -> Option<&IdentString<'a>> {
         Some(&self.ident)
+    }
+
+    fn site(&self) -> FlagSetFlagSite {
+        FlagSetFlagSite::Field(&self.ident)
     }
 }
 
@@ -98,6 +103,14 @@ impl<'a> FlagSetFlagExtra<'a> for PlainFlagInfo<'a> {
             Self::Unit => None,
             Self::Newtype(_) => None,
             Self::Struct(ref info) => Some(&info.ident),
+        }
+    }
+
+    fn site(&self) -> FlagSetFlagSite<'_> {
+        match *self {
+            Self::Unit => FlagSetFlagSite::Unit,
+            Self::Newtype(_) => FlagSetFlagSite::Newtype,
+            Self::Struct(ref field) => FlagSetFlagSite::Field(&field.ident),
         }
     }
 }
@@ -304,14 +317,41 @@ impl<'a> ParsedFlagSetInfo<'a> {
     }
 }
 
+pub enum FlagSetFlagSite<'a> {
+    Unit,
+    Newtype,
+    Field(&'a IdentString<'a>),
+}
+
+impl<'a> FlagSetFlagSite<'a> {
+    pub fn field(&self) -> Option<&'a IdentString<'a>> {
+        match self {
+            Self::Field(ident) => Some(ident),
+            Self::Unit | Self::Newtype => None,
+        }
+    }
+}
+
+pub struct FlagSetFlagStateSite {
+    pub index: usize,
+    pub len: usize,
+}
+
+pub struct FlagSetFlagVariant<'a> {
+    pub variant: &'a IdentString<'a>,
+    pub state: FlagSetFlagStateSite,
+    pub site: FlagSetFlagSite<'a>,
+}
+
 pub struct FlagSetFlag<'a> {
     /// The first place this flag appears; either the variant name or the field
     /// name
     pub origin: &'a IdentString<'a>,
 
     /// All of the variants where this flag appears, along with the index
-    /// of its location in that variant (if relevant)
-    pub variants: Vec<(&'a IdentString<'a>, Option<usize>)>,
+    /// of its location in that variant's state, and (if relevant) the name
+    /// of the
+    pub variants: Vec<FlagSetFlagVariant<'a>>,
 
     /// Precomputed set of all the variants where this flag DOESN'T appear,
     /// along with their indices.
@@ -423,7 +463,7 @@ fn add_or_update_flag<'a, Info>(
     flag: &'a FlagSetFlagInfo<Info>,
     family: Family<()>,
     variant: &'a IdentString<'a>,
-    index: Option<usize>,
+    site: FlagSetFlagStateSite,
     all_variants: &HashMap<&'a str, usize>,
 ) -> syn::Result<()>
 where
@@ -496,7 +536,11 @@ where
         }
     };
 
-    existing_flag.variants.push((variant, index));
+    existing_flag.variants.push(FlagSetFlagVariant {
+        variant,
+        state: site,
+        site: flag.info.site(),
+    });
     existing_flag.excluded.remove(variant.as_str());
     existing_flag.family.merge(family, variant);
 
@@ -529,7 +573,7 @@ pub fn compute_grouped_flags<'a>(
             &flag,
             Family::Solitary(()),
             &variant.ident,
-            None,
+            FlagSetFlagStateSite { index: 0, len: 1 },
             &all_variants,
         ),
         VariantMode::Struct(ref fields) => {
@@ -539,7 +583,10 @@ pub fn compute_grouped_flags<'a>(
                     flag,
                     Family::Sibling,
                     &variant.ident,
-                    Some(index),
+                    FlagSetFlagStateSite {
+                        index,
+                        len: fields.len(),
+                    },
                     &all_variants,
                 )
             })

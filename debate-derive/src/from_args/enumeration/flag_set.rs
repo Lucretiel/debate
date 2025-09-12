@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, f32::consts::E};
 
 use itertools::Itertools;
 use proc_macro2::TokenStream as TokenStream2;
@@ -9,15 +9,26 @@ use crate::{
     common::{
         FlagTags, IdentString,
         enumeration::flag_set::{
-            FlagFieldInfo, FlagSetFlag, FlagSetFlagInfo, FlagSetVariant, ParsedFlagSetInfo,
-            PlainFlagInfo, VariantMode, compute_grouped_flags,
+            FlagFieldInfo, FlagSetFlag, FlagSetFlagInfo, FlagSetFlagSite, FlagSetFlagStateSite,
+            FlagSetVariant, ParsedFlagSetInfo, PlainFlagInfo, VariantMode, compute_grouped_flags,
         },
     },
-    from_args::common::{FieldNature, FlagField, MakeScrutinee, complete_flag_body, indexed},
+    from_args::common::{
+        FieldNature, FlagField, MakeScrutinee, apply_arg_to_field, complete_flag_body, indexed,
+    },
     generics::AngleBracedLifetime,
 };
 
 use super::ValueEnumAttr;
+
+fn state_init_expression(site: &FlagSetFlagStateSite) -> TokenStream2 {
+    let inits = (0..site.len).map(|i| match i == site.index {
+        true => quote! { ::core::option::Option::Some(value) },
+        false => quote! { ::core::option::Option::None },
+    });
+
+    quote! { ( #(#inits,)* ) }
+}
 
 // There doesn't exist a rejection set or superposition field states. Just
 // transition immediately.
@@ -25,18 +36,32 @@ fn handle_simple_long_superposition_argument(
     fields_ident: &Ident,
     flags: &[FlagSetFlag<'_>],
 ) -> TokenStream2 {
-    let arms = indexed(flags)
-        .filter_map(|(index, flag)| flag.tags.long().map(move |long| (long, index, flag)))
-        .map(|(long, index, flag): (&str, Index, &FlagSetFlag<'_>)| {
+    let arms = flags
+        .iter()
+        .filter_map(|flag| flag.tags.long().map(move |long| (long, flag)))
+        .map(|(long, flag)| {
             let scrutinee = long.make_scrutinee();
 
             // TODO: using `exactly_one` here is probably going to be the
             // secret to generalizing between this and regular superpositions.
             let destination = flag.variants.first().unwrap();
+            let variant = &destination.variant;
+            let name = destination.site.field().unwrap_or(variant).as_str();
+
+            let state_init = match destination.site {
+                FlagSetFlagSite::Unit | FlagSetFlagSite::Newtype => quote! { ( value, ) },
+                FlagSetFlagSite::Field(_) => state_init_expression(&destination.state),
+            };
 
             quote! {
-                #scrutinee => {
-
+                #scrutinee => match ::debate::parameter::Parameter::present(argument) {
+                    ::core::result::Result::Err(err) => ::core::result::Result::Err(
+                        ::debate::state::Error::parameter(#name, err)
+                    ),
+                    ::core::result::Result::Ok(value) => {
+                        *self = Self:: #variant { fields: #state_init, };
+                        ::core::result::Result::Ok(())
+                    }
                 }
             }
         });
@@ -48,9 +73,16 @@ fn handle_simple_long_superposition_argument(
     }
 }
 
-fn handle_long_superposition_argument(
+fn handle_long_superposition_argument<'a, Tag: MakeScrutinee>(
     fields_ident: &Ident,
-    flags: &[FlagSetFlag<'_>],
+    argument_ident: &Ident,
+    flag_expr: impl ToTokens,
+    flags: &[FlagSetFlag<'a>],
+    get_tag: impl Fn(FlagTags<&'a str, char>) -> Option<Tag>,
+    any_multi_flags: bool,
+    parameter_method: &Ident,
+    add_parameter_method: &Ident,
+    flatten_rebind_argument: impl ToTokens,
 ) -> TokenStream2 {
     // Step 1: check the rejection set for a conflict
     // Step 2: update the rejection set with all newly rejeced variants
@@ -69,34 +101,97 @@ fn handle_long_superposition_argument(
     // and use it.
 
     let arms = indexed(flags)
-        .filter_map(|(index, flag)| flag.tags.long().map(move |long| (long, index, flag)))
-        .map(|(long, index, flag): (&str, Index, &FlagSetFlag<'_>)| {
-            let scrutinee = long.make_scrutinee();
+        .filter_map(|(index, flag)| get_tag(flag.tags).map(move |long| (long, index, flag)))
+        .map(|(tag, index, flag): (Tag, Index, &FlagSetFlag<'_>)| {
+            let scrutinee = tag.make_scrutinee();
 
             let update_exclusions = flag
                 .excluded
                 .values()
+                .take_while(|_| any_multi_flags)
                 .map(|&i| Index::from(i))
                 .map(|index| quote! { rejection_set.#index = true; });
 
+            let (expr, transition, name) = if let [destination] = flag.variants.as_slice() {
+                let variant = &destination.variant;
+                let name = destination.site.field().unwrap_or(variant).as_str();
+
+                let state_init = match destination.site {
+                    FlagSetFlagSite::Unit | FlagSetFlagSite::Newtype => quote! { ( value, ) },
+                    FlagSetFlagSite::Field(_) => {
+                        let site: &FlagSetFlagStateSite = &destination.state;
+
+                        let inits = (0..site.len).map(|i| {
+                            if i == site.index {
+                                quote! { ::core::option::Option::Some(value) }
+                            } else if any_multi_flags {
+                                // TODO: this is very wrong. We need to get
+                                // the index a different way. We're trying
+                                // to map the relevant fields from the global
+                                // state array to the local state array.
+                                let index = Index::from(i);
+                                quote! { fields.#index }
+                            } else {
+                                quote! { ::core::option::Option::None }
+                            }
+                        });
+
+                        quote! { ( #(#inits,)* ) }
+                    }
+                };
+
+                (
+                    quote! { ::debate::parameter::Parameter::#parameter_method(#argument_ident) },
+                    Some(quote! { *self = Self::#variant { #fields_ident: #state_init, }; }),
+                    name,
+                )
+            } else {
+                let expr = apply_arg_to_field(
+                    fields_ident,
+                    argument_ident,
+                    &index,
+                    &format_ident!("Parameter"),
+                    parameter_method,
+                    match flag.overridable {
+                        true => None,
+                        false => Some(add_parameter_method),
+                    },
+                    &FieldNature::Optional,
+                );
+
+                (expr, None, flag.origin.as_str())
+            };
+
             quote! {
                 #scrutinee => {
-                    #update_exclusions
+                    #(#update_exclusions)*
 
                     if Self::total_rejection(&rejection_set) {
                         todo!("conflict")
                     }
 
-                    // TODO: transition to a known state
-
-
+                    match (#expr) {
+                        ::core::result::Result::Ok(()) => {
+                            #transition
+                            ::core::result::Result::Ok(())
+                        }
+                        ::core::result::Result::Err(err) => ::core::result::Result::Err(
+                            ::debate::state::Error::parameter(#name, err)
+                        ),
+                    }
                 }
             }
         });
 
     quote! {
-        match flag.bytes() {
+        match (#flag_expr) {
+            #(#arms,)*
 
+            _ => ::core::result::Result::Err(
+                ::debate::state::Error::unrecognized(
+                    #flatten_rebind_argument
+                )
+            )
         }
     }
 }
@@ -275,13 +370,6 @@ pub fn derive_args_enum_flag_set(
         attr.short.map(|short| short.span()).as_ref(),
     )?;
     let parsed_flags = compute_grouped_flags(&parsed.variants)?;
-
-    let keyed_variants: HashMap<&str, &FlagSetVariant<'_>> = parsed
-        .variants
-        .iter()
-        .map(|variant| (variant.ident.as_str(), variant))
-        .collect();
-
     let superposition_ident = &parsed.superposition;
 
     /*
@@ -336,13 +424,9 @@ pub fn derive_args_enum_flag_set(
 
     let fields_ident = format_ident!("fields");
 
-    let parameter_ident = format_ident!("Parameter");
-    let positional_parameter_ident = format_ident!("PositionalParameter");
-
     let state_ident = format_ident!("__{name}State");
     let argument = format_ident!("argument");
     let flag = format_ident!("flag");
-    let visitor = format_ident!("visitor");
 
     let any_multi_flags = parsed_flags.iter().any(|flag| flag.variants.len() > 1);
 
@@ -427,8 +511,18 @@ pub fn derive_args_enum_flag_set(
         .filter_map(|flag| flag.tags.short())
         .collect_vec();
 
-    // TODO: deduplicate these. The trouble is figuring out how to abscract
-    // `complete_long_arg_body`, which has two generic instantiations.
+    let long_arg_superposition = handle_long_superposition_argument(
+        &fields_ident,
+        &argument,
+        quote! { flag.bytes() },
+        &parsed_flags,
+        |tags| tags.long(),
+        any_multi_flags,
+        &arg_ident,
+        &add_arg_ident,
+        quote! {()},
+    );
+
     let add_long_arg_arms = parsed.variants.iter().map(|variant| {
         let body = match variant.mode {
             VariantMode::Plain(ref field) => complete_long_arg_body(
@@ -533,19 +627,6 @@ pub fn derive_args_enum_flag_set(
             }
         }
 
-        impl <#lifetime> #state_ident < #lifetime {
-            fn handle_long_argument_during_superposition<A, EA, E>(
-                &mut self,
-                #flag: & #lifetime ::debate_parser::Arg,
-                #argument: A,
-            ) -> ::core::result::Result<(), E>
-            where
-                E: ::debate::state::Error<#lifetime, EA>
-            {
-
-            }
-        }
-
         impl<#lifetime> ::debate::state::State<#lifetime> for #state_ident <#lifetime> {
             // Flag sets never accept positionals
             fn add_positional<E>(
@@ -569,9 +650,7 @@ pub fn derive_args_enum_flag_set(
                 E: ::debate::state::Error<#lifetime, ()>
             {
                 match *self {
-                    Self :: #superposition_ident {ref mut #fields_ident, ref mut rejection_set, .. } => {
-
-                    }
+                    Self :: #superposition_ident {ref mut #fields_ident, ref mut rejection_set, .. } => #long_arg_superposition,
                     #(#add_long_arg_arms,)*
                 }
             }
