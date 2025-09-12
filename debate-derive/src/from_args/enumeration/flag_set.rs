@@ -105,6 +105,9 @@ fn handle_long_superposition_argument<'a, Tag: MakeScrutinee>(
         .map(|(tag, index, flag): (Tag, Index, &FlagSetFlag<'_>)| {
             let scrutinee = tag.make_scrutinee();
 
+            // TODO: we removed the idea of conditional transitions. This means
+            // we can remove all the states that aren't reachable by
+            // unconditional transitions.
             // TODO: if this is gonna be an unconditional transition, there's
             // no need to update the exclusions, we only need to make sure
             // the state we want to be is acceptable.
