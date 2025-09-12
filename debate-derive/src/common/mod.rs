@@ -22,7 +22,7 @@ macro_rules! regex {
 }
 
 /// A borrowed identifier that also has its string pre-computed for easy reuse.
-#[derive(Clone)]
+#[derive(Clone, Eq)]
 pub struct IdentString<'a> {
     raw: &'a Ident,
     string: String,
@@ -59,6 +59,30 @@ impl<'a> IdentString<'a> {
 impl ToTokens for IdentString<'_> {
     fn to_tokens(&self, tokens: &mut TokenStream2) {
         self.raw.to_tokens(tokens);
+    }
+}
+
+impl PartialEq<str> for IdentString<'_> {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+
+impl PartialEq<IdentString<'_>> for str {
+    fn eq(&self, other: &IdentString<'_>) -> bool {
+        self == other.as_str()
+    }
+}
+
+impl PartialEq<IdentString<'_>> for IdentString<'_> {
+    fn eq(&self, other: &IdentString<'_>) -> bool {
+        self.as_str() == other.as_str()
+    }
+}
+
+impl std::hash::Hash for IdentString<'_> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.as_str().hash(state);
     }
 }
 

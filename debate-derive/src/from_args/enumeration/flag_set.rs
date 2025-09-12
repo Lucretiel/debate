@@ -10,7 +10,8 @@ use crate::{
         FlagTags, IdentString,
         enumeration::flag_set::{
             FlagFieldInfo, FlagSetFlag, FlagSetFlagInfo, FlagSetFlagSite, FlagSetFlagStateSite,
-            FlagSetVariant, ParsedFlagSetInfo, PlainFlagInfo, VariantMode, compute_grouped_flags,
+            FlagSetVariant, FlagSetVariant, ParsedFlagSetInfo, PlainFlagInfo,
+            compute_grouped_flags,
         },
     },
     from_args::common::{
@@ -20,15 +21,6 @@ use crate::{
 };
 
 use super::ValueEnumAttr;
-
-fn state_init_expression(site: &FlagSetFlagStateSite) -> TokenStream2 {
-    let inits = (0..site.len).map(|i| match i == site.index {
-        true => quote! { ::core::option::Option::Some(value) },
-        false => quote! { ::core::option::Option::None },
-    });
-
-    quote! { ( #(#inits,)* ) }
-}
 
 fn variant_bit(i: usize) -> TokenStream2 {
     quote! { const { 1u64 << #i } }
@@ -324,25 +316,6 @@ where
     )
 }
 
-struct FlagSetVariantComputedExtras {
-    /// A reachable variant is one that has at least one flag that it shares
-    /// with no other variants. Only reachable variants have state variants.
-    reachable: bool,
-
-    /// For each field in this variant, this is the index in the GLOBAL flags
-    /// state list where that field appears
-    field_indices: Vec<usize>,
-}
-
-fn variant_is_reachable(variant: &FlagSetVariant<'_>, flags: &[FlagSetFlag<'_>]) -> bool {
-    flags.iter().any(|flag| {
-        flag.variants
-            .iter()
-            .exactly_one()
-            .is_ok_and(|candidate| candidate.ident.as_str() == variant.ident.as_str())
-    })
-}
-
 pub fn derive_args_enum_flag_set(
     name: &Ident,
     variants: &Punctuated<Variant, Token![,]>,
@@ -361,64 +334,25 @@ pub fn derive_args_enum_flag_set(
             "currently support a max of 64 variants of a flag set",
         ));
     }
-    let parsed_flags = compute_grouped_flags(&parsed.variants)?;
+    let (variant_sources, parsed_flags) = compute_grouped_flags(&parsed.variants)?;
     let superposition_ident = &parsed.superposition;
-    let variant_extras = parsed
-        .variants
-        .iter()
-        .map(|variant| {
-            (
-                FlagSetVariantComputedExtras {
-                    reachable: variant_is_reachable(variant, &parsed_flags),
-                },
-                variant,
-            )
-        })
-        .collect_vec();
 
-    /*
-    Let's talk algorithm.
-
-    enum Flags {
-        Flag,
-        Arg(arg),
-        Set3 {
-            bar: bool,
-            baz: bool,
-        }
-        Set {
-            foo: i32,
-            bar: bool,
-        }
-        Set2 {
-            foo: i32,
-            baz: bool,
-        }
-    }
-
-    The flags here are --flag, --arg, --foo, --bar, and --baz. Most of them
-    are unique (and, in fact, we expect a vast majority of flags using the
-    enum to be unique).
-
-    We require that each instance of a tag across the enum be identical.
-
-    Each time we receive a flag, we check if it's unique, and if so,
-    unconditionally switch our state to that flag.
-
-    Otherwise, we update the viability set. The viability set is initially that
-    all variants are viable, but each flag disables viability for each variant
-    it isn't a member of. The idea is that, because flags can be in default
-    states, it isn't sufficient to just try each one in sequence; we have to
-    actively track which set the user is opting into, and consider only those.
-
-    After we're done receiving new arguments, we'll attempt to construct the
-    final enum. We do this by attempting to construct each viable variant in
-    sequence, falling through to each next viable variant when there are
-    Missing Required Value errors.
-
-    If ALL of the flags are unique, then we won't even bother tracking the
-    viability set; it's a large array of bools and a cost we don't need to pay.
-    */
+    // Data model for the state:
+    // - Fields: tuple of all of the flags, in a normalized set. Each field is
+    //   identified by index. Each field is replaced in the tuple with a unit
+    //   if it only exists in a single variant.
+    // - Viability set: a set of bools (we use a bit-shifted u64) indicating
+    //   which variants are currently viable. At the beginning, all variants
+    //   are viable (1), but with each incoming flag, variants outside of those
+    //   flags might become non-viable (0). The viability set is replaced with
+    //   a unit only in the case that ALL fields are exclusive to a single
+    //   variants. We might make a fancy unit that supports bitwise ops and
+    //   integer comparisons to simplify codegen.
+    // - State variants: A state variant marks that a given variant has been
+    //   unconditionally selected but is still being parsed. Contains all of
+    //   the fields for that variant. A state variant doesn't exist if it
+    //   has no exclusive flags, because there's no mechansism for us to ever
+    //   switch over to it during parsing.
 
     // Reuse these everywhere
     let arg_ident = format_ident!("arg");
@@ -470,9 +404,9 @@ pub fn derive_args_enum_flag_set(
     // TODO: we ONLY can transition directly into states via flags that are
     // unique to that state. Any variant that has no such flags can be
     // omitted (or, more likely, for consistency)
-    let state_variants = variant_extras
+    let state_variants = variant_sources
         .iter()
-        .filter(|info| info.0.reachable)
+        .filter(|(_, variant)| variant.reachable)
         .map(|info| {
             let variant = info.1;
             let ident = variant.ident.raw();
@@ -481,7 +415,7 @@ pub fn derive_args_enum_flag_set(
                 // We don't use options for units and newtypes; there's only one
                 // possible flag that triggers these states, so it's guaranteed
                 // that its argument is real when we arrived to it.
-                VariantMode::Plain(ref flag) => {
+                FlagSetVariant::Plain(ref flag) => {
                     let ty = flag.info.ty();
 
                     // Don't forget that the `ty` for a unit variant is `()`,
@@ -490,7 +424,7 @@ pub fn derive_args_enum_flag_set(
                     quote! { #ident { #fields_ident: ( #ty, ), } }
                 }
 
-                VariantMode::Struct(ref fields) => {
+                FlagSetVariant::Struct(ref fields) => {
                     let field_types = fields.iter().map(|field| &field.info.ty);
 
                     quote! {
@@ -536,14 +470,14 @@ pub fn derive_args_enum_flag_set(
 
     let add_long_arg_arms = parsed.variants.iter().map(|variant| {
         let body = match variant.mode {
-            VariantMode::Plain(ref field) => complete_long_arg_body(
+            FlagSetVariant::Plain(ref field) => complete_long_arg_body(
                 &fields_ident,
                 &argument,
                 &flag,
                 &[(&variant.ident, field)],
                 all_long_scrutinees.iter().copied(),
             ),
-            VariantMode::Struct(ref fields) => complete_long_arg_body(
+            FlagSetVariant::Struct(ref fields) => complete_long_arg_body(
                 &fields_ident,
                 &argument,
                 &flag,
@@ -560,14 +494,14 @@ pub fn derive_args_enum_flag_set(
 
     let add_long_arms = parsed.variants.iter().map(|variant| {
         let body = match variant.mode {
-            VariantMode::Plain(ref field) => complete_long_body(
+            FlagSetVariant::Plain(ref field) => complete_long_body(
                 &fields_ident,
                 &argument,
                 &flag,
                 &[(&variant.ident, field)],
                 all_long_scrutinees.iter().copied(),
             ),
-            VariantMode::Struct(ref fields) => complete_long_body(
+            FlagSetVariant::Struct(ref fields) => complete_long_body(
                 &fields_ident,
                 &argument,
                 &flag,
@@ -584,14 +518,14 @@ pub fn derive_args_enum_flag_set(
 
     let add_short_arms = parsed.variants.iter().map(|variant| {
         let body = match variant.mode {
-            VariantMode::Plain(ref field) => complete_short_body(
+            FlagSetVariant::Plain(ref field) => complete_short_body(
                 &fields_ident,
                 &argument,
                 &flag,
                 &[(&variant.ident, field)],
                 all_short_scrutinees.iter().copied(),
             ),
-            VariantMode::Struct(ref fields) => complete_short_body(
+            FlagSetVariant::Struct(ref fields) => complete_short_body(
                 &fields_ident,
                 &argument,
                 &flag,

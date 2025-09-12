@@ -156,6 +156,8 @@ pub trait Error<'arg, Arg>: Sized {
         allowed: &'static [&'static str],
     ) -> Self;
 
+    // TODO: conflict error
+
     /// This was a request for a usage message. This error doesn't need to
     /// interrupt argument parsing, since it can be useful to have a complete
     /// state object to print more contextually useful usage messages.

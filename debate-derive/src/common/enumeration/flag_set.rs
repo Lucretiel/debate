@@ -4,6 +4,7 @@ use darling::{
     FromAttributes,
     util::{Override, SpannedValue},
 };
+use indexmap::IndexMap;
 use itertools::Itertools as _;
 use proc_macro2::{Delimiter, Group, Span, TokenStream, TokenTree};
 use quote::ToTokens;
@@ -121,16 +122,11 @@ impl<'a> From<FlagFieldInfo<'a>> for PlainFlagInfo<'a> {
     }
 }
 
-pub enum VariantMode<'a> {
+pub enum FlagSetVariant<'a> {
     /// A plain variant is a unit variant, a newtype variant, OR a struct
     /// variant with exactly one field
     Plain(FlagSetFlagInfo<PlainFlagInfo<'a>>),
     Struct(Vec<FlagSetFlagInfo<FlagFieldInfo<'a>>>),
-}
-
-pub struct FlagSetVariant<'a> {
-    pub ident: IdentString<'a>,
-    pub mode: VariantMode<'a>,
 }
 
 #[derive(Clone, Copy)]
@@ -155,7 +151,7 @@ impl ToTokens for FlagSetType<'_> {
 
 pub struct ParsedFlagSetInfo<'a> {
     pub superposition: Ident,
-    pub variants: Vec<FlagSetVariant<'a>>,
+    pub variants: IndexMap<IdentString<'a>, FlagSetVariant<'a>>,
 }
 
 fn compute_flag_set_tags(
@@ -216,7 +212,7 @@ impl<'a> ParsedFlagSetInfo<'a> {
         auto_long: Option<&Span>,
         auto_short: Option<&Span>,
     ) -> syn::Result<Self> {
-        let variants: Vec<FlagSetVariant<'a>> = variants
+        let variants: IndexMap<IdentString<'a>, FlagSetVariant<'a>> = variants
             .into_iter()
             .map(|variant| {
                 let variant_ident = IdentString::new(&variant.ident);
@@ -229,7 +225,7 @@ impl<'a> ParsedFlagSetInfo<'a> {
                         info: PlainFlagInfo::Unit,
                         attrs: &variant.attrs,
                     )
-                    .map(VariantMode::Plain),
+                    .map(FlagSetVariant::Plain),
 
                     syn::Fields::Unnamed(ref fields) => create_flag!(
                         auto_long,
@@ -249,7 +245,7 @@ impl<'a> ParsedFlagSetInfo<'a> {
                             })?,
                         attrs: &variant.attrs,
                     )
-                    .map(VariantMode::Plain),
+                    .map(FlagSetVariant::Plain),
 
                     syn::Fields::Named(ref fields) => match fields
                         .named
@@ -276,7 +272,7 @@ impl<'a> ParsedFlagSetInfo<'a> {
                             }),
                             attrs: &field.attrs,
                         )
-                        .map(VariantMode::Plain),
+                        .map(FlagSetVariant::Plain),
 
                         Err(fields) => fields
                             .map(|(ident, field)| {
@@ -294,21 +290,15 @@ impl<'a> ParsedFlagSetInfo<'a> {
                                 // same struct.
                             })
                             .try_collect()
-                            .map(VariantMode::Struct),
+                            .map(FlagSetVariant::Struct),
                     },
                 };
 
-                mode.map(|mode| FlagSetVariant {
-                    ident: variant_ident,
-                    mode,
-                })
+                mode.map(|mode| (variant_ident, mode))
             })
             .try_collect()?;
 
-        let superposition = create_non_colliding_ident(
-            "Superposition",
-            variants.iter().map(|variant| &variant.ident),
-        );
+        let superposition = create_non_colliding_ident("Superposition", variants.keys());
 
         Ok(Self {
             superposition,
@@ -337,6 +327,8 @@ pub struct FlagSetFlagStateSite {
     pub len: usize,
 }
 
+/// For a given global flag, this includes information about one of the
+/// variants attached to that flag.
 pub struct FlagSetFlagVariant<'a> {
     /// The name of a variant this flag belongs to.
     pub ident: &'a IdentString<'a>,
@@ -344,10 +336,10 @@ pub struct FlagSetFlagVariant<'a> {
     /// The index of this *variant*. Used in viability set calculations.
     pub index: usize,
 
-    /// The location of this flag within its variant. Used in state initializers.
-    pub state: FlagSetFlagStateSite,
+    /// The location of this flag within this variant. Used in state initializers.
+    pub state_site: FlagSetFlagStateSite,
 
-    /// The location of this flag within its variant, as an identifier.
+    /// The location of this flag within this variant, as an identifier.
     pub site: FlagSetFlagSite<'a>,
 }
 
@@ -462,19 +454,21 @@ fn try_find<I: IntoIterator, E>(
 /// one variant of a flag set, but if they do, they must have identical tags
 /// (both short and long), as well as a handful other other things that are
 /// shared.
+///
+/// Returns the index of the added or updated flag.
 fn add_or_update_flag<'a, Info>(
     set: &mut Vec<FlagSetFlag<'a>>,
-    flag: &'a FlagSetFlagInfo<Info>,
+    variant_flag: &'a FlagSetFlagInfo<Info>,
     family: Family<()>,
     variant: &'a IdentString<'a>,
-    index: usize,
-    site: FlagSetFlagStateSite,
-) -> syn::Result<()>
+    variant_index: usize,
+    state_site: FlagSetFlagStateSite,
+) -> syn::Result<usize>
 where
     Info: FlagSetFlagExtra<'a>,
 {
-    let origin = flag.info.field().unwrap_or(variant);
-    let tags = flag.tags.simplify();
+    let origin = variant_flag.info.field().unwrap_or(variant);
+    let tags = variant_flag.tags.simplify();
 
     let mismatch_error = |existing_span, message| {
         error_pair(
@@ -485,7 +479,7 @@ where
         )
     };
 
-    let existing_flag = try_find(set.iter_mut(), |existing| {
+    let existing_flag = try_find(set.iter_mut().enumerate(), |(_, existing)| {
         let mismatch_error = |message| mismatch_error(existing.origin.span(), message);
 
         match compare_tags(&tags, &existing.tags) {
@@ -505,12 +499,12 @@ where
                         existing_variant.span(),
                         "this variant's flag is identical",
                     ))
-                } else if flag.placeholder.as_str() != existing.placeholder {
+                } else if variant_flag.placeholder.as_str() != existing.placeholder {
                     // Nit: placeholders are just a docs convention. In theory
                     // we should be able to detect and use a custom placeholder
                     // and reject only distinctions between custom placeholders.
                     Err(mismatch_error("this instance has a different placeholder"))
-                } else if flag.overridable.is_some() != existing.overridable {
+                } else if variant_flag.overridable.is_some() != existing.overridable {
                     Err(mismatch_error(
                         "this instance has a different `override` setting",
                     ))
@@ -521,37 +515,60 @@ where
         }
     })?;
 
-    let existing_flag = match existing_flag {
+    let (flag_index, existing_flag) = match existing_flag {
         Some(flag) => flag,
         None => {
+            let index = set.len();
+
             set.push(FlagSetFlag {
                 origin,
                 variants: Vec::new(),
                 docs: const { &Description::empty() },
-                placeholder: &flag.placeholder,
-                ty: flag.info.as_flag_set_type(),
+                placeholder: &variant_flag.placeholder,
+                ty: variant_flag.info.as_flag_set_type(),
                 tags,
-                overridable: flag.overridable.is_some(),
+                overridable: variant_flag.overridable.is_some(),
                 family: Family::Sibling,
             });
 
-            set.last_mut().expect("we just pushed an item into the set")
+            (
+                index,
+                set.last_mut().expect("we just pushed an item into the set"),
+            )
         }
     };
 
     existing_flag.variants.push(FlagSetFlagVariant {
         ident: variant,
-        state: site,
-        site: flag.info.site(),
-        index,
+        index: variant_index,
+        state_site,
+        site: variant_flag.info.site(),
     });
     existing_flag.family.merge(family, variant);
 
-    if existing_flag.docs.full.len() > flag.docs.full.len() {
-        existing_flag.docs = &flag.docs;
+    if existing_flag.docs.full.len() > variant_flag.docs.full.len() {
+        existing_flag.docs = &variant_flag.docs;
     };
 
-    Ok(())
+    Ok(flag_index)
+}
+
+struct VariantFieldSource<Ident> {
+    index: usize,
+    ident: Ident,
+}
+
+enum VariantFieldSourcesMode<'a> {
+    Unit,
+    Newtype(VariantFieldSource<()>),
+    Field(VariantFieldSource<&'a IdentString<'a>>),
+    Struct(Vec<VariantFieldSource<&'a IdentString<'a>>>),
+}
+
+/// Information required to attempt to initialize a
+struct VariantFieldSources<'a> {
+    pub mode: VariantFieldSourcesMode<'a>,
+    pub reachable: bool,
 }
 
 /// Given the parsed variants, create the flat, deduplicated list of flags
@@ -559,41 +576,83 @@ where
 /// (duplicate flags must be mostly identical) and where things like the
 /// exclusion sets are calculated.
 pub fn compute_grouped_flags<'a>(
-    variants: &'a [FlagSetVariant<'a>],
-) -> syn::Result<Vec<FlagSetFlag<'a>>> {
+    variants: &'a IndexMap<IdentString<'a>, FlagSetVariant<'a>>,
+) -> syn::Result<(
+    IndexMap<&'a IdentString<'a>, VariantFieldSources<'a>>,
+    Vec<FlagSetFlag<'a>>,
+)> {
     let mut flags = Vec::new();
 
-    variants
+    let mut sources: IndexMap<&'a IdentString<'a>, VariantFieldSources<'a>> = variants
         .iter()
         .enumerate()
-        .try_for_each(|(index, variant)| match variant.mode {
-            VariantMode::Plain(ref flag) => add_or_update_flag(
-                &mut flags,
-                &flag,
-                Family::Solitary(()),
-                &variant.ident,
-                index,
-                FlagSetFlagStateSite { index: 0, len: 1 },
-            ),
-            VariantMode::Struct(ref fields) => {
-                fields
+        .map(|(variant_index, (variant_ident, variant))| {
+            match variant {
+                FlagSetVariant::Plain(flag) => add_or_update_flag(
+                    &mut flags,
+                    flag,
+                    Family::Solitary(()),
+                    variant_ident,
+                    variant_index,
+                    FlagSetFlagStateSite { index: 0, len: 1 },
+                )
+                .map(|flag_index| match flag.info {
+                    PlainFlagInfo::Unit => VariantFieldSourcesMode::Unit,
+                    PlainFlagInfo::Newtype(_) => {
+                        VariantFieldSourcesMode::Newtype(VariantFieldSource {
+                            ident: (),
+                            index: flag_index,
+                        })
+                    }
+                    PlainFlagInfo::Struct(ref field) => {
+                        VariantFieldSourcesMode::Field(VariantFieldSource {
+                            index: flag_index,
+                            ident: &field.ident,
+                        })
+                    }
+                }),
+                FlagSetVariant::Struct(fields) => fields
                     .iter()
                     .enumerate()
-                    .try_for_each(|(field_index, flag)| {
+                    .map(|(field_index, field)| {
                         add_or_update_flag(
                             &mut flags,
-                            flag,
+                            field,
                             Family::Sibling,
-                            &variant.ident,
-                            index,
+                            &variant_ident,
+                            variant_index,
                             FlagSetFlagStateSite {
                                 index: field_index,
                                 len: fields.len(),
                             },
                         )
+                        .map(|field_index| VariantFieldSource {
+                            ident: &field.info.ident,
+                            index: field_index,
+                        })
                     })
+                    .try_collect()
+                    .map(VariantFieldSourcesMode::Struct),
             }
-        })?;
+            .map(|mode| VariantFieldSources {
+                mode,
+                reachable: false,
+            })
+            .map(|sources| (variant_ident, sources))
+        })
+        .try_collect()?;
 
-    Ok(flags)
+    // Update all the sources with reachability. Needed to precompute flags,
+    // to verify which flags only have one possible variant.
+    flags
+        .iter()
+        .filter_map(|flag| flag.variants.iter().exactly_one().ok())
+        .for_each(|reachable_variant| {
+            sources
+                .get_mut(reachable_variant.ident)
+                .expect("all source variants should exist")
+                .reachable = true;
+        });
+
+    Ok((sources, flags))
 }
