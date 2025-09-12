@@ -3,7 +3,7 @@ use std::{collections::HashMap, f32::consts::E};
 use itertools::Itertools;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::{ToTokens, format_ident, quote};
-use syn::{Ident, Index, Lifetime, Token, Variant, punctuated::Punctuated};
+use syn::{Ident, Index, Lifetime, Token, Variant, punctuated::Punctuated, spanned::Spanned};
 
 use crate::{
     common::{
@@ -30,51 +30,13 @@ fn state_init_expression(site: &FlagSetFlagStateSite) -> TokenStream2 {
     quote! { ( #(#inits,)* ) }
 }
 
-// There doesn't exist a rejection set or superposition field states. Just
-// transition immediately.
-fn handle_simple_long_superposition_argument(
-    fields_ident: &Ident,
-    flags: &[FlagSetFlag<'_>],
-) -> TokenStream2 {
-    let arms = flags
-        .iter()
-        .filter_map(|flag| flag.tags.long().map(move |long| (long, flag)))
-        .map(|(long, flag)| {
-            let scrutinee = long.make_scrutinee();
-
-            // TODO: using `exactly_one` here is probably going to be the
-            // secret to generalizing between this and regular superpositions.
-            let destination = flag.variants.first().unwrap();
-            let variant = &destination.variant;
-            let name = destination.site.field().unwrap_or(variant).as_str();
-
-            let state_init = match destination.site {
-                FlagSetFlagSite::Unit | FlagSetFlagSite::Newtype => quote! { ( value, ) },
-                FlagSetFlagSite::Field(_) => state_init_expression(&destination.state),
-            };
-
-            quote! {
-                #scrutinee => match ::debate::parameter::Parameter::present(argument) {
-                    ::core::result::Result::Err(err) => ::core::result::Result::Err(
-                        ::debate::state::Error::parameter(#name, err)
-                    ),
-                    ::core::result::Result::Ok(value) => {
-                        *self = Self:: #variant { fields: #state_init, };
-                        ::core::result::Result::Ok(())
-                    }
-                }
-            }
-        });
-
-    quote! {
-        match flag.bytes() {
-
-        }
-    }
+fn variant_bit(i: usize) -> TokenStream2 {
+    quote! { const { 1u64 << #i } }
 }
 
 fn handle_long_superposition_argument<'a, Tag: MakeScrutinee>(
     fields_ident: &Ident,
+    viable_ident: &Ident,
     argument_ident: &Ident,
     flag_expr: impl ToTokens,
     flags: &[FlagSetFlag<'a>],
@@ -105,21 +67,8 @@ fn handle_long_superposition_argument<'a, Tag: MakeScrutinee>(
         .map(|(tag, index, flag): (Tag, Index, &FlagSetFlag<'_>)| {
             let scrutinee = tag.make_scrutinee();
 
-            // TODO: we removed the idea of conditional transitions. This means
-            // we can remove all the states that aren't reachable by
-            // unconditional transitions.
-            // TODO: if this is gonna be an unconditional transition, there's
-            // no need to update the exclusions, we only need to make sure
-            // the state we want to be is acceptable.
-            let update_exclusions = flag
-                .excluded
-                .values()
-                .take_while(|_| any_multi_flags)
-                .map(|&i| Index::from(i))
-                .map(|index| quote! { rejection_set.#index = true; });
-
             let (expr, transition, name) = if let [destination] = flag.variants.as_slice() {
-                let variant = &destination.variant;
+                let variant = &destination.ident;
                 let name = destination.site.field().unwrap_or(variant).as_str();
 
                 let state_init = match destination.site {
@@ -168,13 +117,25 @@ fn handle_long_superposition_argument<'a, Tag: MakeScrutinee>(
                 (expr, None, flag.origin.as_str())
             };
 
-            quote! {
-                #scrutinee => {
-                    #(#update_exclusions)*
+            let viability_check = any_multi_flags.then(|| {
+                let viable_bits = flag
+                    .variants
+                    .iter()
+                    .map(|viable_variant| viable_variant.index)
+                    .map(variant_bit);
 
-                    if Self::total_rejection(&rejection_set) {
+                quote! {
+                    *#viable_ident &= const { 0 #( | #viable_bits )* };
+
+                    if #viable_ident == 0 {
                         todo!("conflict")
                     }
+                }
+            });
+
+            quote! {
+                #scrutinee => {
+                    #viability_check
 
                     match (#expr) {
                         ::core::result::Result::Ok(()) => {
@@ -363,6 +324,25 @@ where
     )
 }
 
+struct FlagSetVariantComputedExtras {
+    /// A reachable variant is one that has at least one flag that it shares
+    /// with no other variants. Only reachable variants have state variants.
+    reachable: bool,
+
+    /// For each field in this variant, this is the index in the GLOBAL flags
+    /// state list where that field appears
+    field_indices: Vec<usize>,
+}
+
+fn variant_is_reachable(variant: &FlagSetVariant<'_>, flags: &[FlagSetFlag<'_>]) -> bool {
+    flags.iter().any(|flag| {
+        flag.variants
+            .iter()
+            .exactly_one()
+            .is_ok_and(|candidate| candidate.ident.as_str() == variant.ident.as_str())
+    })
+}
+
 pub fn derive_args_enum_flag_set(
     name: &Ident,
     variants: &Punctuated<Variant, Token![,]>,
@@ -370,13 +350,31 @@ pub fn derive_args_enum_flag_set(
     type_lifetime: Option<&AngleBracedLifetime>,
     attr: &ValueEnumAttr,
 ) -> syn::Result<TokenStream2> {
-    let parsed = ParsedFlagSetInfo::from_variants(
+    let mut parsed = ParsedFlagSetInfo::from_variants(
         variants,
         attr.long.map(|long| long.span()).as_ref(),
         attr.short.map(|short| short.span()).as_ref(),
     )?;
+    if parsed.variants.len() > 64 {
+        return Err(syn::Error::new(
+            variants.span(),
+            "currently support a max of 64 variants of a flag set",
+        ));
+    }
     let parsed_flags = compute_grouped_flags(&parsed.variants)?;
     let superposition_ident = &parsed.superposition;
+    let variant_extras = parsed
+        .variants
+        .iter()
+        .map(|variant| {
+            (
+                FlagSetVariantComputedExtras {
+                    reachable: variant_is_reachable(variant, &parsed_flags),
+                },
+                variant,
+            )
+        })
+        .collect_vec();
 
     /*
     Let's talk algorithm.
@@ -428,6 +426,7 @@ pub fn derive_args_enum_flag_set(
     let present_ident = format_ident!("present");
     let add_present_ident = format_ident!("add_present");
 
+    let viable_ident = format_ident!("viable");
     let fields_ident = format_ident!("fields");
 
     let state_ident = format_ident!("__{name}State");
@@ -452,53 +451,58 @@ pub fn derive_args_enum_flag_set(
         _ => quote! { ::core::option::Option::None },
     });
 
-    // TODO: if there are at most 64 variants (lol), use a u64 for the
-    // rejection set.
-    let rejection_set_types = parsed
+    let viable_set_type = match any_multi_flags {
+        true => quote! { u64 },
+        false => quote! { () },
+    };
+
+    let viable_set_values = parsed
         .variants
         .iter()
-        .take_while(|_| any_multi_flags)
-        .map(|_| quote! { bool });
+        .enumerate()
+        .map(|(i, _)| variant_bit(i));
 
-    let rejection_set_inits = parsed
-        .variants
+    let viable_set_init = match any_multi_flags {
+        true => quote! { const { 0u64 #( | #viable_set_values)* } },
+        false => quote! { () },
+    };
+
+    // TODO: we ONLY can transition directly into states via flags that are
+    // unique to that state. Any variant that has no such flags can be
+    // omitted (or, more likely, for consistency)
+    let state_variants = variant_extras
         .iter()
-        .take_while(|_| any_multi_flags)
-        .map(|_| quote! { false });
+        .filter(|info| info.0.reachable)
+        .map(|info| {
+            let variant = info.1;
+            let ident = variant.ident.raw();
 
-    // We could try to filter out state variants that are never reachable
-    // during argument parsing (for instance, their set of flags is a subset
-    // of another flag). In practice I expect this to be radically uncommon
-    // and not worth going out of our way for.
-    let state_variants = parsed.variants.iter().map(|variant| {
-        let ident = variant.ident.raw();
+            match variant.mode {
+                // We don't use options for units and newtypes; there's only one
+                // possible flag that triggers these states, so it's guaranteed
+                // that its argument is real when we arrived to it.
+                VariantMode::Plain(ref flag) => {
+                    let ty = flag.info.ty();
 
-        match variant.mode {
-            // We don't use options for units and newtypes; there's only one
-            // possible flag that triggers these states, so it's guaranteed
-            // that its argument is real when we arrived to it.
-            VariantMode::Plain(ref flag) => {
-                let ty = flag.info.ty();
+                    // Don't forget that the `ty` for a unit variant is `()`,
+                    // which has a correct implementation of Parameter for our
+                    // needs
+                    quote! { #ident { #fields_ident: ( #ty, ), } }
+                }
 
-                // Don't forget that the `ty` for a unit variant is `()`,
-                // which has a correct implementation of Parameter for our
-                // needs
-                quote! { #ident { #fields_ident: ( #ty, ), } }
-            }
+                VariantMode::Struct(ref fields) => {
+                    let field_types = fields.iter().map(|field| &field.info.ty);
 
-            VariantMode::Struct(ref fields) => {
-                let field_types = fields.iter().map(|field| &field.info.ty);
-
-                quote! {
-                    #ident {
-                        #fields_ident: ( #(
-                            ::core::option::Option< #field_types >,
-                        )* ),
+                    quote! {
+                        #ident {
+                            #fields_ident: ( #(
+                                ::core::option::Option< #field_types >,
+                            )* ),
+                        }
                     }
                 }
             }
-        }
-    });
+        });
 
     let long_flags = indexed(&parsed_flags)
         .find_map(|(index, flag)| flag.tags.long().map(|long| (index, long, flag)));
@@ -519,6 +523,7 @@ pub fn derive_args_enum_flag_set(
 
     let long_arg_superposition = handle_long_superposition_argument(
         &fields_ident,
+        &viable_ident,
         &argument,
         quote! { flag.bytes() },
         &parsed_flags,
@@ -601,33 +606,23 @@ pub fn derive_args_enum_flag_set(
         }
     });
 
-    let rejection_set_type = quote! {
-         ( #(#rejection_set_types,)* )
-    };
-
     Ok(quote! {
         enum #state_ident <#lifetime> {
             // In the generic state, we haven't selected a specific variant yet
             #superposition_ident {
                 #fields_ident: ( #(#flag_types,)* ),
-                rejection_set: #rejection_set_type,
+                #viable_ident: #viable_set_type,
                 phantom: ::core::marker::PhantomData<& #lifetime ()>,
             },
 
             #(#state_variants,)*
         }
 
-        impl #state_ident<'_> {
-            fn total_rejection(set: &#rejection_set_type) -> bool {
-                todo!()
-            }
-        }
-
         impl ::core::default::Default for #state_ident <'_> {
             fn default() -> Self {
                 Self :: #superposition_ident {
                     #fields_ident: ( #(#flag_inits,)* ),
-                    rejection_set: ( #(#rejection_set_inits,)* ),
+                    #viable_ident: #viable_set_init,
                     phantom: ::core::marker::PhantomData,
                 }
             }
@@ -656,7 +651,7 @@ pub fn derive_args_enum_flag_set(
                 E: ::debate::state::Error<#lifetime, ()>
             {
                 match *self {
-                    Self :: #superposition_ident {ref mut #fields_ident, ref mut rejection_set, .. } => #long_arg_superposition,
+                    Self :: #superposition_ident {ref mut #fields_ident, ref mut #viable_ident, .. } => #long_arg_superposition,
                     #(#add_long_arg_arms,)*
                 }
             }
@@ -671,7 +666,7 @@ pub fn derive_args_enum_flag_set(
                 E: ::debate::state::Error<#lifetime, A>
             {
                 match *self {
-                    Self :: #superposition_ident {ref mut #fields_ident, ref mut rejection_set, .. } => {
+                    Self :: #superposition_ident {ref mut #fields_ident, ref mut #viable_ident, .. } => {
 
                     }
                     #(#add_long_arms,)*
@@ -688,7 +683,7 @@ pub fn derive_args_enum_flag_set(
                 E: ::debate::state::Error<#lifetime, A>
             {
                 match *self {
-                    Self :: #superposition_ident {ref mut #fields_ident, ref mut rejection_set, .. } => {
+                    Self :: #superposition_ident {ref mut #fields_ident, ref mut #viable_ident, .. } => {
 
                     }
                     #(#add_short_arms,)*

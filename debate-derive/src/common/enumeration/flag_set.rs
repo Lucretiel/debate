@@ -7,7 +7,7 @@ use darling::{
 use itertools::Itertools as _;
 use proc_macro2::{Delimiter, Group, Span, TokenStream, TokenTree};
 use quote::ToTokens;
-use syn::{Attribute, Expr, Ident, Type, Variant, spanned::Spanned};
+use syn::{Expr, Ident, Type, Variant, spanned::Spanned};
 
 use crate::common::{
     Description, FieldDefault, FlagTags, IdentString, compute_docs, compute_placeholder,
@@ -338,8 +338,16 @@ pub struct FlagSetFlagStateSite {
 }
 
 pub struct FlagSetFlagVariant<'a> {
-    pub variant: &'a IdentString<'a>,
+    /// The name of a variant this flag belongs to.
+    pub ident: &'a IdentString<'a>,
+
+    /// The index of this *variant*. Used in viability set calculations.
+    pub index: usize,
+
+    /// The location of this flag within its variant. Used in state initializers.
     pub state: FlagSetFlagStateSite,
+
+    /// The location of this flag within its variant, as an identifier.
     pub site: FlagSetFlagSite<'a>,
 }
 
@@ -352,10 +360,6 @@ pub struct FlagSetFlag<'a> {
     /// of its location in that variant's state, and (if relevant) the name
     /// of the
     pub variants: Vec<FlagSetFlagVariant<'a>>,
-
-    /// Precomputed set of all the variants where this flag DOESN'T appear,
-    /// along with their indices.
-    pub excluded: HashMap<&'a str, usize>,
 
     /// Documentation for this flag. If the flag appears more than once in
     /// different variants, we choose the longest description.
@@ -463,8 +467,8 @@ fn add_or_update_flag<'a, Info>(
     flag: &'a FlagSetFlagInfo<Info>,
     family: Family<()>,
     variant: &'a IdentString<'a>,
+    index: usize,
     site: FlagSetFlagStateSite,
-    all_variants: &HashMap<&'a str, usize>,
 ) -> syn::Result<()>
 where
     Info: FlagSetFlagExtra<'a>,
@@ -523,7 +527,6 @@ where
             set.push(FlagSetFlag {
                 origin,
                 variants: Vec::new(),
-                excluded: all_variants.clone(),
                 docs: const { &Description::empty() },
                 placeholder: &flag.placeholder,
                 ty: flag.info.as_flag_set_type(),
@@ -537,11 +540,11 @@ where
     };
 
     existing_flag.variants.push(FlagSetFlagVariant {
-        variant,
+        ident: variant,
         state: site,
         site: flag.info.site(),
+        index,
     });
-    existing_flag.excluded.remove(variant.as_str());
     existing_flag.family.merge(family, variant);
 
     if existing_flag.docs.full.len() > flag.docs.full.len() {
@@ -560,38 +563,37 @@ pub fn compute_grouped_flags<'a>(
 ) -> syn::Result<Vec<FlagSetFlag<'a>>> {
     let mut flags = Vec::new();
 
-    let all_variants = variants
+    variants
         .iter()
-        .map(|variant| variant.ident.as_str())
         .enumerate()
-        .map(|(index, name)| (name, index))
-        .collect();
-
-    variants.iter().try_for_each(|variant| match variant.mode {
-        VariantMode::Plain(ref flag) => add_or_update_flag(
-            &mut flags,
-            &flag,
-            Family::Solitary(()),
-            &variant.ident,
-            FlagSetFlagStateSite { index: 0, len: 1 },
-            &all_variants,
-        ),
-        VariantMode::Struct(ref fields) => {
-            fields.iter().enumerate().try_for_each(|(index, flag)| {
-                add_or_update_flag(
-                    &mut flags,
-                    flag,
-                    Family::Sibling,
-                    &variant.ident,
-                    FlagSetFlagStateSite {
-                        index,
-                        len: fields.len(),
-                    },
-                    &all_variants,
-                )
-            })
-        }
-    })?;
+        .try_for_each(|(index, variant)| match variant.mode {
+            VariantMode::Plain(ref flag) => add_or_update_flag(
+                &mut flags,
+                &flag,
+                Family::Solitary(()),
+                &variant.ident,
+                index,
+                FlagSetFlagStateSite { index: 0, len: 1 },
+            ),
+            VariantMode::Struct(ref fields) => {
+                fields
+                    .iter()
+                    .enumerate()
+                    .try_for_each(|(field_index, flag)| {
+                        add_or_update_flag(
+                            &mut flags,
+                            flag,
+                            Family::Sibling,
+                            &variant.ident,
+                            index,
+                            FlagSetFlagStateSite {
+                                index: field_index,
+                                len: fields.len(),
+                            },
+                        )
+                    })
+            }
+        })?;
 
     Ok(flags)
 }
