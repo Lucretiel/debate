@@ -1,4 +1,4 @@
-use proc_macro2::{Literal, Span, TokenStream as TokenStream2};
+use proc_macro2::{Literal, Punct, Spacing, Span, TokenStream as TokenStream2, TokenTree};
 use quote::{ToTokens, format_ident, quote};
 use syn::{Ident, Index, Lifetime};
 
@@ -623,18 +623,71 @@ pub fn complete_short_body(
     )
 }
 
+pub struct NormalFieldInfo<'a> {
+    pub long: Option<&'a str>,
+    pub short: Option<char>,
+    pub placeholder: &'a str,
+    pub ident: &'a IdentString<'a>,
+    pub default: Option<&'a FieldDefault>,
+}
+
+pub fn struct_field_initializer(
+    fields_ident: &Ident,
+    index: Index,
+    field: NormalFieldInfo<'_>,
+) -> TokenStream2 {
+    let ident = field.ident;
+    let ident_str = ident.as_str();
+    let placeholder = field.placeholder;
+
+    // Technically we allocate too eagerly here. It reads better
+    // this way, imo, and we trust the optimizer to reorder a lot
+    // of this stuff so that (for example) the `let error` is only
+    // evaluated in the `FieldDefault::None` case.
+    let short = match field.short {
+        Some(short) => quote! {::core::option::Option::Some(#short)},
+        None => quote! {::core::option::Option::None},
+    };
+
+    let error = match (field.long, field.short) {
+        (Some(long), _) => quote! {
+            required_long( #ident_str, #long, #short )
+        },
+        (None, Some(short)) => quote! {
+            required_short( #ident_str, #short )
+        },
+        (None, None) => quote! {
+            required_positional( #ident_str, #placeholder )
+        },
+    };
+
+    let default = match field.default {
+        Some(FieldDefault::Expr(expr)) => quote! { #expr },
+        Some(FieldDefault::Trait) => quote! { ::core::default::Default::default() },
+        None => quote! {
+            match ::debate::parameter::Parameter::absent() {
+                ::core::result::Result::Ok(value) => value,
+                ::core::result::Result::Err(::debate::parameter::RequiredError) => {
+                    return ::core::result::Result::Err(
+                        ::debate::build::Error:: #error,
+                    )
+                }
+            }
+        },
+    };
+
+    quote! {
+        #ident: match #fields_ident.#index {
+            ::core::option::Option::Some(value) => value,
+            ::core::option::Option::None => #default,
+        }
+    }
+}
+
 pub fn final_field_initializers(
     fields_ident: &Ident,
     fields: &[ParsedFieldInfo<'_>],
 ) -> impl Iterator<Item = TokenStream2> {
-    struct NormalFieldInfo<'a> {
-        long: Option<&'a str>,
-        short: Option<char>,
-        placeholder: &'a str,
-        ident: &'a IdentString<'a>,
-        default: Option<&'a FieldDefault>,
-    }
-
     indexed(fields)
         .map(|(index, field)| {
             (
@@ -659,54 +712,7 @@ pub fn final_field_initializers(
             )
         })
         .map(move |(idx, field)| match field {
-            FlattenOr::Normal(field) => {
-                let ident = field.ident.raw();
-                let ident_str = field.ident.as_str();
-                let placeholder = field.placeholder;
-
-                // Technically we allocate too eagerly here. It reads better
-                // this way, imo, and we trust the optimizer to reorder a lot
-                // of this stuff so that (for example) the `let error` is only
-                // evaluated in the `FieldDefault::None` case.
-                let short = match field.short {
-                    Some(short) => quote! {::core::option::Option::Some(#short)},
-                    None => quote! {::core::option::Option::None},
-                };
-
-                let error = match (field.long, field.short) {
-                    (Some(long), _) => quote! {
-                        required_long( #ident_str, #long, #short )
-                    },
-                    (None, Some(short)) => quote! {
-                        required_short( #ident_str, #short )
-                    },
-                    (None, None) => quote! {
-                        required_positional( #ident_str, #placeholder )
-                    },
-                };
-
-                let default = match field.default {
-                    Some(FieldDefault::Expr(expr)) => quote! { #expr },
-                    Some(FieldDefault::Trait) => quote! { ::core::default::Default::default() },
-                    None => quote! {
-                        match ::debate::parameter::Parameter::absent() {
-                            ::core::result::Result::Ok(value) => value,
-                            ::core::result::Result::Err(::debate::parameter::RequiredError) => {
-                                return ::core::result::Result::Err(
-                                    ::debate::build::Error:: #error,
-                                )
-                            }
-                        }
-                    },
-                };
-
-                quote! {
-                    #ident: match #fields_ident.#idx {
-                        ::core::option::Option::Some(value) => value,
-                        ::core::option::Option::None => #default,
-                    }
-                }
-            }
+            FlattenOr::Normal(field) => struct_field_initializer(fields_ident, idx, field),
             FlattenOr::Flatten(FlattenFieldInfo { ident, .. }) => {
                 let field_name = ident.as_str();
 

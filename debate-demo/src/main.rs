@@ -157,7 +157,7 @@ enum FlagChoice {
 //     Quiet { quiet: (), requester: String },
 // }
 
-#[derive(FromArgs, Usage, Debug)]
+#[derive(FromArgs, Debug)]
 #[debate(subcommand)]
 enum Subcommand<'arg> {
     #[debate(fallback)]
@@ -184,6 +184,9 @@ enum Subcommand<'arg> {
 
     /// Run the project's tests
     Test(TestArgs),
+
+    ///
+    ExclusiveAction(FlagChoice),
 }
 
 #[derive(FromArgs, Usage, Debug)]

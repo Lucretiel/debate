@@ -1,4 +1,4 @@
-use std::{collections::HashMap, ops::ControlFlow};
+use std::ops::ControlFlow;
 
 use darling::{
     FromAttributes,
@@ -381,6 +381,18 @@ pub struct FlagSetFlag<'a> {
     pub family: Family<&'a IdentString<'a>>,
 }
 
+impl<'a> FlagSetFlag<'a> {
+    /// If this flag is associated with exactly 1 variant, get that variant.
+    /// Unique flags don't need to have their state recorded when they're in
+    /// superposition, because the arrival of a unique flag always takes us
+    /// directly to this specific state variant.
+    #[inline(always)]
+    #[must_use]
+    pub fn unique_variant(&self) -> Option<&FlagSetFlagVariant<'a>> {
+        self.variants.iter().exactly_one().ok()
+    }
+}
+
 enum TagComparison {
     Match,
     Different,
@@ -553,20 +565,21 @@ where
     Ok(flag_index)
 }
 
-struct VariantFieldSource<Ident> {
-    index: usize,
-    ident: Ident,
+pub struct VariantFieldSource<'a, Info> {
+    /// The location, in the GLOBAL flags state list, where this flag can be
+    /// found
+    pub index: usize,
+
+    /// Everything else interesting about this flag as it exists on the variant
+    pub field: &'a FlagSetFlagInfo<Info>,
 }
 
-enum VariantFieldSourcesMode<'a> {
-    Unit,
-    Newtype(VariantFieldSource<()>),
-    Field(VariantFieldSource<&'a IdentString<'a>>),
-    Struct(Vec<VariantFieldSource<&'a IdentString<'a>>>),
+pub enum VariantFieldSourcesMode<'a> {
+    Plain(VariantFieldSource<'a, PlainFlagInfo<'a>>),
+    Struct(Vec<VariantFieldSource<'a, FlagFieldInfo<'a>>>),
 }
 
-/// Information required to attempt to initialize a
-struct VariantFieldSources<'a> {
+pub struct VariantFieldSources<'a> {
     pub mode: VariantFieldSourcesMode<'a>,
     pub reachable: bool,
 }
@@ -596,28 +609,18 @@ pub fn compute_grouped_flags<'a>(
                     variant_index,
                     FlagSetFlagStateSite { index: 0, len: 1 },
                 )
-                .map(|flag_index| match flag.info {
-                    PlainFlagInfo::Unit => VariantFieldSourcesMode::Unit,
-                    PlainFlagInfo::Newtype(_) => {
-                        VariantFieldSourcesMode::Newtype(VariantFieldSource {
-                            ident: (),
-                            index: flag_index,
-                        })
-                    }
-                    PlainFlagInfo::Struct(ref field) => {
-                        VariantFieldSourcesMode::Field(VariantFieldSource {
-                            index: flag_index,
-                            ident: &field.ident,
-                        })
-                    }
-                }),
+                .map(|flag_index| VariantFieldSource {
+                    index: flag_index,
+                    field: flag,
+                })
+                .map(VariantFieldSourcesMode::Plain),
                 FlagSetVariant::Struct(fields) => fields
                     .iter()
                     .enumerate()
-                    .map(|(field_index, field)| {
+                    .map(|(field_index, flag)| {
                         add_or_update_flag(
                             &mut flags,
-                            field,
+                            flag,
                             Family::Sibling,
                             &variant_ident,
                             variant_index,
@@ -627,8 +630,8 @@ pub fn compute_grouped_flags<'a>(
                             },
                         )
                         .map(|field_index| VariantFieldSource {
-                            ident: &field.info.ident,
                             index: field_index,
+                            field: flag,
                         })
                     })
                     .try_collect()
@@ -646,10 +649,10 @@ pub fn compute_grouped_flags<'a>(
     // to verify which flags only have one possible variant.
     flags
         .iter()
-        .filter_map(|flag| flag.variants.iter().exactly_one().ok())
-        .for_each(|reachable_variant| {
+        .filter_map(|flag| flag.unique_variant())
+        .for_each(|unique_variant| {
             sources
-                .get_mut(reachable_variant.ident)
+                .get_mut(unique_variant.ident)
                 .expect("all source variants should exist")
                 .reachable = true;
         });

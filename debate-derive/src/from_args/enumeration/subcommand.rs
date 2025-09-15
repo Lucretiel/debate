@@ -308,7 +308,7 @@ pub fn derive_args_enum_subcommand(
                         Self :: #fallback_ident => ::core::result::Result::Err(
                             ::debate::state::Error::unrecognized(())
                         ),
-                        #(#long_option_arms)*
+                        #(#long_option_arms,)*
                 }
                 }
 
@@ -325,7 +325,7 @@ pub fn derive_args_enum_subcommand(
                         Self :: #fallback_ident => ::core::result::Result::Err(
                             ::debate::state::Error::unrecognized(#argument)
                         ),
-                        #(#long_arms)*
+                        #(#long_arms,)*
                     }
                 }
 
@@ -342,7 +342,7 @@ pub fn derive_args_enum_subcommand(
                         Self :: #fallback_ident => ::core::result::Result::Err(
                             ::debate::state::Error::unrecognized(#argument)
                         ),
-                        #(#short_arms)*
+                        #(#short_arms,)*
                     }
                 }
 
