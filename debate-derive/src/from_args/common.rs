@@ -1,3 +1,5 @@
+use std::default;
+
 use proc_macro2::{Literal, Punct, Spacing, Span, TokenStream as TokenStream2, TokenTree};
 use quote::{ToTokens, format_ident, quote};
 use syn::{Ident, Index, Lifetime};
@@ -631,6 +633,39 @@ pub struct NormalFieldInfo<'a> {
     pub default: Option<&'a FieldDefault>,
 }
 
+pub fn default_field_initializer(default: &FieldDefault) -> TokenStream2 {
+    match default {
+        FieldDefault::Trait => quote! { ::core::default::Default::default() },
+        FieldDefault::Expr(expr) => quote! { #expr },
+    }
+}
+
+/**
+Create an expression that initializes a value of type `T` that wasn't present
+on the command line. This expression is either a default expression, or a call
+to `Parameter::absent`, where an error from `absent` should result in a
+divergent branch.
+ */
+pub fn absent_field_initializer(
+    default: Option<&FieldDefault>,
+    on_absent: impl FnOnce() -> TokenStream2,
+) -> TokenStream2 {
+    match default {
+        Some(default) => default_field_initializer(default),
+        None => {
+            let divergent_branch = on_absent();
+            quote! {
+                match ::debate::parameter::Parameter::absent() {
+                    ::core::result::Result::Ok(value) => value,
+                    ::core::result::Result::Err(::debate::parameter::RequiredError) => {
+                        #divergent_branch
+                    }
+                }
+            }
+        }
+    }
+}
+
 pub fn struct_field_initializer(
     fields_ident: &Ident,
     index: Index,
@@ -661,20 +696,13 @@ pub fn struct_field_initializer(
         },
     };
 
-    let default = match field.default {
-        Some(FieldDefault::Expr(expr)) => quote! { #expr },
-        Some(FieldDefault::Trait) => quote! { ::core::default::Default::default() },
-        None => quote! {
-            match ::debate::parameter::Parameter::absent() {
-                ::core::result::Result::Ok(value) => value,
-                ::core::result::Result::Err(::debate::parameter::RequiredError) => {
-                    return ::core::result::Result::Err(
-                        ::debate::build::Error:: #error,
-                    )
-                }
-            }
-        },
-    };
+    let default = absent_field_initializer(field.default, || {
+        quote! {
+             return ::core::result::Result::Err(
+                ::debate::build::Error:: #error,
+            )
+        }
+    });
 
     quote! {
         #ident: match #fields_ident.#index {

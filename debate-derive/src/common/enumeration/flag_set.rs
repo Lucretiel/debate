@@ -371,8 +371,13 @@ pub struct FlagSetFlag<'a> {
     pub tags: FlagTags<&'a str, char>,
 
     /// If true, subsequent instances of this flag override earlier ones.
-    ///  this setting must be identical for all instances.
+    /// this setting must be identical for all instances.
     pub overridable: bool,
+
+    /// If true, there is at least one variant of this flag that does *not*
+    /// have a default specified. This means that it's possible for a
+    /// requirement error to cite this flag.
+    pub ever_required: bool,
 
     /// Record if there are *any* solitary instances of this flag. This is
     /// used to prevent more than one solitary instance of the flag being
@@ -541,6 +546,7 @@ where
                 tags,
                 overridable: variant_flag.overridable.is_some(),
                 family: Family::Sibling,
+                ever_required: false,
             });
 
             (
@@ -557,6 +563,7 @@ where
         site: variant_flag.info.site(),
     });
     existing_flag.family.merge(family, variant);
+    existing_flag.ever_required = existing_flag.ever_required || variant_flag.default.is_none();
 
     if existing_flag.docs.full.len() > variant_flag.docs.full.len() {
         existing_flag.docs = &variant_flag.docs;
@@ -569,6 +576,10 @@ pub struct VariantFieldSource<'a, Info> {
     /// The location, in the GLOBAL flags state list, where this flag can be
     /// found
     pub index: usize,
+
+    /// Is this flag unique (that, does this flag ONLY appear in this variant).
+    /// Affects code gen.
+    pub unique: bool,
 
     /// Everything else interesting about this flag as it exists on the variant
     pub field: &'a FlagSetFlagInfo<Info>,
@@ -612,6 +623,7 @@ pub fn compute_grouped_flags<'a>(
                 .map(|flag_index| VariantFieldSource {
                     index: flag_index,
                     field: flag,
+                    unique: false,
                 })
                 .map(VariantFieldSourcesMode::Plain),
                 FlagSetVariant::Struct(fields) => fields
@@ -622,7 +634,7 @@ pub fn compute_grouped_flags<'a>(
                             &mut flags,
                             flag,
                             Family::Sibling,
-                            &variant_ident,
+                            variant_ident,
                             variant_index,
                             FlagSetFlagStateSite {
                                 index: field_index,
@@ -632,6 +644,7 @@ pub fn compute_grouped_flags<'a>(
                         .map(|field_index| VariantFieldSource {
                             index: field_index,
                             field: flag,
+                            unique: false,
                         })
                     })
                     .try_collect()
@@ -647,15 +660,25 @@ pub fn compute_grouped_flags<'a>(
 
     // Update all the sources with reachability. Needed to precompute flags,
     // to verify which flags only have one possible variant.
-    flags
-        .iter()
-        .filter_map(|flag| flag.unique_variant())
-        .for_each(|unique_variant| {
-            sources
+    for (index, flag) in flags.iter().enumerate() {
+        if let Some(unique_variant) = flag.unique_variant() {
+            let source = sources
                 .get_mut(unique_variant.ident)
-                .expect("all source variants should exist")
-                .reachable = true;
-        });
+                .expect("all source variants should exist");
+
+            source.reachable = true;
+            match source.mode {
+                VariantFieldSourcesMode::Plain(ref mut source) => source.unique = true,
+                VariantFieldSourcesMode::Struct(ref mut sources) => {
+                    sources
+                        .iter_mut()
+                        .find(|source| source.index == index)
+                        .expect("source flag must exist here")
+                        .unique = true
+                }
+            }
+        }
+    }
 
     Ok((sources, flags))
 }

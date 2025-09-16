@@ -8,7 +8,7 @@ use syn::{Ident, Index, Lifetime, Token, Variant, punctuated::Punctuated, spanne
 
 use crate::{
     common::{
-        FlagTags, IdentString,
+        FieldDefault, FlagTags, IdentString,
         enumeration::flag_set::{
             FlagFieldInfo, FlagSetFlag, FlagSetFlagInfo, FlagSetFlagSite, FlagSetFlagStateSite,
             ParsedFlagSetInfo, PlainFlagInfo, VariantFieldSource, VariantFieldSources,
@@ -16,8 +16,9 @@ use crate::{
         },
     },
     from_args::common::{
-        FieldNature, FlagField, MakeScrutinee, NormalFieldInfo, apply_arg_to_field,
-        complete_flag_body, indexed, struct_field_initializer,
+        FieldNature, FlagField, MakeScrutinee, NormalFieldInfo, absent_field_initializer,
+        apply_arg_to_field, complete_flag_body, default_field_initializer, indexed,
+        struct_field_initializer,
     },
     generics::AngleBracedLifetime,
 };
@@ -204,23 +205,10 @@ impl<'a> FlagField<'a> for &(&'a IdentString<'a>, &'a FlagSetFlagInfo<PlainFlagI
     }
 }
 
-fn conflict_detection_arm(
-    recognized_tags: impl IntoIterator<Item = impl MakeScrutinee>,
-) -> TokenStream2 {
-    let mut tags = recognized_tags.into_iter().map(|tag| tag.make_scrutinee());
-
-    match tags.next() {
-        None => quote! {},
-        Some(recognize) => quote! {
-            #recognize #(| #tags)* => todo!("handle conflict"),
-        },
-    }
-}
-
 // We use slices everywhere here because we call `indexed` on them, and we
 // want to enforce (more or less) that we're using the complete set, from
 // a slice, rather than a filtered set from an iterator.
-
+#[expect(clippy::too_many_arguments)]
 fn complete_flagset_flag_body<'a, Tag: MakeScrutinee, T>(
     fields_ident: &Ident,
     argument_ident: &Ident,
@@ -237,6 +225,19 @@ fn complete_flagset_flag_body<'a, Tag: MakeScrutinee, T>(
 where
     &'a T: FlagField<'a>,
 {
+    let conflict = {
+        let mut tags = all_tag_scrutinees
+            .into_iter()
+            .map(|tag| tag.make_scrutinee());
+
+        match tags.next() {
+            None => quote! {},
+            Some(recognize) => quote! {
+                #recognize #(| #tags)* => todo!("handle conflict"),
+            },
+        }
+    };
+
     complete_flag_body(
         fields_ident,
         argument_ident,
@@ -246,7 +247,7 @@ where
         get_tag,
         parameter_method,
         add_parameter_method,
-        conflict_detection_arm(all_tag_scrutinees),
+        conflict,
         [],
         flatten_rebind_argument,
     )
@@ -324,6 +325,39 @@ where
     )
 }
 
+fn variant_field_superposition_initializer<T>(
+    fields_ident: &Ident,
+    requirements_ident: &Ident,
+    source: &VariantFieldSource<'_, T>,
+) -> TokenStream2 {
+    let flag_index = Index::from(source.index);
+    let default = absent_field_initializer(source.field.default.as_ref(), || {
+        quote! {{
+            #requirements_ident.#flag_index = ::core::result::Result::Err(
+                ::debate::parameter::RequiredError
+            );
+
+            break 'block;
+        }}
+    });
+
+    match source.unique {
+        // If the source is unique, and we're in a superposition, we KNOW that
+        // the flag wasn't present on the command line (because it would have
+        // taken us out of a superposition), so we unconditionally use
+        // `absent_field_initializer`
+        true => default,
+        false => {
+            quote! {
+                match #fields_ident.#flag_index {
+                    ::core::option::Option::Some(_) => ::core::option::Option::None,
+                    ::core::option::Option::None => ::core::option::Option::Some(#default),
+                }
+            }
+        }
+    }
+}
+
 pub fn derive_args_enum_flag_set(
     name: &Ident,
     variants: &Punctuated<Variant, Token![,]>,
@@ -331,7 +365,7 @@ pub fn derive_args_enum_flag_set(
     type_lifetime: Option<&AngleBracedLifetime>,
     attr: &ValueEnumAttr,
 ) -> syn::Result<TokenStream2> {
-    let mut parsed = ParsedFlagSetInfo::from_variants(
+    let parsed = ParsedFlagSetInfo::from_variants(
         variants,
         attr.long.map(|long| long.span()).as_ref(),
         attr.short.map(|short| short.span()).as_ref(),
@@ -439,9 +473,6 @@ pub fn derive_args_enum_flag_set(
             }
         });
 
-    let long_flags = indexed(&parsed_flags)
-        .find_map(|(index, flag)| flag.tags.long().map(|long| (index, long, flag)));
-
     // We do a rare pre-emptive collect because this operation is nakedly
     // quadratic so we want to minimize repeated computation. In the future
     // we'd even like to pre-compute the scrutinees directly, but for now we
@@ -512,7 +543,7 @@ pub fn derive_args_enum_flag_set(
                             &fields_ident,
                             &argument,
                             &flag,
-                            &[(ident, source.flag)],
+                            &[(ident, source.field)],
                             ($scrutinees).iter().copied(),
                         ),
                         VariantFieldSourcesMode::Struct(ref sources) => $builder(
@@ -546,42 +577,118 @@ pub fn derive_args_enum_flag_set(
         scrutinees: &all_short_scrutinees,
     );
 
-    let local_value_ident = Ident::new("value", Span::mixed_site());
+    let local_requirements = Ident::new("requirements", Span::mixed_site());
+    let local_fields_ident = Ident::new("local_fields", Span::mixed_site());
+
     let build_from_superposition = {
-        let fields_reinits = indexed(&parsed_flags).map(|(index, flag)| {
-            quote! { ::core::result::Result::Ok(#fields_ident.#index), }
+        let requirement_tracking_inits = parsed_flags.iter().map(|flag| match flag.ever_required {
+            true => {
+                quote! { ::core::result::Result::<(), ::debate::parameter::RequiredError>::Ok(()) }
+            }
+            false => quote! { ::core::result::Result::<(), ::core::convert::Infallible>::Ok(()) },
         });
 
         let variant_attempts =
             variant_sources
                 .iter()
                 .enumerate()
-                .map(|(index, (ident, variant))| {
-                    let bit = variant_bit(index);
+                .map(|(variant_index, (ident, variant))| {
+                    let bit = variant_bit(variant_index);
 
-                    // Step 2a: for each field in this variant, attempt to instantiate
-                    // it. Then, if they all really do exist, return success. Use
-                    // clever juggling of mutable references to allow our `if let`
-                    // binding to work withount unconditionally moving anything.
+                    let local_field_inits = match variant.mode {
+                        VariantFieldSourcesMode::Plain(ref source) => {
+                            variant_field_superposition_initializer(
+                                &fields_ident,
+                                &local_requirements,
+                                source,
+                            )
+                        }
+                        VariantFieldSourcesMode::Struct(ref sources) => {
+                            let inits = sources.iter().map(|source| {
+                                variant_field_superposition_initializer(
+                                    &fields_ident,
+                                    &local_requirements,
+                                    source,
+                                )
+                            });
+
+                            quote! { ( #(#inits,)* ) }
+                        }
+                    };
+
+                    let final_init = match variant.mode {
+                        VariantFieldSourcesMode::Plain(ref source) => {
+                            let index = Index::from(source.index);
+
+                            let init = match source.unique {
+                                true => quote! { #local_fields_ident },
+                                false => quote! {
+                                    match #local_fields_ident {
+                                        None => #fields_ident.#index.unwrap(),
+                                        Some(value) => value,
+                                    }
+                                },
+                            };
+
+                            match source.field.info {
+                                PlainFlagInfo::Unit => {
+                                    quote! {
+                                        {
+                                            let () = #init;
+                                            Self :: #ident
+                                        }
+                                    }
+                                }
+                                PlainFlagInfo::Newtype(_) => {
+                                    quote! { Self :: #ident ( #init ) }
+                                }
+                                PlainFlagInfo::Struct(ref info) => {
+                                    let field = &info.ident.raw();
+                                    quote! { Self :: #ident { #field : #init } }
+                                }
+                            }
+                        }
+                        VariantFieldSourcesMode::Struct(ref sources) => {
+                            let field_inits = indexed(sources).map(|(field_index, source)| {
+                                let flag_index = Index::from(source.index);
+                                let field = source.field.info.ident.raw();
+
+                                let init = match source.unique {
+                                    true => quote! { #local_fields_ident.#field_index },
+                                    false => quote! {
+                                        match #local_fields_ident.#field_index {
+                                            None => #fields_ident.#flag_index.unwrap(),
+                                            Some(value) => value,
+                                        }
+                                    },
+                                };
+
+                                quote! {
+                                    #field : #init
+                                }
+                            });
+
+                            quote! {
+                                Self :: #ident { #(#field_inits,)* }
+                            }
+                        }
+                    };
+
+                    let viability_check = match any_multi_flags {
+                        true => quote! { ((#viable_ident & #bit) != 0) },
+                        false => quote! { true },
+                    };
 
                     quote! {
                         'block : {
-                            if (#viable_ident & #bit) != 0 {
-                                // Instantiate stuff that doesn't live in #fields_ident.
-                                // Each instantiated local will `break` if it encounters
-                                // an error. At the end of this we'll have a tuples
-                                // of high-quality `T` values.
-                                let #local_value_ident = ( #(#instantiate_locals, )* );
+                            if #viability_check {
+                                let #local_fields_ident = #local_field_inits;
 
-                                // Instantiate stuff that DOES live in #fields_ident.
-                                // this won't create a new variable, but it will
-                                // still `break` if any errors are encountered. After
-                                // this chunk, all the values are guaranteed to be
-                                // present
-                                #(#instantiate_globals)*
-
-                                break ::core::result::Result::Ok(
-                                    Self :: #ident { ...inits }
+                                // At this point, we've guaranteed the presence
+                                // of everything we need to create the variant,
+                                // so we can unwrap freely.
+                                return ::core::result::Result::Ok(
+                                    #final_init
                                 )
                             }
                         }
@@ -590,21 +697,19 @@ pub fn derive_args_enum_flag_set(
 
         quote! {
             {
-                // Variant instantiator functions. Each one of these attempts
-                // to construct
+                // Step 1: Create a tuple of results that will track which
+                // flags we end up requiring
+                let mut #local_requirements = ( #(#requirement_tracking_inits,)* );
 
-                // Step 1: replace each field with a Result<Option<T>, RequiredError> or
-                // Result<(), RequiredError>. This will allow us to lazily compute
-                // the errors for absent fields.
-                let #fields_ident = ( #(#fields_reinits,)* );
-
-                // Step 2: for each viable variant: instantiate all of the fields
-                // it needs, then attempt to match them all.
+                // Step 2: for each viable variant: attempt to construct that
+                // variant, and perform an early return with that variant
+                #(#variant_attempts)*
 
                 // Step 3: if we haven't returned yet, all of the variants
                 // we tried to instantiate were missing required fields. Emit
                 // a required field missing error with, ideally, information
                 // about all the fields.
+                todo!("handle required fields missing")
             }
         }
     };
@@ -617,7 +722,7 @@ pub fn derive_args_enum_flag_set(
                 VariantFieldSourcesMode::Plain(ref source) => match source.field.info {
                     PlainFlagInfo::Unit => quote! {},
                     PlainFlagInfo::Newtype(_) => quote! { (#fields_ident.0) },
-                    PlainFlagInfo::Struct(field) => {
+                    PlainFlagInfo::Struct(ref field) => {
                         let ident = &field.ident;
                         quote! { { #ident : #fields_ident.0 } }
                     }
@@ -643,7 +748,7 @@ pub fn derive_args_enum_flag_set(
             };
 
             quote! {
-                Self :: State :: #ident { #fields_ident } => Self :: #ident #body
+                #state_ident :: #ident { #fields_ident } => Self :: #ident #body
             }
         });
 
@@ -737,7 +842,7 @@ pub fn derive_args_enum_flag_set(
                 {
                     ::core::result::Result::Ok(
                         match state {
-                            Self :: State :: #superposition_ident { #viable_ident, #fields_ident } => #build_from_superposition,
+                        #state_ident :: #superposition_ident { #viable_ident, #fields_ident, .. } => #build_from_superposition,
                             #(#build_from_variant_arms,)*
                         }
                     )

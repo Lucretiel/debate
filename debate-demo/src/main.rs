@@ -16,7 +16,7 @@ use debate_derive::{self, FromArgs, ParameterUsage, Usage, Value};
 /// eget, imperdiet porttitor mauris. Sed tristique ligula auctor dolor
 /// aliquam, sed placerat ipsum scelerisque. Mauris felis quam, interdum sit
 /// amet dui quis, pulvinar faucibus ligula.
-#[derive(Debug, FromArgs, Usage)]
+#[derive(Debug, FromArgs)]
 #[debate(help)]
 struct DebateDemo<'arg> {
     /// The path
@@ -145,7 +145,6 @@ enum FlagChoice {
     },
 
     Louder {
-        loud: (),
         shouter: String,
     },
 }
