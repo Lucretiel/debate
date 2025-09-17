@@ -1,7 +1,7 @@
 use darling::FromAttributes as _;
 use heck::ToKebabCase as _;
 use itertools::Itertools as _;
-use syn::{Fields, Ident, Type, Variant, spanned::Spanned as _};
+use syn::{Fields, Ident, Token, Type, Variant, punctuated::Punctuated, spanned::Spanned as _};
 
 use crate::common::{Description, IdentString, ParsedFieldInfo, compute_docs, error_pair};
 
@@ -75,7 +75,14 @@ pub struct ParsedSubcommandInfo<'a> {
 }
 
 impl<'a> ParsedSubcommandInfo<'a> {
-    pub fn from_variants(variants: impl IntoIterator<Item = &'a Variant>) -> syn::Result<Self> {
+    pub fn from_variants(variants: &'a Punctuated<Variant, Token![,]>) -> syn::Result<Self> {
+        if variants.is_empty() {
+            return Err(syn::Error::new(
+                variants.span(),
+                "must have at least one variant",
+            ));
+        }
+
         let mut fallback: Option<&Ident> = None;
         let mut parsed_variants = Vec::new();
 

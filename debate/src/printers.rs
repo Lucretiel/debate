@@ -8,10 +8,11 @@ use indent_write::io::IndentWriter;
 use lazy_format::lazy_format;
 
 use crate::{
+    Tags,
     errors::{BuildError, FieldKind, ParameterError, ParameterSource, StateError},
     help::{
         Description, HelpRequest, Parameter, ParameterOption, ParameterPositional,
-        ParameterSubgroup, Repetition, Requirement, Tags, UsageItems, ValueParameter,
+        ParameterSubgroup, Repetition, Requirement, UsageItems, ValueParameter,
     },
 };
 
@@ -171,11 +172,7 @@ pub fn print_help<'a>(
     let description = description.get(style);
     writeln!(out, "{description}")?;
 
-    section(out, "Synopsis", |mut out| {
-        // TODO: [OPTIONS] is a lie, we should only print it if there's
-        // at least one optional flag.
-        // In particular, we know that there are definitely no options
-        // if items is a subcommand set.
+    section(out, "\nSynopsis", |mut out| {
         write!(out, "{command}")?;
 
         subcommand
@@ -206,13 +203,16 @@ pub fn print_help<'a>(
             groups
                 .clone()
                 .filter(|group| matches!(group.contents, UsageItems::Subcommands { .. }))
-                .try_for_each(|group| print_parameter_subgroup(out, style, group))?;
+                .try_for_each(|group| {
+                    writeln!(out)?;
+                    print_parameter_subgroup(out, style, group)
+                })?;
 
-            maybe_section(out, "Arguments", positionals, |out, positional| {
+            maybe_section(out, "\nArguments", positionals, |out, positional| {
                 print_parameter_positional(out, style, positional)
             })?;
 
-            maybe_section(out, "Options", options, |out, option| {
+            maybe_section(out, "\nOptions", options, |out, option| {
                 print_parameter_option(out, style, option)
             })?;
 
@@ -220,17 +220,20 @@ pub fn print_help<'a>(
                 .filter(|group| !matches!(group.contents, UsageItems::Subcommands { .. }))
                 // TODO: various edge cases here related to anonymous groups.
                 // Hopefully that isn't an issue for a while.
-                .try_for_each(|group| print_parameter_subgroup(out, style, group))
+                .try_for_each(|group| {
+                    writeln!(out)?;
+                    print_parameter_subgroup(out, style, group)
+                })
         }
         UsageItems::Subcommands { commands, .. } => {
-            maybe_section(out, "Commands", commands, |out, command| {
+            maybe_section(out, "\nCommands", commands, |out, command| {
                 describe(out, command.command, &command.description, style)
             })
         }
         UsageItems::Exclusive {
             all_flags: all_options,
             ..
-        } => maybe_section(out, "Options", all_options, |out, option| {
+        } => maybe_section(out, "\nOptions", all_options, |out, option| {
             print_parameter_option(out, style, option)
         }),
     }
@@ -326,7 +329,7 @@ fn printable_option_synopsis(option: &ParameterOption<'_>) -> impl Display {
 
     lazy_format!(match (option.repetition) {
         Repetition::Single => "{tag}",
-        Repetition::Multiple => "<{tag}>...",
+        Repetition::Multiple => "({tag})...",
     })
 }
 
@@ -343,7 +346,7 @@ fn print_synopsis(
                         return Ok(());
                     }
 
-                    write!(out, "{}", printable_option_synopsis(option))
+                    write!(out, " {}", printable_option_synopsis(option))
                 }
                 Parameter::Positional(positional) => {
                     let placeholder = positional.argument.placeholder;
@@ -389,7 +392,7 @@ fn print_synopsis(
                     None => Ok(()),
                     Some(group) => {
                         let tail = lazy_format!(" | {group}" for group in groups.clone());
-                        write!(out, " {{{group}{tail}}}")
+                        write!(out, " ({group}{tail})")
                     }
                 }
             }
@@ -407,7 +410,7 @@ fn section<O: io::Write + ?Sized, T>(
     header: &str,
     body: impl FnOnce(IndentWriter<&mut O>) -> io::Result<T>,
 ) -> io::Result<T> {
-    writeln!(out, "\n{header}:")?;
+    writeln!(out, "{header}:")?;
     let value = body(IndentWriter::new("  ", out))?;
 
     Ok(value)

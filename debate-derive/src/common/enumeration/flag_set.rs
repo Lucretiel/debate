@@ -219,6 +219,12 @@ impl<'a> ParsedFlagSetInfo<'a> {
         auto_long: Option<&Span>,
         auto_short: Option<&Span>,
     ) -> syn::Result<Self> {
+        if variants.is_empty() {
+            return Err(syn::Error::new(
+                variants.span(),
+                "must have at least one variant",
+            ));
+        }
         let variants: IndexMap<IdentString<'a>, FlagSetVariant<'a>> = variants
             .into_iter()
             .map(|variant| {

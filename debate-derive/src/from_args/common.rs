@@ -1,6 +1,4 @@
-use std::default;
-
-use proc_macro2::{Literal, Punct, Spacing, Span, TokenStream as TokenStream2, TokenTree};
+use proc_macro2::{Literal, Span, TokenStream as TokenStream2};
 use quote::{ToTokens, format_ident, quote};
 use syn::{Ident, Index, Lifetime};
 
@@ -15,7 +13,7 @@ pub enum HelpMode {
 }
 
 #[must_use]
-pub fn struct_state_block<'a>(
+pub fn struct_state_block(
     position_ty: impl ToTokens,
     lifetime: &Lifetime,
     fields_types: impl IntoIterator<Item = TokenStream2>,
@@ -72,8 +70,8 @@ pub fn struct_state_block_from_fields(
 
 /// Create a default initializer block for a structure
 #[must_use]
-pub fn struct_state_init_block_from_field_count<'a>(num_fields: usize) -> TokenStream2 {
-    let field_state_initializers = (0..num_fields).into_iter().map(|_| {
+pub fn struct_state_init_block_from_field_count(num_fields: usize) -> TokenStream2 {
+    let field_state_initializers = (0..num_fields).map(|_| {
         quote! {
             ::core::default::Default::default()
         }
@@ -92,17 +90,13 @@ pub fn struct_state_init_block_from_field_count<'a>(num_fields: usize) -> TokenS
 
 /// Basically the same as `enumerate`, but the items are paired with a
 /// `syn::Index` instead, suitable for use to look stuff up in a tuple.
-#[must_use]
-pub fn indexed<'a, T>(
-    fields: &'a [T],
-) -> impl Iterator<Item = (Index, &'a T)> + DoubleEndedIterator + Clone {
+pub fn indexed<T>(fields: &[T]) -> impl DoubleEndedIterator<Item = (Index, &T)> + Clone {
     fields
         .iter()
         .enumerate()
         .map(|(index, field)| (Index::from(index), field))
 }
 
-#[must_use]
 fn flag_fields<'a>(
     fields: &'a [ParsedFieldInfo<'a>],
 ) -> impl Iterator<Item = (Index, &'a FlagFieldInfo<'a>)> {
@@ -112,17 +106,15 @@ fn flag_fields<'a>(
     })
 }
 
-#[must_use]
 fn flatten_fields<'a>(
     fields: &'a [ParsedFieldInfo<'a>],
-) -> impl Iterator<Item = (Index, &'a FlattenFieldInfo<'a>)> + DoubleEndedIterator {
+) -> impl DoubleEndedIterator<Item = (Index, &'a FlattenFieldInfo<'a>)> {
     indexed(fields).filter_map(|(index, field)| match field {
         ParsedFieldInfo::Flatten(field) => Some((index, field)),
         ParsedFieldInfo::Flag(_) | ParsedFieldInfo::Positional(_) => None,
     })
 }
 
-#[must_use]
 fn positional_flatten_fields<'a>(
     fields: &'a [ParsedFieldInfo<'a>],
 ) -> impl Iterator<
@@ -167,7 +159,6 @@ impl<'a> FieldNature<'a> {
 ///
 /// If `Parameter::follow_up_method` is omitted, then we assume this is an
 /// overridable field and that we should always use `initial_method`
-
 #[must_use]
 pub fn apply_arg_to_field(
     fields_ident: &Ident,
@@ -222,7 +213,6 @@ pub fn apply_arg_to_field(
 /// Given an expression that returns a Result<(), E>, wrap it such that `Ok`
 /// is RETURNED, `DetectUnrecognized::Unrecognized` is propagated as the value
 /// of the expression, and other errors are returned as an error via `wrap_error`
-
 #[must_use]
 pub fn handle_propagated_error(
     expr: impl ToTokens,
@@ -267,7 +257,6 @@ pub fn handle_flatten(
 ///     *position = {/* handle argument for this field */}
 /// }
 /// ```
-#[must_use]
 pub fn visit_positional_arms_for_fields(
     fields_ident: &Ident,
     argument_ident: &Ident,

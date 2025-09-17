@@ -2,12 +2,12 @@ use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
 
 use crate::common::{
-    Description, FlagFieldInfo, FlagTags, FlattenFieldInfo, HelpFlag, IdentString, ParsedFieldInfo,
+    Description, FlagFieldInfo, FlagTags, FlattenFieldInfo, HelpFlag, ParsedFieldInfo,
     enumeration::flag_set::FlagType,
 };
 
 /// Convert a set of tags into an expression suitable for use after
-/// `::debate::help::Tags`
+/// `::debate::Tags`
 fn compute_usage_tags(tags: &FlagTags<&str, char>) -> TokenStream2 {
     match *tags {
         FlagTags::Long(ref long) => quote! { Long { long : #long } },
@@ -117,7 +117,7 @@ pub fn flag_usage(flag: impl FlagUsageInfo) -> TokenStream2 {
                 repetition: <#ty as ::debate::help::ParameterUsage>::REPETITION,
                 argument: <#ty as ::debate::help::ParameterUsage>::VALUE
                     .as_maybe_value_parameter(#placeholder),
-                tags: ::debate::help::Tags:: #tags,
+                tags: ::debate::Tags:: #tags,
             }
         }
     }
@@ -203,7 +203,7 @@ pub fn struct_usage_items(
                 requirement: ::debate::help::Requirement::Optional,
                 repetition: ::debate::help::Repetition::Single,
                 argument: ::core::option::Option::None,
-                tags: ::debate::help::Tags:: #tags,
+                tags: ::debate::Tags:: #tags,
             }),
         }
     });

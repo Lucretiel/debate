@@ -133,7 +133,7 @@ fn find_best_ident<'a>(
 fn find_best_ident_from_pattern_list<'a>(
     option: impl IntoIterator<Item = &'a Pat>,
 ) -> Option<IdentString<'a>> {
-    find_best_ident(option.into_iter().filter_map(|pat| get_useful_ident(pat)))
+    find_best_ident(option.into_iter().filter_map(get_useful_ident))
 }
 
 /// Get an ident from the pattern. We don't really care which one, though we
@@ -144,13 +144,13 @@ fn get_useful_ident(pattern: &Pat) -> Option<IdentString<'_>> {
             None => Some(IdentString::new(&pat.ident)),
             Some((_, ref subpat)) => {
                 find_best_ident(LazyPair::new(IdentString::new(&pat.ident), || {
-                    get_useful_ident(&subpat)
+                    get_useful_ident(subpat)
                 }))
             }
         },
         Pat::Or(pat) => find_best_ident_from_pattern_list(&pat.cases),
         Pat::Paren(inner) => get_useful_ident(&inner.pat),
-        Pat::Path(path) => path.path.get_ident().map(|ident| IdentString::new(ident)),
+        Pat::Path(path) => path.path.get_ident().map(IdentString::new),
         Pat::Reference(pat) => get_useful_ident(&pat.pat),
         Pat::Slice(pat) => find_best_ident_from_pattern_list(&pat.elems),
         Pat::Struct(pat) => {

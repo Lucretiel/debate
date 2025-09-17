@@ -68,6 +68,17 @@ struct DebateDemo<'arg> {
     /// A list of possible items we're interested in
     #[debate(short, long = "item", invert = "no-items")]
     items: Vec<String>,
+
+    /// A target, either --release or --debug
+    #[debate(flatten)]
+    target: Target,
+}
+
+#[derive(Debug, Usage, FromArgs)]
+#[debate(long)]
+enum Target {
+    Debug,
+    Release,
 }
 
 #[derive(FromArgs, Usage, Debug)]
@@ -185,7 +196,7 @@ enum Subcommand<'arg> {
     /// Run the project's tests
     Test(TestArgs),
 
-    ///
+    /// A subcommand with a set of mututally exclusive arguments
     ExclusiveAction(FlagChoice),
 }
 
