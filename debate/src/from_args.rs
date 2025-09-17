@@ -98,7 +98,7 @@ where
 
         let mut state = T::State::default();
 
-        // TODO: get your hands on argv(0) somehow. Don't really want to
+        // FIXME: get your hands on argv(0) somehow. Don't really want to
         // put it into arguments. Take it as a function argument and force
         // people to use the Arguments helper? Don't bother and just insist
         // people name their struct correctly?
@@ -121,7 +121,7 @@ where
                 // instead of from `Self`
 
                 let print_result = match state.get_subcommand_path({
-                    // TODO: We'd LOVE it if this could be a closure,
+                    // FIXME: We'd LOVE it if this could be a closure,
                     // obviously. Currently it chokes on lifetimes.
                     use crate::state::SubcommandVisitor;
 
@@ -185,8 +185,6 @@ where
 
                 process::exit(0);
             } else {
-                // TODO: print a usage message here, perhaps one that specifically
-                // accounts the flag that caused the error
                 use_stream_and_die! {
                     stderr = io::stderr().lock(),
                     writeln!(stderr, "{}", build_error(&error)),
