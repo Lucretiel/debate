@@ -17,6 +17,9 @@ pub trait Error {
     /// A required positional field wasn't present
     fn required_positional(field: &'static str, placeholder: &'static str) -> Self;
 
+    // TODO: Variations on Requirement errors (allow for a spread of
+    // requirements)
+
     /// There was an error building a flattened field
     fn flattened(field: &'static str, error: Self) -> Self;
 

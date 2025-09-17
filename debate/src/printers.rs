@@ -120,6 +120,7 @@ pub fn build_error(error: &BuildError) -> impl Display {
     }
 }
 
+/// If true, we'll include an "[OPTIONS]" at the beginning of the synopsis.
 fn any_options(items: &UsageItems<'_>) -> bool {
     match *items {
         UsageItems::Parameters { parameters } => {
@@ -129,38 +130,22 @@ fn any_options(items: &UsageItems<'_>) -> bool {
                 Parameter::Group(group) => any_options(&group.contents),
             })
         }
+        UsageItems::Exclusive {
+            requirement: Requirement::Optional,
+            all_flags,
+            ..
+        } => !all_flags.is_empty(),
+        UsageItems::Exclusive { groups, .. } => groups.iter().any(|group| {
+            group
+                .iter()
+                .any(|flag| flag.requirement == Requirement::Optional)
+        }),
         // Subcommands might have options, but their usage messages are printed
         // separately.
-        UsageItems::Subcommands { .. } => todo!(),
-        // For now we'll say yes, but definitely will revisit later when we
-        // decide how to print synopses for exclusive flag sets
-        UsageItems::Exclusive {
-            all_flags: all_options,
-            ..
-        } => !all_options.is_empty(),
+        UsageItems::Subcommands { .. } => false,
     }
 }
 
-/*
-Overall structure:
-
-DESCRIPTION
-
-USAGE:
-  command [OPTIONS] <ARG>
-
-ARGUMENTS:
-  <ARG>
-
-OPTIONS:
-  -f, --foo <ARG>
-      --help
-  -g
-
-GROUP:
-  etc
-
- */
 pub fn print_help<'a>(
     out: &mut impl io::Write,
     command: &str,
@@ -218,8 +203,6 @@ pub fn print_help<'a>(
 
             groups
                 .filter(|group| !matches!(group.contents, UsageItems::Subcommands { .. }))
-                // TODO: various edge cases here related to anonymous groups.
-                // Hopefully that isn't an issue for a while.
                 .try_for_each(|group| {
                     writeln!(out)?;
                     print_parameter_subgroup(out, style, group)
@@ -269,7 +252,7 @@ fn print_parameter_option(
     option: &ParameterOption<'_>,
 ) -> io::Result<()> {
     // TODO: find a way to express the repetition and
-    // requirement for an option
+    // requirement for an option in the general usage message
     let tags = lazy_format!(match (option.tags) {
         Tags::Short { short } => "-{short}",
         Tags::Long { long } => "    --{long}",
@@ -402,9 +385,6 @@ fn print_synopsis(
 
 /// Write a section by writing a newline, then the `header`, then an
 /// indented `body`.
-///
-/// TODO: Only top-level sections should get the bonus leading newline.
-/// Consider removing it from `section` and doing it only in `print_help`.
 fn section<O: io::Write + ?Sized, T>(
     out: &mut O,
     header: &str,
