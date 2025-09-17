@@ -361,7 +361,7 @@ impl<'a> ParsedFieldInfo<'a> {
             )
         })?);
 
-        if let Some(_) = parsed.flatten {
+        if parsed.flatten.is_some() {
             // TODO: find a less brittle way to enforce the valid mutually
             // permissible sets here.
             reject_some!(
@@ -477,7 +477,6 @@ fn unpack_spanned_override<T>(value: SpannedValue<Override<T>>) -> Option<Spanne
 ///
 /// If the value ends up derived from the field identifier, the span is set
 /// to that identifier.
-#[must_use]
 fn derive_from_field_name<T>(
     user_value: Option<SpannedValue<T>>,
     field_name: SpannedValue<&str>,
@@ -505,7 +504,6 @@ macro_rules! checks {
 }
 
 #[inline]
-#[must_use]
 fn compute_long(
     long: Option<SpannedValue<String>>,
     field_name: &IdentString<'_>,
@@ -535,7 +533,6 @@ fn compute_long(
 }
 
 #[inline]
-#[must_use]
 fn compute_short(
     short: Option<SpannedValue<char>>,
     field_name: &IdentString<'_>,
@@ -559,18 +556,17 @@ fn compute_short(
     )
 }
 
-#[must_use]
 pub fn compute_tags(
     long: Option<SpannedValue<Override<String>>>,
     short: Option<SpannedValue<Override<char>>>,
     ident: &IdentString<'_>,
 ) -> syn::Result<Option<FlagTags<SpannedValue<String>, SpannedValue<char>>>> {
     let long = long
-        .map(|long| compute_long(unpack_spanned_override(long), &ident))
+        .map(|long| compute_long(unpack_spanned_override(long), ident))
         .transpose()?;
 
     let short = short
-        .map(|short| compute_short(unpack_spanned_override(short), &ident))
+        .map(|short| compute_short(unpack_spanned_override(short), ident))
         .transpose()?;
 
     Ok(match (long, short) {
@@ -582,7 +578,6 @@ pub fn compute_tags(
 }
 
 #[inline]
-#[must_use]
 fn compute_placeholder(
     placeholder: Option<SpannedValue<String>>,
     field_name: &IdentString<'_>,
@@ -600,7 +595,6 @@ fn compute_placeholder(
 }
 
 #[inline]
-#[must_use]
 fn compute_invert(
     // If given, the user's preference for the flag. If omitted, we'll compute
     // it by prefixing the `long` tag with `no-`

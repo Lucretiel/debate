@@ -133,7 +133,10 @@ fn any_options(items: &UsageItems<'_>) -> bool {
         UsageItems::Subcommands { .. } => todo!(),
         // For now we'll say yes, but definitely will revisit later when we
         // decide how to print synopses for exclusive flag sets
-        UsageItems::Exclusive { all_options, .. } => all_options.len() > 0,
+        UsageItems::Exclusive {
+            all_flags: all_options,
+            ..
+        } => !all_options.is_empty(),
     }
 }
 
@@ -166,7 +169,7 @@ pub fn print_help<'a>(
     style: HelpRequest,
 ) -> io::Result<()> {
     let description = description.get(style);
-    write!(out, "{description}\n")?;
+    writeln!(out, "{description}")?;
 
     section(out, "Synopsis", |mut out| {
         // TODO: [OPTIONS] is a lie, we should only print it if there's
@@ -183,7 +186,7 @@ pub fn print_help<'a>(
             write!(out, " [OPTIONS]")?;
         }
 
-        print_synopsis(&mut out, "COMMAND", style, items)?;
+        print_synopsis(&mut out, "COMMAND", items)?;
         writeln!(out)
     })?;
 
@@ -224,11 +227,12 @@ pub fn print_help<'a>(
                 describe(out, command.command, &command.description, style)
             })
         }
-        UsageItems::Exclusive { all_options, .. } => {
-            maybe_section(out, "Options", all_options, |out, option| {
-                print_parameter_option(out, style, option)
-            })
-        }
+        UsageItems::Exclusive {
+            all_flags: all_options,
+            ..
+        } => maybe_section(out, "Options", all_options, |out, option| {
+            print_parameter_option(out, style, option)
+        }),
     }
 }
 
@@ -239,22 +243,20 @@ fn print_usage_items(
 ) -> io::Result<()> {
     match *items {
         UsageItems::Parameters { parameters } => {
-            parameters
-                .into_iter()
-                .try_for_each(|parameter| match parameter {
-                    Parameter::Option(option) => print_parameter_option(out, style, option),
-                    Parameter::Positional(positional) => {
-                        print_parameter_positional(out, style, positional)
-                    }
-                    Parameter::Group(group) => print_parameter_subgroup(out, style, group),
-                })
+            parameters.iter().try_for_each(|parameter| match parameter {
+                Parameter::Option(option) => print_parameter_option(out, style, option),
+                Parameter::Positional(positional) => {
+                    print_parameter_positional(out, style, positional)
+                }
+                Parameter::Group(group) => print_parameter_subgroup(out, style, group),
+            })
         }
         UsageItems::Subcommands { commands, .. } => commands
             .iter()
             .try_for_each(|command| describe(out, command.command, &command.description, style)),
-        UsageItems::Exclusive { .. } => {
-            todo!()
-        }
+        UsageItems::Exclusive { all_flags, .. } => all_flags
+            .iter()
+            .try_for_each(|flag| print_parameter_option(out, style, flag)),
     }
 }
 
@@ -314,7 +316,6 @@ fn print_parameter_subgroup(
 fn print_synopsis(
     out: &mut (impl io::Write + ?Sized),
     subcommand_placeholder: &str,
-    style: HelpRequest,
     items: &UsageItems<'_>,
 ) -> io::Result<()> {
     match *items {
@@ -355,9 +356,7 @@ fn print_synopsis(
 
                     write!(out, " {name}")
                 }
-                Parameter::Group(group) => {
-                    print_synopsis(out, group.placeholder, style, &group.contents)
-                }
+                Parameter::Group(group) => print_synopsis(out, group.placeholder, &group.contents),
             })
         }
         UsageItems::Subcommands { requirement, .. } => match requirement {

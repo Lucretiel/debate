@@ -1,4 +1,5 @@
-pub mod subcommand;
+mod flag_set;
+mod subcommand;
 
 use darling::FromAttributes as _;
 use proc_macro2::TokenStream as TokenStream2;
@@ -17,6 +18,6 @@ pub fn derive_usage_enum(
     if attr.subcommand.is_some() {
         subcommand::derive_usage_enum_subcommand(name, variants, type_lifetime)
     } else {
-        todo!("not implemented yet")
+        flag_set::derive_usage_enum_flag_set(name, variants, type_lifetime, &attr)
     }
 }

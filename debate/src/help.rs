@@ -119,17 +119,17 @@ pub enum UsageItems<'a> {
         commands: &'a [Subcommand<'a>],
     },
 
-    /// This usage describes mutually sets of options, where exactly one set of
-    /// options must be present
+    /// This usage describes mutually sets of flags, where exactly one set of
+    /// flags must be present
     Exclusive {
-        /// The groups of options. Each child slice here represents a mutually
+        /// The groups of flags. Each child slice here represents a mutually
         /// exclusive separate group of flags.
         groups: &'a [&'a [ParameterOption<'a>]],
 
-        /// The complete set of options. Options may appear in more than one
+        /// The complete set of flags. Flags may appear in more than one
         /// group (so long as they're identical); so this list deduplicates
         /// them.
-        all_options: &'a [ParameterOption<'a>],
+        all_flags: &'a [ParameterOption<'a>],
     },
 }
 

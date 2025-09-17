@@ -8,7 +8,7 @@ use indexmap::IndexMap;
 use itertools::Itertools as _;
 use proc_macro2::{Delimiter, Group, Span, TokenStream, TokenTree};
 use quote::ToTokens;
-use syn::{Expr, Ident, Type, Variant, spanned::Spanned};
+use syn::{Expr, Ident, Token, Type, Variant, punctuated::Punctuated, spanned::Spanned};
 
 use crate::common::{
     Description, FieldDefault, FlagTags, IdentString, compute_docs, compute_placeholder,
@@ -53,9 +53,9 @@ pub struct FlagSetFlagInfo<Info> {
     pub overridable: Option<SpannedValue<()>>,
 }
 
-trait FlagSetFlagExtra<'a> {
-    fn as_flag_set_type(&self) -> FlagSetType<'a>;
-    fn field(&'a self) -> Option<&IdentString<'a>>;
+pub trait FlagSetFlagExtra<'a> {
+    fn as_flag_set_type(&self) -> FlagType<'a>;
+    fn field(&'a self) -> Option<&'a IdentString<'a>>;
     fn site(&self) -> FlagSetFlagSite<'_>;
 }
 
@@ -65,15 +65,15 @@ pub struct FlagFieldInfo<'a> {
 }
 
 impl<'a> FlagSetFlagExtra<'a> for FlagFieldInfo<'a> {
-    fn as_flag_set_type(&self) -> FlagSetType<'a> {
-        FlagSetType::Typed(self.ty)
+    fn as_flag_set_type(&self) -> FlagType<'a> {
+        FlagType::Typed(self.ty)
     }
 
-    fn field(&self) -> Option<&IdentString<'a>> {
+    fn field(&'a self) -> Option<&'a IdentString<'a>> {
         Some(&self.ident)
     }
 
-    fn site(&self) -> FlagSetFlagSite {
+    fn site(&self) -> FlagSetFlagSite<'_> {
         FlagSetFlagSite::Field(&self.ident)
     }
 }
@@ -85,17 +85,17 @@ pub enum PlainFlagInfo<'a> {
 }
 
 impl<'a> PlainFlagInfo<'a> {
-    pub fn ty(&self) -> FlagSetType<'a> {
+    pub fn ty(&self) -> FlagType<'a> {
         match *self {
-            PlainFlagInfo::Unit => FlagSetType::Unit,
-            PlainFlagInfo::Newtype(ty) => FlagSetType::Typed(ty),
-            PlainFlagInfo::Struct(ref info) => FlagSetType::Typed(info.ty),
+            PlainFlagInfo::Unit => FlagType::Unit,
+            PlainFlagInfo::Newtype(ty) => FlagType::Typed(ty),
+            PlainFlagInfo::Struct(ref info) => FlagType::Typed(info.ty),
         }
     }
 }
 
 impl<'a> FlagSetFlagExtra<'a> for PlainFlagInfo<'a> {
-    fn as_flag_set_type(&self) -> FlagSetType<'a> {
+    fn as_flag_set_type(&self) -> FlagType<'a> {
         self.ty()
     }
 
@@ -116,12 +116,19 @@ impl<'a> FlagSetFlagExtra<'a> for PlainFlagInfo<'a> {
     }
 }
 
-impl<'a> From<FlagFieldInfo<'a>> for PlainFlagInfo<'a> {
-    fn from(info: FlagFieldInfo<'a>) -> Self {
-        Self::Struct(info)
-    }
-}
+// impl<'a> From<FlagFieldInfo<'a>> for PlainFlagInfo<'a> {
+//     fn from(info: FlagFieldInfo<'a>) -> Self {
+//         Self::Struct(info)
+//     }
+// }
 
+// We disable this lint here for two reasons:
+// - We expect the typical case to be plain variants, which means that there's
+//   not a lot of wasted space
+// - FlagSetVariant objects live in an IndexMap after construction, so they
+//   aren't passed by move more than once and therefore don't impose any copy
+//   penalty that the `Box` would help with
+#[expect(clippy::large_enum_variant)]
 pub enum FlagSetVariant<'a> {
     /// A plain variant is a unit variant, a newtype variant, OR a struct
     /// variant with exactly one field
@@ -130,18 +137,18 @@ pub enum FlagSetVariant<'a> {
 }
 
 #[derive(Clone, Copy)]
-pub enum FlagSetType<'a> {
+pub enum FlagType<'a> {
     Unit,
     Typed(&'a Type),
 }
 
-impl ToTokens for FlagSetType<'_> {
+impl ToTokens for FlagType<'_> {
     fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
         match *self {
-            FlagSetType::Typed(ty) => ty.to_tokens(tokens),
+            FlagType::Typed(ty) => ty.to_tokens(tokens),
 
             // Empty tuple
-            FlagSetType::Unit => tokens.extend([TokenTree::Group(Group::new(
+            FlagType::Unit => tokens.extend([TokenTree::Group(Group::new(
                 Delimiter::Parenthesis,
                 TokenStream::new(),
             ))]),
@@ -208,7 +215,7 @@ macro_rules! create_flag {
 
 impl<'a> ParsedFlagSetInfo<'a> {
     pub fn from_variants(
-        variants: impl IntoIterator<Item = &'a Variant>,
+        variants: &'a Punctuated<Variant, Token![,]>,
         auto_long: Option<&Span>,
         auto_short: Option<&Span>,
     ) -> syn::Result<Self> {
@@ -322,11 +329,6 @@ impl<'a> FlagSetFlagSite<'a> {
     }
 }
 
-pub struct FlagSetFlagStateSite {
-    pub index: usize,
-    pub len: usize,
-}
-
 /// For a given global flag, this includes information about one of the
 /// variants attached to that flag.
 pub struct FlagSetFlagVariant<'a> {
@@ -337,7 +339,7 @@ pub struct FlagSetFlagVariant<'a> {
     pub index: usize,
 
     /// The location of this flag within this variant. Used in state initializers.
-    pub state_site: FlagSetFlagStateSite,
+    pub field_index: usize,
 
     /// The location of this flag within this variant, as an identifier.
     pub site: FlagSetFlagSite<'a>,
@@ -364,7 +366,7 @@ pub struct FlagSetFlag<'a> {
     /// between types; we rely on the compilers own type-checking to both
     /// check the type and produce a better error message about the wrong
     /// type
-    pub ty: FlagSetType<'a>,
+    pub ty: FlagType<'a>,
 
     /// Computed tags for this flag. Possibly enabled by a debate attribute
     /// on the enum itself, in addition to the flag
@@ -479,7 +481,7 @@ fn add_or_update_flag<'a, Info>(
     family: Family<()>,
     variant: &'a IdentString<'a>,
     variant_index: usize,
-    state_site: FlagSetFlagStateSite,
+    field_index: usize,
 ) -> syn::Result<usize>
 where
     Info: FlagSetFlagExtra<'a>,
@@ -559,7 +561,7 @@ where
     existing_flag.variants.push(FlagSetFlagVariant {
         ident: variant,
         index: variant_index,
-        state_site,
+        field_index,
         site: variant_flag.info.site(),
     });
     existing_flag.family.merge(family, variant);
@@ -618,7 +620,7 @@ pub fn compute_grouped_flags<'a>(
                     Family::Solitary(()),
                     variant_ident,
                     variant_index,
-                    FlagSetFlagStateSite { index: 0, len: 1 },
+                    0,
                 )
                 .map(|flag_index| VariantFieldSource {
                     index: flag_index,
@@ -636,10 +638,7 @@ pub fn compute_grouped_flags<'a>(
                             Family::Sibling,
                             variant_ident,
                             variant_index,
-                            FlagSetFlagStateSite {
-                                index: field_index,
-                                len: fields.len(),
-                            },
+                            field_index,
                         )
                         .map(|field_index| VariantFieldSource {
                             index: field_index,

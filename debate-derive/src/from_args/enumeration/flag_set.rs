@@ -1,5 +1,3 @@
-use std::{collections::HashMap, f32::consts::E, iter::Copied, slice::Iter as SliceIter};
-
 use indexmap::IndexMap;
 use itertools::Itertools;
 use proc_macro2::{Span, TokenStream as TokenStream2};
@@ -8,17 +6,16 @@ use syn::{Ident, Index, Lifetime, Token, Variant, punctuated::Punctuated, spanne
 
 use crate::{
     common::{
-        FieldDefault, FlagTags, IdentString,
+        FlagTags, IdentString,
         enumeration::flag_set::{
-            FlagFieldInfo, FlagSetFlag, FlagSetFlagInfo, FlagSetFlagSite, FlagSetFlagStateSite,
-            ParsedFlagSetInfo, PlainFlagInfo, VariantFieldSource, VariantFieldSources,
-            VariantFieldSourcesMode, compute_grouped_flags,
+            FlagFieldInfo, FlagSetFlag, FlagSetFlagInfo, ParsedFlagSetInfo, PlainFlagInfo,
+            VariantFieldSource, VariantFieldSources, VariantFieldSourcesMode,
+            compute_grouped_flags,
         },
     },
     from_args::common::{
         FieldNature, FlagField, MakeScrutinee, NormalFieldInfo, absent_field_initializer,
-        apply_arg_to_field, complete_flag_body, default_field_initializer, indexed,
-        struct_field_initializer,
+        apply_arg_to_field, complete_flag_body, indexed, struct_field_initializer,
     },
     generics::AngleBracedLifetime,
 };
@@ -29,6 +26,7 @@ fn variant_bit(i: usize) -> TokenStream2 {
     quote! { const { 1u64 << #i } }
 }
 
+#[expect(clippy::too_many_arguments)]
 fn handle_superposition_argument<'a, Tag: MakeScrutinee>(
     fields_ident: &Ident,
     viable_ident: &Ident,
@@ -73,7 +71,7 @@ fn handle_superposition_argument<'a, Tag: MakeScrutinee>(
                             .iter()
                             .enumerate()
                             .map(|(index_in_variant, source)| {
-                                if index_in_variant == destination.state_site.index {
+                                if index_in_variant == destination.field_index {
                                     quote! { ::core::option::Option::Some(value) }
                                 } else {
                                     let source_index = Index::from(source.index);

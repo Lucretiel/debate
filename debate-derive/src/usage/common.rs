@@ -1,7 +1,10 @@
 use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
 
-use crate::common::{Description, FlagTags, FlattenFieldInfo, HelpFlag, ParsedFieldInfo};
+use crate::common::{
+    Description, FlagFieldInfo, FlagTags, FlattenFieldInfo, HelpFlag, IdentString, ParsedFieldInfo,
+    enumeration::flag_set::FlagType,
+};
 
 /// Convert a set of tags into an expression suitable for use after
 /// `::debate::help::Tags`
@@ -28,6 +31,93 @@ impl Description {
             ::debate::help::Description {
                 succinct: #succinct,
                 full: #full,
+            }
+        }
+    }
+}
+
+pub trait FlagUsageInfo {
+    fn docs(&self) -> &Description;
+    fn defaulted(&self) -> bool;
+    fn ty(&self) -> FlagType<'_>;
+    fn tags(&self) -> FlagTags<&str, char>;
+    fn placeholder(&self) -> &str;
+}
+
+impl FlagUsageInfo for &FlagFieldInfo<'_> {
+    fn docs(&self) -> &Description {
+        &self.docs
+    }
+
+    fn defaulted(&self) -> bool {
+        self.default.is_some()
+    }
+
+    fn ty(&self) -> FlagType<'_> {
+        FlagType::Typed(self.ty)
+    }
+
+    fn tags(&self) -> FlagTags<&str, char> {
+        self.tags.simplify()
+    }
+
+    fn placeholder(&self) -> &str {
+        self.placeholder.as_str()
+    }
+}
+
+struct Invert<'a> {
+    tag: &'a str,
+}
+
+impl FlagUsageInfo for Invert<'_> {
+    fn docs(&self) -> &Description {
+        const {
+            &Description {
+                succinct: String::new(),
+                full: String::new(),
+            }
+        }
+    }
+
+    fn defaulted(&self) -> bool {
+        true
+    }
+
+    fn ty(&self) -> FlagType<'_> {
+        FlagType::Unit
+    }
+
+    fn tags(&self) -> FlagTags<&str, char> {
+        FlagTags::Long(self.tag)
+    }
+
+    fn placeholder(&self) -> &str {
+        ""
+    }
+}
+
+/// Given a description of a flag, produce a const expression of type
+/// `:debate::help::ParameterOption`
+pub fn flag_usage(flag: impl FlagUsageInfo) -> TokenStream2 {
+    let tags = compute_usage_tags(&flag.tags());
+    let placeholder = flag.placeholder();
+    let ty = flag.ty();
+    let defaulted = flag.defaulted();
+    let docs = flag.docs().quote();
+
+    quote! {
+        const {
+            ::debate::help::ParameterOption {
+                description: #docs,
+                requirement: match #defaulted {
+                    true => ::debate::help::Requirement::Optional,
+                    false => <#ty as ::debate::help::ParameterUsage>::REQUIREMENT,
+                },
+                repetition: <#ty as ::debate::help::ParameterUsage>::REPETITION,
+                argument: <#ty as ::debate::help::ParameterUsage>::VALUE
+                    .as_maybe_value_parameter(#placeholder),
+                tags: ::debate::help::Tags:: #tags,
             }
         }
     }
@@ -60,39 +150,18 @@ pub fn struct_usage_items(
             }
         }
         ParsedFieldInfo::Flag(field) => {
-            let tags = compute_usage_tags(&field.tags.simplify());
-            let placeholder = field.placeholder.as_str();
-            let ty = field.ty;
-            let defaulted = field.default.is_some();
-            let docs = field.docs.quote();
-
-            let invert = field.invert.as_ref().map(|invert| {
-                let long = invert.as_str();
-
+            let invert = field.invert.as_ref().map(|tag| {
+                let usage = flag_usage(Invert { tag: tag.as_str() });
                 quote! {
-                    ::debate::help::Parameter::Option(::debate::help::ParameterOption {
-                        description: ::debate::help::Description::new(""),
-                        requirement: ::debate::help::Requirement::Optional,
-                        repetition: ::debate::help::Repetition::Single,
-                        argument: ::core::option::Option::None,
-                        tags: ::debate::help::Tags::Long { long: #long},
-                    }),
+                    ::debate::help::Parameter::Option(#usage),
                 }
             });
 
+            let usage = flag_usage(field);
+
             quote! {
                 #invert
-                ::debate::help::Parameter::Option(::debate::help::ParameterOption {
-                    description: #docs,
-                    requirement: match #defaulted {
-                        true => ::debate::help::Requirement::Optional,
-                        false => <#ty as ::debate::help::ParameterUsage>::REQUIREMENT,
-                    },
-                    repetition: <#ty as ::debate::help::ParameterUsage>::REPETITION,
-                    argument: <#ty as ::debate::help::ParameterUsage>::VALUE
-                        .as_maybe_value_parameter(#placeholder),
-                    tags: ::debate::help::Tags:: #tags,
-                }),
+                ::debate::help::Parameter::Option(#usage),
             }
         }
         ParsedFieldInfo::Flatten(FlattenFieldInfo {
