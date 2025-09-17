@@ -7,14 +7,14 @@ use core::hash::Hash;
 
 use debate_parser::Arg;
 
-use crate::build;
-use crate::help::{ParameterUsage, ParameterValueKind, Repetition, Requirement};
+use crate::help::{ParameterUsage, ParameterValueKind, Repetition, Requirement, Usage};
 use crate::parameter::{
     ArgAccess, Error as ParameterError, Parameter, ParsedValue, PositionalParameter, RequiredError,
     Value,
 };
 use crate::state;
 use crate::util::{DetectUnrecognized, arg_as_str};
+use crate::{build, help};
 
 macro_rules! from_str {
     ($(
@@ -285,4 +285,23 @@ where
             Some(state) => state.get_subcommand_path(visitor),
         }
     }
+}
+
+impl<T: Usage> help::Usage for Option<T> {
+    const NAME: &'static str = T::NAME;
+    const DESCRIPTION: help::Description<'static> = T::DESCRIPTION;
+    const ITEMS: help::UsageItems<'static> = match T::ITEMS {
+        help::UsageItems::Parameters { parameters } => help::UsageItems::Parameters { parameters },
+        help::UsageItems::Subcommands { commands, .. } => help::UsageItems::Subcommands {
+            requirement: help::Requirement::Optional,
+            commands,
+        },
+        help::UsageItems::Exclusive {
+            groups, all_flags, ..
+        } => help::UsageItems::Exclusive {
+            requirement: help::Requirement::Optional,
+            groups,
+            all_flags,
+        },
+    };
 }

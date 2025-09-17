@@ -313,6 +313,23 @@ fn print_parameter_subgroup(
     })
 }
 
+fn printable_option_synopsis(option: &ParameterOption<'_>) -> impl Display {
+    let tag = lazy_format!(match (option.tags) {
+        Tags::LongShort { long, .. } | Tags::Long { long } => "--{long}",
+        Tags::Short { short } => "-{short}",
+    });
+
+    let tag = lazy_format!(match (option.argument) {
+        None => "{tag}",
+        Some(ValueParameter { placeholder, .. }) => "{tag} <{placeholder}>",
+    });
+
+    lazy_format!(match (option.repetition) {
+        Repetition::Single => "{tag}",
+        Repetition::Multiple => "<{tag}>...",
+    })
+}
+
 fn print_synopsis(
     out: &mut (impl io::Write + ?Sized),
     subcommand_placeholder: &str,
@@ -326,22 +343,7 @@ fn print_synopsis(
                         return Ok(());
                     }
 
-                    let tag = lazy_format!(match (option.tags) {
-                        Tags::LongShort { long, .. } | Tags::Long { long } => "--{long}",
-                        Tags::Short { short } => "-{short}",
-                    });
-
-                    let tag = lazy_format!(match (option.argument) {
-                        None => "{tag}",
-                        Some(ValueParameter { placeholder, .. }) => "{tag} <{placeholder}>",
-                    });
-
-                    let tag = lazy_format!(match (option.repetition) {
-                        Repetition::Single => "{tag}",
-                        Repetition::Multiple => "<{tag}>...",
-                    });
-
-                    write!(out, " {tag}")
+                    write!(out, "{}", printable_option_synopsis(option))
                 }
                 Parameter::Positional(positional) => {
                     let placeholder = positional.argument.placeholder;
@@ -363,7 +365,35 @@ fn print_synopsis(
             Requirement::Optional => write!(out, " [{subcommand_placeholder}]"),
             Requirement::Mandatory => write!(out, " <{subcommand_placeholder}>"),
         },
-        UsageItems::Exclusive { .. } => todo!(),
+        // Write out groups, but include only options that are mandatory in the
+        // sets.
+        UsageItems::Exclusive {
+            groups,
+            requirement,
+            ..
+        } => match requirement {
+            Requirement::Optional => Ok(()),
+            Requirement::Mandatory => {
+                let mut groups = groups.iter().filter_map(|group| {
+                    let mut flags = group
+                        .iter()
+                        .filter(|flag| matches!(flag.requirement, Requirement::Mandatory))
+                        .map(|flag| printable_option_synopsis(flag));
+
+                    let first = flags.next()?;
+                    let tail = lazy_format!(" {flag}" for flag in flags.clone());
+                    Some(lazy_format!("{first}{tail}"))
+                });
+
+                match groups.next() {
+                    None => Ok(()),
+                    Some(group) => {
+                        let tail = lazy_format!(" | {group}" for group in groups.clone());
+                        write!(out, " {{{group}{tail}}}")
+                    }
+                }
+            }
+        },
     }
 }
 

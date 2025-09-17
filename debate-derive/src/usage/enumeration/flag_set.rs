@@ -36,7 +36,7 @@ impl<'a, T: FlagSetFlagExtra<'a>> FlagUsageInfo for &'a FlagSetFlagInfo<T> {
     }
 
     fn placeholder(&self) -> &str {
-        &self.placeholder.as_str()
+        self.placeholder.as_str()
     }
 }
 
@@ -46,7 +46,6 @@ impl FlagUsageInfo for &FlagSetFlag<'_> {
     }
 
     fn defaulted(&self) -> bool {
-        // TODO: what to put here? I don't think it impacts anything
         true
     }
 
@@ -97,6 +96,7 @@ pub fn derive_usage_enum_flag_set(
                 ::debate::help::Description::new("TODO FLAG SETS");
             const ITEMS: ::debate::help::UsageItems<'static> =
                 ::debate::help::UsageItems::Exclusive {
+                    requirement: ::debate::help::Requirement::Mandatory,
                     groups: &[ #(#groups,)* ],
                     all_flags: &[ #(#all_flags,)* ],
                 };

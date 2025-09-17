@@ -145,6 +145,7 @@ enum FlagChoice {
     },
 
     Louder {
+        loud: (),
         shouter: String,
     },
 }

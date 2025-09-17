@@ -122,6 +122,10 @@ pub enum UsageItems<'a> {
     /// This usage describes mutually sets of flags, where exactly one set of
     /// flags must be present
     Exclusive {
+        /// Indicates if at least one group is required. Note that individual
+        /// flags within groups might have their own requirements.
+        requirement: Requirement,
+
         /// The groups of flags. Each child slice here represents a mutually
         /// exclusive separate group of flags.
         groups: &'a [&'a [ParameterOption<'a>]],
