@@ -594,6 +594,26 @@ fn compute_placeholder(
     )
 }
 
+fn strip_no(tag: &str) -> Option<&str> {
+    let (suffix, may_omit_separator) = if let Some(suffix) = tag.strip_suffix("no") {
+        (suffix, true)
+    } else if let Some(suffix) = tag.strip_suffix("No") {
+        (suffix, true)
+    } else if let Some(suffix) = tag.strip_suffix("NO") {
+        (suffix, false)
+    } else {
+        return None;
+    };
+
+    if let Some(suffix) = suffix.strip_prefix(['-', '_']) {
+        Some(suffix)
+    } else if may_omit_separator && suffix.starts_with(|c: char| !c.is_lowercase()) {
+        Some(suffix)
+    } else {
+        None
+    }
+}
+
 #[inline]
 fn compute_invert(
     // If given, the user's preference for the flag. If omitted, we'll compute
@@ -607,6 +627,12 @@ fn compute_invert(
         invert,
         long,
         |long| {
+            // First, try to strip a `no` prefix. There aren't many variations
+            // here, so we can pretty much just try all of them.
+            if let Some(stripped) = strip_no(long) {
+                return stripped.to_owned();
+            }
+
             // Rudimentary case detection
             let underscore = long.contains('_');
             let dash = long.contains('-');
