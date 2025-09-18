@@ -19,9 +19,9 @@ argument are handled earlier.
 */
 pub trait Error {
     /**
-    When reporting [`any_required_flag`], we need to be able to report a list
-    of flags. This type allows the error to define the container it wants to
-    use for those flags.
+    When reporting [`any_required_flag`][Error::any_required_flag], we need to
+    be able to report a list of flags. This type allows the error to define the
+    container it wants to use for those flags.
     */
     type FlagList: errors::FlagsList<'static>;
 

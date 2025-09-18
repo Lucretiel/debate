@@ -85,7 +85,7 @@ A comprehensive description of the CLI parameters for a given
 `--help` usage message. This trait is usually derived.
 */
 pub trait Usage {
-    /// The name of the command. Can be replaced with argv[0].
+    /// The name of the command. Can be replaced with `argv[0]`.
     const NAME: &'static str;
 
     /// The top-level text description of the whole command.

@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use debate_derive::{self, FromArgs, ParameterUsage, Usage, Value};
+use debate::{FromArgs, ParameterUsage, Usage, Value};
 
 /// This is a demo program for the debate CLI parser
 ///
@@ -19,11 +19,11 @@ use debate_derive::{self, FromArgs, ParameterUsage, Usage, Value};
 #[derive(Debug, FromArgs, Usage)]
 #[debate(help)]
 struct DebateDemo<'arg> {
-    /// The path
+    /// The path, a flag
     #[debate(short, long = "foo", override)]
     path: &'arg Path,
 
-    /// Whether or not we're running in verbose mode
+    /// Whether or not we're running in verbose mode. Also a flag.
     #[debate(short, long)]
     verbose: bool,
 
@@ -32,7 +32,10 @@ struct DebateDemo<'arg> {
     second_path: Option<PathBuf>,
 
     /**
-     * Intro material for the cool value
+     * Intro material for the cool value.
+     *
+     * This flag is optional, and includes a --no-cool-value (via `invert`)
+     * that allows it to be reverted.
      *
      * Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nunc dignissim
      * placerat dolor, eu semper leo venenatis ut. Morbi volutpat congue
@@ -48,9 +51,11 @@ struct DebateDemo<'arg> {
     #[debate(long = "cool-value", default, invert)]
     value: i32,
 
+    /// Nested options. These will appear as their own group in usage messages.
     #[debate(flatten)]
     alphabet_options: Alphabet,
 
+    /// A subcommand; each command has its own flags
     #[debate(flatten)]
     subcommand: Subcommand<'arg>,
 
@@ -65,15 +70,25 @@ struct DebateDemo<'arg> {
     /// A positional argument
     extra: Option<String>,
 
-    /// A list of possible items we're interested in
+    /// A list of possible items we're interested in.
+    ///
+    /// `--no-items` will completely erase this list.
     #[debate(short, long = "item", invert = "no-items")]
     items: Vec<String>,
 
-    /// A target, either --release or --debug
+    /// A target, either --release or --debug. Not optional.
     #[debate(flatten)]
     target: Target,
+
+    /// A value with a default expression
+    #[debate(long, default = 10)]
+    probably_10: u32,
 }
 
+/**
+Basic example of `derive(FromArgs)` on an enum. Each variant of this enum is
+a mutually exclusive flag; in this case, --release or --debug
+ */
 #[derive(Debug, Usage, FromArgs)]
 #[debate(long)]
 enum Target {
@@ -127,6 +142,10 @@ struct NestedAlphabet {
     z: bool,
 }
 
+/**
+An example of `derive(Value)` on an enum. This can appear as a command line
+argument, where it will expect to be one of "up", "down", "left", or "right".
+ */
 #[derive(Debug, Clone, Copy, Value, ParameterUsage)]
 enum Direction {
     Up,
@@ -135,12 +154,20 @@ enum Direction {
     Right,
 }
 
+/// Another example of `derive(Value)` on an enum
 #[derive(Debug, Clone, Copy, Value, ParameterUsage)]
 enum BuildMode {
     Debug,
     Release,
 }
 
+/**
+A complex example of `derive(FromArgs)` on an enum. Each variant represents
+either a single flag or a group of flags; each group is mutually exclusive with
+the others. Notice, though, how one flag (--loud) appears in two different
+variants; flags in these enums are allowed to appear in more than one variant,
+so long as they're (more or less) identical in all cases.
+ */
 #[derive(FromArgs, Debug, Usage)]
 #[debate(long)]
 enum FlagChoice {
@@ -151,26 +178,31 @@ enum FlagChoice {
 
     OutFile(PathBuf),
 
-    Loud {
-        loud: (),
-    },
+    Loud,
 
     Louder {
+        /// The unit type makes this a switch, but a non-optional switch. This
+        /// is normally pretty useless but it works here in enums to indicate
+        /// that `--loud` MUST be present in the `Louder` variant.
         loud: (),
         shouter: String,
     },
 }
 
-// #[derive(FromArgs, Debug)]
-// #[debate(long)]
-// enum FlagChoice {
-//     Loud { loud: (), shouter: String },
-//     Quiet { quiet: (), requester: String },
-// }
+/**
+Example of `derive(FromArgs)` to create a group of subcommands. Note that
+`#[debate(flatten)]` must be used to nest this into a parent arguments struct.
 
+Note how each subcommand can have its own set of arguments, either directly
+(shown in `Build` or via a newtype containing a `FromArgs` type (shown in
+`Test` and `ExclusiveAction`).
+*/
 #[derive(FromArgs, Debug, Usage)]
 #[debate(subcommand)]
 enum Subcommand<'arg> {
+    /// If no subcommand is given, the fallback variant will be used. It's
+    /// likely that I'm going to remove `fallback` in favor of just wrapping
+    /// the subcommand in an `Option`.
     #[debate(fallback)]
     None,
 
@@ -179,7 +211,7 @@ enum Subcommand<'arg> {
 
     /// Build the project into a target directory
     ///
-    /// These are more extensive docs for the build command
+    /// These are more extensive docs for the build command.
     Build {
         /// The target directory to execute the build
         #[debate(long)]
@@ -213,7 +245,8 @@ struct TestArgs {
     warn_only: bool,
 }
 
-#[debate_derive::main]
+/// ``
+#[debate::main]
 fn main(args: DebateDemo<'_>) -> anyhow::Result<()> {
     println!("{args:#?}");
 

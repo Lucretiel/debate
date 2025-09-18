@@ -101,8 +101,8 @@ impl<V: SubcommandVisitor> SubcommandVisitor for SubcommandPathVisitorWithItem<'
 }
 
 /**
-The state associated with a [`BuildFromArgs`][crate::BuildFromArgs] type that
-is in the middle of being parsed. Arguments are passed into the state and
+The state associated with a [`BuildFromArgs`][crate::build::BuildFromArgs] type
+that is in the middle of being parsed. Arguments are passed into the state and
 parsed, with usage errors or unrecognized arguments being returned.
 */
 pub trait State<'arg> {

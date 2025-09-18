@@ -1,3 +1,6 @@
+/*!
+Top-level trait for structures that can be parsed from command-line arguments
+ */
 use core::marker::PhantomData;
 
 use debate_parser::{Arg, ArgumentsParser};

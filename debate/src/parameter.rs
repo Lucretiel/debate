@@ -1,7 +1,7 @@
 /*!
 Traits enabling individual parameter parsing.
 
-In [`debate`][crate], a [`Parameter`] is any type that can from (usually one)
+In [`debate`][crate], a [`Parameter`] is any type parsed from (usually one)
 command line argument, such as a string or integer. The trait allows these
 primitive types to be parsed without consideration for whether they appear
 as a `[POSITIONAL]` or `--flag=FLAG`.
@@ -14,7 +14,7 @@ the trait(s) below it.
 The base [`Parameter`] trait applies to ANY parameter. It allows parameters
 that are omitted, those that appear once or more than once, and those that
 accept or deny arguments. Typically you only need to implement [`Parameter`]
-for switches and switch-like types: `--flags` that don't accept arguments; it's
+for switches and switch-like types: `--flags` that don't accept arguments. It's
 always preferable to implement [`PositionalParameter`] for types that accept
 arguments.
 
@@ -127,12 +127,14 @@ When parsing flags from the command line, the low-level parser can't know in
 general whether a given argument is a standalone value, or whether it's an
 argument to an earlier flag. For instance, given `--foo bar`, `bar` could be
 a positional parameter, or it could be an argument to `--foo`, depending on
-`--foo`'s type. This trait allows a [`Parameter`] implementation to
+`--foo`'s type. This trait allows a [`Parameter`] implementation to take an
+argument, if required, or to simply exist as a switch, and leave the next raw
+command line argument to be parsed on its own.
 */
 pub trait ArgAccess<'arg> {
     /**
-    Call `with` if and only if this [`Parameter`] type expects arguments. It
-    will call `op` with the argument, if any is available, and propagate the
+    Call `with` if and only if this [`Parameter`] type expects an argument. `op`
+    will be called with the argument, if any is available, and propagate the
     result; it will return an [`Error::needs_arg`] if no argument was found.
 
     This method uses a callback rather than simply returning the argument to
@@ -156,9 +158,9 @@ command line argument, responsible for requesting arguments (if appropriate)
 and parsing them into the underlying type.
 
 A type should have a consistent behavior with regard to taking values; that is,
-it should either ALWAYS or NEVER accept arguments. This ensures that the parse
-behavior is as consistent as possible, with no weird ambiguities about options
-vs arguments.
+it should either *always* or *never* accept arguments. This ensures that the parse
+behavior is as consistent as possible, with no weird ambiguities about flags
+vs positionals vs switches.
 
 This is the lowest-level parameter trait, with the broadest range of
 capabilities; usually it makes more sense to implement [`Value`] (for types
@@ -173,7 +175,7 @@ pub trait Parameter<'arg>: Sized {
     and allow defaults to be handled by an [`Option`] or `#[debate(default)]`.
     However, there are plenty of cases where a type has a sensible behavior if
     it doesn't appear on the command line, such as a bool flag being false or
-    a [`Vec`] being empty.
+    a [`Vec`][std::vec::Vec] being empty.
     */
     #[inline]
     fn absent() -> Result<Self, RequiredError> {
@@ -208,7 +210,8 @@ pub trait Parameter<'arg>: Sized {
     argument.
 
     Most parameters should return an error here. However, some types (like
-    counters and [`Vec`]) can collect more than one instance together.
+    counters and [`Vec`][std::vec::Vec]) can collect more than one instance
+    together.
 
     Additionally, switches should return an error unconditionally here, since
     switches don't take arguments.
@@ -222,7 +225,8 @@ pub trait Parameter<'arg>: Sized {
     This parameter appeared more than once on the command line.
 
     Most parameters should return an error here. However, some types (like
-    counters and [`Vec`]) can collect more than one instance together.
+    counters and [`Vec`][std::vec::Vec]) can collect more than one instance
+    together.
     */
     fn add_present<E: Error<'arg>>(&mut self, argument: impl ArgAccess<'arg>) -> Result<(), E>;
 }
@@ -264,7 +268,7 @@ pub trait PositionalParameter<'arg>: Sized {
     argument.
 
     Most parameters should return an error here. However, some types (like
-    [`Vec`]) can collect more than one instance together.
+    [`Vec`][std::vec::Vec]) can collect more than one instance together.
     */
     fn add_arg<E: Error<'arg>>(&mut self, argument: &'arg Arg) -> Result<(), E>;
 }
@@ -304,8 +308,8 @@ and [`Parameter`] such that they return an error if they are absent, don't
 receive an argument, or are present more than once.
 
 [`Value`] is the typical constraint for containers and wrappers, like [`Option`]
-and [`Vec`]. This is because each value *within* the container needs to be
-a value that appeared exactly once.
+and [`Vec`][std::vec::Vec]. This is because each value *within* the container
+needs to be a value that appeared exactly once.
 */
 pub trait Value<'arg>: Sized {
     /// Parse a `Value` from an [`Arg`] given on the command line

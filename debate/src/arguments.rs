@@ -1,5 +1,5 @@
 /*!
-Container type for raw arguments retreived from the environment.
+Container type for raw arguments retrieved from the environment.
  */
 
 use std::{
@@ -17,10 +17,10 @@ use crate::{
 
 /**
 Helper type for loading arguments from the environment. Usually you can
-just use [`#[debate::main]`][debate::main] instead of reaching for this type.
+just use [`#[debate::main]`][crate::main] instead of reaching for this type.
 
 This type exists for roughly two purposes: to provide a convenient
-owned container for args retreived from [`mod@std::env`], and to be an object
+owned container for args retrieved from [`mod@std::env`], and to be an object
 that a [`FromArgs`] can borrow from.
 */
 #[derive(Debug, Clone)]

@@ -164,7 +164,7 @@ pub fn derive_args_struct(
         impl<#lifetime> ::debate::state::State<#lifetime> for #state_ident <#lifetime> {
             fn add_positional<E>(
                 &mut self,
-                #argument: & #lifetime ::debate_parser::Arg
+                #argument: & #lifetime ::debate::Arg
             ) -> ::core::result::Result<(), E>
             where
                 E: ::debate::state::Error<#lifetime, ()>
@@ -181,8 +181,8 @@ pub fn derive_args_struct(
 
             fn add_long_argument<E>(
                 &mut self,
-                option: & #lifetime ::debate_parser::Arg,
-                argument: & #lifetime ::debate_parser::Arg
+                option: & #lifetime ::debate::Arg,
+                argument: & #lifetime ::debate::Arg
             ) -> ::core::result::Result<(), E>
             where
                 E: ::debate::state::Error<#lifetime, ()>
@@ -194,7 +194,7 @@ pub fn derive_args_struct(
 
             fn add_long<A, E>(
                 &mut self,
-                option: & #lifetime ::debate_parser::Arg,
+                option: & #lifetime ::debate::Arg,
                 argument: A
             ) -> ::core::result::Result<(), E>
             where

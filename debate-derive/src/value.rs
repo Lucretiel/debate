@@ -59,7 +59,7 @@ fn derive_value_enum(
     Ok(quote! {
         impl<#lifetime> ::debate::parameter::Value<#lifetime> for #ident #type_lifetime {
             fn from_arg<E: ::debate::parameter::Error<#lifetime>>(
-                argument: & #lifetime ::debate_parser::Arg,
+                argument: & #lifetime ::debate::Arg,
             ) -> Result<Self, E> {
                 match argument.bytes() {
                     #(#unit_byte_arms)*
@@ -84,7 +84,7 @@ fn derive_value_newtype(
     quote! {
         impl<#lifetime> ::debate::parameter::Value<#lifetime> for #ident #type_lifetime {
             fn from_arg<E: ::debate::parameter::Error<#lifetime>>(
-                argument: & #lifetime ::debate_parser::Arg,
+                argument: & #lifetime ::debate::Arg,
             ) -> Result<Self, E> {
                 match ::debate::parameter::Value::from_arg(argument) {
                     ::core::result::Result::Ok(value) => ::core::result::Result::Ok(

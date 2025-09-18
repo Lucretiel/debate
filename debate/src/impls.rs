@@ -83,6 +83,8 @@ impl ParameterUsage for &std::path::Path {
     const REPETITION: Repetition = Repetition::Single;
 }
 
+/// A bool is a simple, optional `--switch`. It's true if present and false if
+/// absent. It takes no arguments.
 impl<'arg> Parameter<'arg> for bool {
     #[inline]
     fn absent() -> Result<Self, RequiredError> {
@@ -109,6 +111,11 @@ impl ParameterUsage for bool {
     const REPETITION: Repetition = Repetition::Single;
 }
 
+/// A unit is a simple, non-optional `--switch`; it's a switch that MUST be
+/// present. This is typically used when deriving
+/// [`FromArgs`][crate::from_args::FromArgs] on an enum, where it can enforce
+/// that a flag must appear as part of the set of flags associated with a
+/// particular variant.
 impl<'arg> Parameter<'arg> for () {
     fn present<E: ParameterError<'arg>>(_arg: impl ArgAccess<'arg>) -> Result<Self, E> {
         Ok(())

@@ -924,7 +924,7 @@ pub fn derive_args_enum_flag_set(
             // Flag sets never accept positionals
             fn add_positional<E>(
                 &mut self,
-                _arg: & #lifetime ::debate_parser::Arg
+                _arg: & #lifetime ::debate::Arg
             ) -> ::core::result::Result<(), E>
             where
                 E: ::debate::state::Error<#lifetime, ()>
@@ -936,8 +936,8 @@ pub fn derive_args_enum_flag_set(
 
             fn add_long_argument<E>(
                 &mut self,
-                #flag: & #lifetime ::debate_parser::Arg,
-                #argument: & #lifetime ::debate_parser::Arg
+                #flag: & #lifetime ::debate::Arg,
+                #argument: & #lifetime ::debate::Arg
             ) -> ::core::result::Result<(), E>
             where
                 E: ::debate::state::Error<#lifetime, ()>
@@ -950,7 +950,7 @@ pub fn derive_args_enum_flag_set(
 
             fn add_long<A, E>(
                 &mut self,
-                #flag: & #lifetime ::debate_parser::Arg,
+                #flag: & #lifetime ::debate::Arg,
                 #argument: A
             ) -> ::core::result::Result<(), E>
             where
