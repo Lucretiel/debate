@@ -36,6 +36,15 @@ pub fn printable_source(source: &ParameterSource) -> impl Display {
     }
 }
 
+pub fn printable_tag(tags: &Tags<'_>) -> impl Display {
+    lazy_format! {
+        match (*tags) {
+            Tags::Long { long } | Tags::LongShort { long, .. } => "--{long}",
+            Tags::Short { short } => "-{short}",
+        }
+    }
+}
+
 /// Get the "word" contained within the source. Usually `printable_source` is
 /// preferable, but this has its uses.
 pub fn source_word<'a>(source: &'a ParameterSource<'_>) -> &'a str {
@@ -99,6 +108,17 @@ pub fn state_error(source: &ParameterSource, error: &StateError<'_>) -> impl Dis
                 "{source} is not valid for subcommand {subcommand:?}",
                 source = printable_source(source),
             ),
+            StateError::ConflictsWith {
+                flag, additional
+            } if additional.is_empty() => (
+                "{source} cannot be used with {tag}",
+                source=printable_source(source),
+                tag = printable_tag(flag),
+            ),
+            StateError::ConflictsWith { .. } => (
+                "{source} conflicts with other flags",
+                source = printable_source(source),
+            ),
             StateError::HelpRequested(..) => "usage message was requested",
         }
     }
@@ -110,11 +130,20 @@ pub fn build_error(error: &BuildError) -> impl Display {
             BuildError::Arg { source, error } => ("{}", state_error(source, error)),
             BuildError::RequiredSubcommand { .. } => "no subcommand given",
             BuildError::RequiredFieldAbsent { kind: FieldKind::Long(long), .. } =>
-                "required option --{long} was omitted",
+                "required flag --{long} was omitted",
             BuildError::RequiredFieldAbsent { kind: FieldKind::Short(short), .. } =>
-                "required option -{short} was omitted",
-            BuildError::RequiredFieldAbsent { kind:  FieldKind::Positional { placeholder }, .. } =>"
-                required argument <{placeholder}> was omitted",
+                "required flag -{short} was omitted",
+            BuildError::RequiredFieldAbsent { kind:  FieldKind::Positional, placeholder, .. } =>
+                "required argument <{placeholder}> was omitted",
+            BuildError::RequiredFlagSet { tags, alternatives } if alternatives.is_empty() => (
+                "required flag {flag} was omitted",
+                flag=printable_tag(tags),
+            ),
+            BuildError::RequiredFlagSet { tags, alternatives } => (
+                "at least one of the following flags is required: {flag}{alternatives}",
+                flag=printable_tag(tags),
+                alternatives=lazy_format!(", {flag}" for flag in alternatives.iter().map(printable_tag)),
+            ),
             BuildError::Custom(message) => "{message}",
         }
     }

@@ -16,6 +16,8 @@ pub struct ValueEnumAttr {
     pub subcommand: Option<()>,
     pub short: Option<SpannedValue<()>>,
     pub long: Option<SpannedValue<()>>,
+    // TODO: help
+    // TODO: name attribute to rename the command
 }
 
 pub fn create_non_colliding_ident<'a>(

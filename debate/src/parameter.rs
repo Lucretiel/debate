@@ -200,9 +200,6 @@ impl<'arg, T: PositionalParameter<'arg>> Parameter<'arg> for T {
     }
 }
 
-// TODO: improved version of parameter that allows for stateful, in-progress
-// builders. This allows us to support things like arrays, if we want.
-
 /**
 Parameters that must appear exactly once and take an argument.
 

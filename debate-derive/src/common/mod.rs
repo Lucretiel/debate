@@ -362,7 +362,7 @@ impl<'a> ParsedFieldInfo<'a> {
         })?);
 
         if parsed.flatten.is_some() {
-            // TODO: find a less brittle way to enforce the valid mutually
+            // FIXME: find a less brittle way to enforce the valid mutually
             // permissible sets here.
             reject_some!(
                 "`flatten` is incompatible with other attributes";
@@ -642,6 +642,7 @@ fn compute_invert(
 pub struct RawParsedTypeAttr {
     help: Option<SpannedValue<()>>,
     // TODO: global long/short
+    // TODO: rename attribute to rename the command
 }
 
 impl RawParsedTypeAttr {

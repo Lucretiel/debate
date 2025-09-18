@@ -2,7 +2,7 @@ use core::iter;
 
 use debate_parser::Arg;
 
-use crate::{help::HelpRequest, parameter};
+use crate::{errors, help::HelpRequest, parameter};
 
 // TODO: move all this subcommand business to another module
 pub trait SubcommandVisitor {
@@ -127,6 +127,7 @@ pub trait State<'arg> {
 /// Errors that can occur when adding an argument to the state during parsing
 pub trait Error<'arg, Arg>: Sized {
     type ParameterError: parameter::Error<'arg>;
+    type FlagList: errors::FlagsList<'static>;
 
     /// A parameter type returned an error. This means that the argument was
     /// recognized and matched to a specific field, but something went wrong
@@ -156,7 +157,8 @@ pub trait Error<'arg, Arg>: Sized {
         allowed: &'static [&'static str],
     ) -> Self;
 
-    // TODO: conflict error
+    /// The argument conflicts with the flags in this set
+    fn conflicts_with_flags(flags: Self::FlagList) -> Self;
 
     /// This was a request for a usage message. This error doesn't need to
     /// interrupt argument parsing, since it can be useful to have a complete

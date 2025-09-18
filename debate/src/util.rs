@@ -60,6 +60,7 @@ where
     E: state::Error<'arg, A>,
 {
     type ParameterError = E::ParameterError;
+    type FlagList = E::FlagList;
 
     fn parameter(field: &'static str, error: Self::ParameterError) -> Self {
         Self::Error(E::parameter(field, error))
@@ -88,6 +89,10 @@ where
         allowed: &'static [&'static str],
     ) -> Self {
         Self::Error(E::wrong_subcommand_for_argument(subcommand, allowed))
+    }
+
+    fn conflicts_with_flags(flags: Self::FlagList) -> Self {
+        Self::Error(E::conflicts_with_flags(flags))
     }
 
     fn help_requested(req: HelpRequest) -> Self {

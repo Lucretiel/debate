@@ -15,7 +15,7 @@ use crate::{
     },
     from_args::common::{
         FieldNature, FlagField, MakeScrutinee, NormalFieldInfo, absent_field_initializer,
-        apply_arg_to_field, complete_flag_body, indexed, struct_field_initializer,
+        apply_arg_to_field, complete_flag_body, indexed, quoted_tags, struct_field_initializer,
     },
     generics::AngleBracedLifetime,
 };
@@ -115,34 +115,47 @@ fn handle_superposition_argument<'a, Tag: MakeScrutinee>(
                 (expr, flag.origin.as_str())
             };
 
-            let viability_check = any_multi_flags.then(|| {
-                let viable_bits = flag
-                    .variants
-                    .iter()
-                    .map(|viable_variant| viable_variant.index)
-                    .map(variant_bit);
+            let expr = quote! {
+                match (#expr) {
+                    ::core::result::Result::Ok(()) => ::core::result::Result::Ok(()),
+                    ::core::result::Result::Err(err) => ::core::result::Result::Err(
+                        ::debate::state::Error::parameter(#name, err)
+                    ),
+                }
+            };
 
-                quote! {
-                    *#viable_ident &= const { 0 #( | #viable_bits )* };
+            let expr = match any_multi_flags {
+                false => expr,
+                true => {
+                    let viable_bits = flag
+                        .variants
+                        .iter()
+                        .map(|viable_variant| viable_variant.index)
+                        .map(variant_bit);
 
-                    if *#viable_ident == 0 {
-                        todo!("conflict")
+                    let update_viability = match flag.unique_variant() {
+                        Some(_) => quote! {},
+                        None => quote! { *#viable_ident = updated_viability; }
+                    };
+
+                    quote! {
+                        match *#viable_ident & const { 0 #( | #viable_bits )* } {
+                            0 => ::core::result::Result::Err(
+                                Self::create_superposition_conflict_error(&*#fields_ident)
+                            ),
+                            updated_viability => match (#expr) {
+                                ::core::result::Result::Err(err) => ::core::result::Result::Err(err),
+                                ::core::result::Result::Ok(()) => {
+                                    #update_viability
+                                    ::core::result::Result::Ok(())
+                                }
+                            }
+                        }
                     }
                 }
-            });
+            };
 
-            quote! {
-                #scrutinee => {
-                    #viability_check
-
-                    match (#expr) {
-                        ::core::result::Result::Ok(()) => ::core::result::Result::Ok(()),
-                        ::core::result::Result::Err(err) => ::core::result::Result::Err(
-                            ::debate::state::Error::parameter(#name, err)
-                        ),
-                    }
-                }
-            }
+            quote! { #scrutinee => #expr }
         });
 
     quote! {
@@ -207,7 +220,7 @@ impl<'a> FlagField<'a> for &(&'a IdentString<'a>, &'a FlagSetFlagInfo<PlainFlagI
 // want to enforce (more or less) that we're using the complete set, from
 // a slice, rather than a filtered set from an iterator.
 #[expect(clippy::too_many_arguments)]
-fn complete_flagset_flag_body<'a, Tag: MakeScrutinee, T>(
+fn complete_flagset_flag_body<'a, Tag, T>(
     fields_ident: &Ident,
     argument_ident: &Ident,
     option_expr: impl ToTokens,
@@ -222,16 +235,42 @@ fn complete_flagset_flag_body<'a, Tag: MakeScrutinee, T>(
 ) -> TokenStream2
 where
     &'a T: FlagField<'a>,
+    T: BasicFlagProperties,
+    Tag: MakeScrutinee,
 {
     let conflict = {
         let mut tags = all_tag_scrutinees
             .into_iter()
             .map(|tag| tag.make_scrutinee());
 
+        let conflicting_flag_set = match fields {
+            // If there's only one field, there's no option, so we can just
+            // directly report the FlagSet
+            [field] => {
+                let tags = field.tags();
+                let tags = quoted_tags(&tags);
+                let placeholder = field.placeholder();
+
+                quote! {
+                    ::debate::errors::FlagsList::new(#tags, #placeholder)
+                }
+            }
+            fields => conflict_flagset_builder_expression(
+                fields_ident,
+                indexed(fields),
+                quote! { ::core::option::Option::None },
+                quote! { ::core::option::Option::Some(_) },
+            ),
+        };
+
         match tags.next() {
             None => quote! {},
             Some(recognize) => quote! {
-                #recognize #(| #tags)* => todo!("handle conflict"),
+                #recognize #(| #tags)* => ::core::result::Result::Err(
+                    ::debate::state::Error::conflicts_with_flags(
+                        #conflicting_flag_set
+                    )
+                ),
             },
         }
     };
@@ -261,6 +300,7 @@ fn complete_long_arg_body<'a, T>(
 ) -> TokenStream2
 where
     &'a T: FlagField<'a>,
+    T: BasicFlagProperties,
 {
     complete_flagset_flag_body(
         fields_ident,
@@ -285,6 +325,7 @@ fn complete_long_body<'a, T>(
 ) -> TokenStream2
 where
     &'a T: FlagField<'a>,
+    T: BasicFlagProperties,
 {
     complete_flagset_flag_body(
         fields_ident,
@@ -309,6 +350,7 @@ fn complete_short_body<'a, T>(
 ) -> TokenStream2
 where
     &'a T: FlagField<'a>,
+    T: BasicFlagProperties,
 {
     complete_flagset_flag_body(
         fields_ident,
@@ -321,6 +363,86 @@ where
         &format_ident!("add_present"),
         argument_ident,
     )
+}
+
+trait BasicFlagProperties {
+    fn tags(&self) -> FlagTags<&str, char>;
+    fn placeholder(&self) -> &str;
+}
+
+impl BasicFlagProperties for FlagSetFlag<'_> {
+    fn tags(&self) -> FlagTags<&str, char> {
+        self.tags
+    }
+
+    fn placeholder(&self) -> &str {
+        self.placeholder
+    }
+}
+
+impl<T> BasicFlagProperties for VariantFieldSource<'_, T> {
+    fn tags(&self) -> FlagTags<&str, char> {
+        self.field.tags.simplify()
+    }
+
+    fn placeholder(&self) -> &str {
+        &self.field.placeholder
+    }
+}
+
+impl BasicFlagProperties for (&IdentString<'_>, &FlagSetFlagInfo<PlainFlagInfo<'_>>) {
+    fn tags(&self) -> FlagTags<&str, char> {
+        self.1.tags.simplify()
+    }
+
+    fn placeholder(&self) -> &str {
+        &self.1.placeholder
+    }
+}
+
+fn conflict_flagset_builder_expression<'a, T>(
+    tuple: &Ident,
+    fields: impl IntoIterator<Item = (Index, &'a T)>,
+    skip: TokenStream2,
+    keep: TokenStream2,
+) -> TokenStream2
+where
+    T: BasicFlagProperties + 'a,
+{
+    let inits = fields.into_iter().map(|(index, flag)| {
+        let tags = quoted_tags(&flag.tags());
+        let placeholder = flag.placeholder();
+
+        quote! {
+            match #tuple.#index {
+                #skip => ::core::option::Option::None,
+                #keep => ::core::option::Option::Some((
+                    #tags, #placeholder,
+                ))
+            }
+        }
+    });
+
+    quote! {{
+        let flags = [ #(#inits,)* ];
+        let flags = &flags;
+        let flags = ::core::iter::IntoIterator::into_iter(flags);
+        let mut flags = ::core::iter::Iterator::filter_map(
+            flags,
+            ::core::option::Option::as_ref
+        );
+
+        let &(tags, placeholder) = ::core::iter::Iterator::next(&mut flags)
+            .expect("there must be something to conflict with");
+
+        let mut set = ::debate::errors::FlagsList::new(tags, placeholder);
+
+        for &(tags, placeholder) in flags {
+            ::debate::errors::FlagsList::add(&mut set, tags, placeholder);
+        }
+
+        set
+    }}
 }
 
 fn variant_field_superposition_initializer<T>(
@@ -420,6 +542,8 @@ pub fn derive_args_enum_flag_set(
         }
     });
 
+    let flag_types_tuple = quote! { ( #(#flag_types,)* ) };
+
     let flag_inits = parsed_flags.iter().map(|flag| match flag.unique_variant() {
         Some(_) => quote! { () },
         None => quote! { ::core::option::Option::None },
@@ -441,9 +565,6 @@ pub fn derive_args_enum_flag_set(
         false => quote! { () },
     };
 
-    // TODO: we ONLY can transition directly into states via flags that are
-    // unique to that state. Any variant that has no such flags can be
-    // omitted.
     let state_variants = variant_sources
         .iter()
         .filter(|(_, variant)| variant.reachable)
@@ -470,6 +591,13 @@ pub fn derive_args_enum_flag_set(
                 }
             }
         });
+
+    let superposition_conflict_set = conflict_flagset_builder_expression(
+        &fields_ident,
+        indexed(&parsed_flags).filter(|(_, flag)| flag.unique_variant().is_none()),
+        quote! { ::core::option::Option::None },
+        quote! { ::core::option::Option::Some(_) },
+    );
 
     // We do a rare pre-emptive collect because this operation is nakedly
     // quadratic so we want to minimize repeated computation. In the future
@@ -693,6 +821,13 @@ pub fn derive_args_enum_flag_set(
                     }
                 });
 
+        let absent_requirements_flagset = conflict_flagset_builder_expression(
+            &local_requirements,
+            indexed(&parsed_flags),
+            quote! { ::core::result::Result::Ok(()) },
+            quote! { ::core::result::Result::Err(_) },
+        );
+
         quote! {
             {
                 // Step 1: Create a tuple of results that will track which
@@ -707,7 +842,11 @@ pub fn derive_args_enum_flag_set(
                 // we tried to instantiate were missing required fields. Emit
                 // a required field missing error with, ideally, information
                 // about all the fields.
-                todo!("handle required fields missing")
+                ::core::result::Result::Err(
+                    ::debate::build::Error::any_required_flag(
+                        #absent_requirements_flagset
+                    )
+                )
             }
         }
     };
@@ -727,13 +866,11 @@ pub fn derive_args_enum_flag_set(
                 },
                 VariantFieldSourcesMode::Struct(ref sources) => {
                     let field_inits = indexed(sources).map(|(index, source)| {
-                        let tags = source.field.tags.simplify();
                         struct_field_initializer(
                             &fields_ident,
                             index,
                             NormalFieldInfo {
-                                long: tags.long(),
-                                short: tags.short(),
+                                tags: Some(source.field.tags.simplify()),
                                 placeholder: &source.field.placeholder,
                                 ident: &source.field.info.ident,
                                 default: source.field.default.as_ref(),
@@ -746,7 +883,9 @@ pub fn derive_args_enum_flag_set(
             };
 
             quote! {
-                #state_ident :: #ident { #fields_ident } => Self :: #ident #body
+                #state_ident :: #ident { #fields_ident } => ::core::result::Result::Ok(
+                    Self :: #ident #body
+                )
             }
         });
 
@@ -754,7 +893,7 @@ pub fn derive_args_enum_flag_set(
         enum #state_ident <#lifetime> {
             // In the generic state, we haven't selected a specific variant yet
             #superposition_ident {
-                #fields_ident: ( #(#flag_types,)* ),
+                #fields_ident: #flag_types_tuple,
                 #viable_ident: #viable_set_type,
                 phantom: ::core::marker::PhantomData<& #lifetime ()>,
             },
@@ -769,6 +908,15 @@ pub fn derive_args_enum_flag_set(
                     #viable_ident: #viable_set_init,
                     phantom: ::core::marker::PhantomData,
                 }
+            }
+        }
+
+        impl<#lifetime> #state_ident <#lifetime> {
+            fn create_superposition_conflict_error<E, A>(#fields_ident: &#flag_types_tuple) -> E
+            where
+                E: ::debate::state::Error<#lifetime, A>
+            {
+                ::debate::state::Error::conflicts_with_flags(#superposition_conflict_set)
             }
         }
 
@@ -835,16 +983,14 @@ pub fn derive_args_enum_flag_set(
             type State = #state_ident <#lifetime>;
 
             fn build<E>(state: Self::State) -> Result<Self,E>
-                where
-                    E: ::debate::build::Error
-                {
-                    ::core::result::Result::Ok(
-                        match state {
-                        #state_ident :: #superposition_ident { #viable_ident, #fields_ident, .. } => #build_from_superposition,
-                            #(#build_from_variant_arms,)*
-                        }
-                    )
+            where
+                E: ::debate::build::Error
+            {
+                match state {
+                    #state_ident :: #superposition_ident { #viable_ident, #fields_ident, .. } => #build_from_superposition,
+                    #(#build_from_variant_arms,)*
                 }
+            }
         }
     })
 }

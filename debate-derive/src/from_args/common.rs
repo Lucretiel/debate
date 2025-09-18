@@ -454,7 +454,6 @@ pub fn complete_flag_body<'a, Flag: FlagField<'a>, Tag: MakeScrutinee>(
                 #scrutinee => match ::debate::parameter::Parameter::#parameter_method(
                     #argument_ident
                 ) {
-                    // TODO: deduplicate this with `apply_arg_to_field`
                     ::core::result::Result::Ok(()) => {
                         #fields_ident.#index = ::core::option::Option::None;
                         ::core::result::Result::Ok(())
@@ -615,8 +614,7 @@ pub fn complete_short_body(
 }
 
 pub struct NormalFieldInfo<'a> {
-    pub long: Option<&'a str>,
-    pub short: Option<char>,
+    pub tags: Option<FlagTags<&'a str, char>>,
     pub placeholder: &'a str,
     pub ident: &'a IdentString<'a>,
     pub default: Option<&'a FieldDefault>,
@@ -655,6 +653,16 @@ pub fn absent_field_initializer(
     }
 }
 
+pub fn quoted_tags(tags: &FlagTags<&str, char>) -> TokenStream2 {
+    match tags {
+        FlagTags::Long(long) => quote! { ::debate::Tags::Long { long: #long } },
+        FlagTags::Short(short) => quote! { ::debate::Tags::Short { short: #short } },
+        FlagTags::LongShort { long, short } => quote! {
+            ::debate::Tags::LongShort { long: #long, short: #short }
+        },
+    }
+}
+
 pub fn struct_field_initializer(
     fields_ident: &Ident,
     index: Index,
@@ -664,23 +672,12 @@ pub fn struct_field_initializer(
     let ident_str = ident.as_str();
     let placeholder = field.placeholder;
 
-    // Technically we allocate too eagerly here. It reads better
-    // this way, imo, and we trust the optimizer to reorder a lot
-    // of this stuff so that (for example) the `let error` is only
-    // evaluated in the `FieldDefault::None` case.
-    let short = match field.short {
-        Some(short) => quote! {::core::option::Option::Some(#short)},
-        None => quote! {::core::option::Option::None},
-    };
-
-    let error = match (field.long, field.short) {
-        (Some(long), _) => quote! {
-            required_long( #ident_str, #long, #short )
-        },
-        (None, Some(short)) => quote! {
-            required_short( #ident_str, #short )
-        },
-        (None, None) => quote! {
+    let error = match field.tags {
+        Some(ref tags) => {
+            let tags = quoted_tags(tags);
+            quote! { required_flag( #ident_str, #tags, #placeholder ) }
+        }
+        None => quote! {
             required_positional( #ident_str, #placeholder )
         },
     };
@@ -711,15 +708,13 @@ pub fn final_field_initializers(
                 index,
                 match field {
                     ParsedFieldInfo::Positional(field) => FlattenOr::Normal(NormalFieldInfo {
-                        long: None,
-                        short: None,
+                        tags: None,
                         placeholder: &field.placeholder,
                         ident: &field.ident,
                         default: field.default.as_ref(),
                     }),
                     ParsedFieldInfo::Flag(field) => FlattenOr::Normal(NormalFieldInfo {
-                        long: field.tags.long().as_deref().copied(),
-                        short: field.tags.short().as_deref().copied(),
+                        tags: Some(field.tags.simplify()),
                         placeholder: &field.placeholder,
                         ident: &field.ident,
                         default: field.default.as_ref(),

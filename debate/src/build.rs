@@ -1,24 +1,22 @@
 use core::fmt::Display;
 
-use crate::state;
+use crate::{Tags, errors, state};
 
 /// Errors that can occur while converting the parsed arguments into the final
 /// structure. Generally these failures are related to the absence of required
 /// arguments; errors that are specific to a particular parameter or incoming
 /// argument are handled earlier.
 pub trait Error {
-    /// A required long option/flag wasn't present. If the field also includes
-    /// a short flag, it is included.
-    fn required_long(field: &'static str, long: &'static str, short: Option<char>) -> Self;
+    type FlagList: errors::FlagsList<'static>;
 
-    /// A required short option/flag field wasn't present.
-    fn required_short(field: &'static str, short: char) -> Self;
+    /// A required flag wasn't present
+    fn required_flag(field: &'static str, tags: Tags<'static>, placeholder: &'static str) -> Self;
 
     /// A required positional field wasn't present
     fn required_positional(field: &'static str, placeholder: &'static str) -> Self;
 
-    // TODO: Variations on Requirement errors (allow for a spread of
-    // requirements)
+    /// *At least one* of the flags in this list were required
+    fn any_required_flag(list: Self::FlagList) -> Self;
 
     /// There was an error building a flattened field
     fn flattened(field: &'static str, error: Self) -> Self;

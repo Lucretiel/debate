@@ -21,7 +21,7 @@ impl<'a> AnalyzedEnum<'a> {
             match variant.fields {
                 Fields::Unit => {
                     // TODO: rename attribute
-                    // TODO: case insensitivity
+                    // FIXME: case insensitivity
                     collected.push((variant.ident.to_string().to_kebab_case(), &variant.ident));
                 }
                 Fields::Unnamed(FieldsUnnamed {

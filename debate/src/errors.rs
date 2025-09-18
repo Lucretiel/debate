@@ -1,6 +1,25 @@
 use core::fmt::{self};
 
-use crate::{build, from_args, help::HelpRequest, parameter, state};
+use crate::{Tags, build, from_args, help::HelpRequest, parameter, state};
+
+/// Errors sometimes need to be able to refer to a group of flags,
+/// guaranteeing at least one. This trait allows the error type to express
+/// which container it wants to use.
+pub trait FlagsList<'a> {
+    fn new(tags: Tags<'a>, placeholder: &'a str) -> Self;
+    fn add(&mut self, tags: Tags<'a>, placeholder: &'a str);
+}
+
+#[cfg(feature = "std")]
+impl<'a> FlagsList<'a> for std::vec::Vec<(Tags<'a>, &'a str)> {
+    fn new(tags: Tags<'a>, placeholder: &'a str) -> Self {
+        Self::from([(tags, placeholder)])
+    }
+
+    fn add(&mut self, tags: Tags<'a>, placeholder: &'a str) {
+        self.push((tags, placeholder));
+    }
+}
 
 /// A simple argument parsing error type that contains no data. Mostly used for
 /// testing and code examples.
@@ -57,8 +76,19 @@ impl<'arg> parameter::Error<'arg> for EmptyError {
     }
 }
 
+impl<'a> FlagsList<'a> for EmptyError {
+    #[inline(always)]
+    fn new(_: Tags<'a>, _: &'a str) -> Self {
+        Self
+    }
+
+    #[inline(always)]
+    fn add(&mut self, _: Tags<'a>, _: &'a str) {}
+}
+
 impl<'arg, A> state::Error<'arg, A> for EmptyError {
     type ParameterError = EmptyError;
+    type FlagList = EmptyError;
 
     #[inline(always)]
     fn parameter(_: &'static str, _: Self::ParameterError) -> Self {
@@ -86,24 +116,30 @@ impl<'arg, A> state::Error<'arg, A> for EmptyError {
     }
 
     #[inline(always)]
+    fn conflicts_with_flags(_flags: Self::FlagList) -> Self {
+        Self
+    }
+
+    #[inline(always)]
     fn help_requested(_: HelpRequest) -> Self {
         Self
     }
 }
 
 impl build::Error for EmptyError {
-    #[inline(always)]
-    fn required_long(_field: &'static str, _long: &'static str, _short: Option<char>) -> Self {
+    type FlagList = EmptyError;
+
+    fn required_flag(_: &'static str, _: Tags<'static>, _: &'static str) -> Self {
         Self
     }
 
     #[inline(always)]
-    fn required_short(_field: &'static str, _short: char) -> Self {
+    fn required_positional(_: &'static str, _: &'static str) -> Self {
         Self
     }
 
     #[inline(always)]
-    fn required_positional(_field: &'static str, _placeholder: &'static str) -> Self {
+    fn any_required_flag(_: Self::FlagList) -> Self {
         Self
     }
 
@@ -162,16 +198,18 @@ mod with_std {
         borrow::ToOwned,
         fmt::Display,
         string::{String, ToString},
+        vec::Vec,
     };
 
     use debate_parser::Arg;
 
-    use crate::{build, from_args, help::HelpRequest, parameter, state};
+    use crate::{Tags, build, from_args, help::HelpRequest, parameter, state};
 
     /// An error trying to parse a parameter from a `--flag` or positional
     /// argument. These error are produced from the primitive types, like
     /// bools and strings and vectors.
     #[derive(Debug, Clone)]
+    #[non_exhaustive]
     pub enum ParameterError<'arg> {
         /// This parameter needs an argument and didn't get one
         NeedArgument,
@@ -244,9 +282,28 @@ mod with_std {
         }
     }
 
+    pub struct TagsList<'a> {
+        tags: Tags<'a>,
+        other_tags: Vec<Tags<'a>>,
+    }
+
+    impl<'a> super::FlagsList<'a> for TagsList<'a> {
+        fn new(tags: Tags<'a>, _placeholder: &'a str) -> Self {
+            Self {
+                tags,
+                other_tags: Vec::new(),
+            }
+        }
+
+        fn add(&mut self, tags: Tags<'a>, _placeholder: &'a str) {
+            self.other_tags.push(tags);
+        }
+    }
+
     /// Errors that occur when parsing a single item from the command-line
     /// arguments
     #[derive(Debug, Clone)]
+    #[non_exhaustive]
     pub enum StateError<'arg> {
         /// The argument was matched with a typed parameter, but the type
         /// returned an error.
@@ -270,6 +327,12 @@ mod with_std {
             allowed: &'static [&'static str],
         },
 
+        /// The argument conflicted with this flag
+        ConflictsWith {
+            flag: Tags<'static>,
+            additional: Vec<Tags<'static>>,
+        },
+
         /// The argument was a request for a usage message
         HelpRequested(HelpRequest),
         // /// A nested error from a nested arguments struct
@@ -290,6 +353,7 @@ mod with_std {
 
     impl<'arg, A> state::Error<'arg, A> for StateError<'arg> {
         type ParameterError = ParameterError<'arg>;
+        type FlagList = TagsList<'static>;
 
         fn parameter(field: &'static str, error: ParameterError<'arg>) -> Self {
             Self::Parameter { field, error }
@@ -305,6 +369,13 @@ mod with_std {
 
         fn unknown_subcommand(expected: &'static [&'static str]) -> Self {
             Self::UnknownSubcommand { expected }
+        }
+
+        fn conflicts_with_flags(conflicts: TagsList<'static>) -> Self {
+            Self::ConflictsWith {
+                flag: conflicts.tags,
+                additional: conflicts.other_tags,
+            }
         }
 
         fn wrong_subcommand_for_argument(
@@ -344,13 +415,14 @@ mod with_std {
     pub enum FieldKind {
         Long(&'static str),
         Short(char),
-        Positional { placeholder: &'static str },
+        Positional,
     }
 
     /// Errors  that occur after all command line arguments have been parsed,
     /// when trying to assemble the final Args object. This is where things
     /// like absent required fields are detected.
     #[derive(Debug, Clone)]
+    #[non_exhaustive]
     pub enum BuildError<'arg> {
         /// There was a state error when loading the an argument from the
         /// given source.
@@ -359,16 +431,26 @@ mod with_std {
             error: StateError<'arg>,
         },
 
-        /// This field was absent. The `kind` includes information a
+        /// This field was absent. The `kind` includes information about
+        /// the parameter that triggered the error
         RequiredFieldAbsent {
             field: &'static str,
+            placeholder: &'static str,
             kind: FieldKind,
+        },
+
+        /// At least one of the flags in this set were required. Each item
+        /// is the placeholder and the tags for the flag.
+        RequiredFlagSet {
+            tags: Tags<'static>,
+            alternatives: Vec<Tags<'static>>,
         },
 
         /// One of these subcommands is required here
         RequiredSubcommand {
             expected: &'static [&'static str],
         },
+
         // Flattened {
         //     field: &'static str,
         //     error: Box<Self>,
@@ -392,24 +474,37 @@ mod with_std {
     }
 
     impl<'arg> build::Error for BuildError<'arg> {
-        fn required_long(field: &'static str, long: &'static str, _short: Option<char>) -> Self {
-            Self::RequiredFieldAbsent {
-                field,
-                kind: FieldKind::Long(long),
-            }
-        }
+        type FlagList = TagsList<'static>;
 
-        fn required_short(field: &'static str, short: char) -> Self {
+        fn required_flag(
+            field: &'static str,
+            tags: crate::Tags<'static>,
+            placeholder: &'static str,
+        ) -> Self {
             Self::RequiredFieldAbsent {
                 field,
-                kind: FieldKind::Short(short),
+                placeholder,
+                kind: match tags {
+                    crate::Tags::LongShort { long, .. } | crate::Tags::Long { long } => {
+                        FieldKind::Long(long)
+                    }
+                    crate::Tags::Short { short } => FieldKind::Short(short),
+                },
             }
         }
 
         fn required_positional(field: &'static str, placeholder: &'static str) -> Self {
             Self::RequiredFieldAbsent {
                 field,
-                kind: FieldKind::Positional { placeholder },
+                placeholder,
+                kind: FieldKind::Positional,
+            }
+        }
+
+        fn any_required_flag(choices: TagsList<'static>) -> Self {
+            Self::RequiredFlagSet {
+                tags: choices.tags,
+                alternatives: choices.other_tags,
             }
         }
 

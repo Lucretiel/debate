@@ -300,10 +300,6 @@ pub fn derive_args_enum_subcommand(
                 where
                     E: ::debate::state::Error<#lifetime, ()>
                 {
-                    // TODO: for now we just say unrecognized, but in the future
-                    // we need to instead return `rejected` for variants that
-                    // we do recognize but which are not a part of the current
-                    // subcommand, or are observed before a subcommand is selected
                     match *self {
                         Self :: #fallback_ident => ::core::result::Result::Err(
                             ::debate::state::Error::unrecognized(())
