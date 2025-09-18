@@ -18,7 +18,14 @@ pub mod arguments;
 #[cfg(feature = "std")]
 mod printers;
 
-// TODO: re-exports
+pub use debate_derive::{FromArgs, ParameterUsage, Usage, Value, main};
+
+pub use {
+    build::BuildFromArgs,
+    from_args::FromArgs,
+    parameter::{Parameter, PositionalParameter, Value},
+    state::State,
+};
 
 /// The set of tags that identify a particular option (`-short`, `--long`)
 #[derive(Debug, Clone, Copy)]

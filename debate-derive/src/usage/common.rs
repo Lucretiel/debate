@@ -98,7 +98,7 @@ impl FlagUsageInfo for Invert<'_> {
 }
 
 /// Given a description of a flag, produce a const expression of type
-/// `:debate::help::ParameterOption`
+/// `:debate::help::ParameterFlag`
 pub fn flag_usage(flag: impl FlagUsageInfo) -> TokenStream2 {
     let tags = compute_usage_tags(&flag.tags());
     let placeholder = flag.placeholder();
@@ -108,7 +108,7 @@ pub fn flag_usage(flag: impl FlagUsageInfo) -> TokenStream2 {
 
     quote! {
         const {
-            ::debate::help::ParameterOption {
+            ::debate::help::ParameterFlag {
                 description: #docs,
                 requirement: match #defaulted {
                     true => ::debate::help::Requirement::Optional,
@@ -153,7 +153,7 @@ pub fn struct_usage_items(
             let invert = field.invert.as_ref().map(|tag| {
                 let usage = flag_usage(Invert { tag: tag.as_str() });
                 quote! {
-                    ::debate::help::Parameter::Option(#usage),
+                    ::debate::help::Parameter::Flag(#usage),
                 }
             });
 
@@ -161,7 +161,7 @@ pub fn struct_usage_items(
 
             quote! {
                 #invert
-                ::debate::help::Parameter::Option(#usage),
+                ::debate::help::Parameter::Flag(#usage),
             }
         }
         ParsedFieldInfo::Flatten(FlattenFieldInfo {
@@ -198,7 +198,7 @@ pub fn struct_usage_items(
         let tags = compute_usage_tags(&help.tags);
 
         quote! {
-            ::debate::help::Parameter::Option(::debate::help::ParameterOption {
+            ::debate::help::Parameter::Flag(::debate::help::ParameterFlag {
                 description: ::debate::help::Description::new("Show usage information"),
                 requirement: ::debate::help::Requirement::Optional,
                 repetition: ::debate::help::Repetition::Single,

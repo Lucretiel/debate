@@ -1,3 +1,7 @@
+/*!
+Utility types and functions for [`debate`][crate]
+ */
+
 use core::{
     fmt,
     iter::FusedIterator,
@@ -13,8 +17,23 @@ use crate::{
     state,
 };
 
+/**
+An error type that assists state errors with propagating unrecognized
+arguments.
+
+When a [`State`][crate::state::State] doesn't recognize an argument, it returns
+the argument it got as a function argument, so that it can be retried
+elsewhere. This enum provides a container for this function argument. This
+allows the caller of the state method to opt-in or opt-out of actually
+receiving this unused argument, depending on if it wants to retry it or not.
+
+This type is mostly used by the [`debate`][crate] derives.
+ */
 pub enum DetectUnrecognized<A, E> {
+    /// This argument wasn't recognized and can be retried
     Unrecognized(A),
+
+    /// A different error occurred
     Error(E),
 }
 
@@ -22,34 +41,42 @@ impl<'arg, E> parameter::Error<'arg> for DetectUnrecognized<(), E>
 where
     E: parameter::Error<'arg>,
 {
+    #[inline]
     fn needs_arg() -> Self {
         Self::Error(E::needs_arg())
     }
 
+    #[inline]
     fn got_arg(arg: &'arg Arg) -> Self {
         Self::Error(E::got_arg(arg))
     }
 
+    #[inline]
     fn got_additional_instance() -> Self {
         Self::Unrecognized(())
     }
 
+    #[inline]
     fn invalid_utf8(arg: &'arg Arg) -> Self {
         Self::Error(E::invalid_utf8(arg))
     }
 
+    #[inline]
     fn parse_error(arg: &'arg str, msg: impl fmt::Display) -> Self {
         Self::Error(E::parse_error(arg, msg))
     }
 
+    #[inline]
     fn byte_parse_error(arg: &'arg Arg, msg: impl fmt::Display) -> Self {
         Self::Error(E::byte_parse_error(arg, msg))
     }
 
+    #[inline]
     fn should_be(argument: &'arg Arg, expected: &'static [&'static str]) -> Self {
         Self::Error(E::should_be(argument, expected))
     }
 
+    #[inline]
     fn custom(msg: impl fmt::Display) -> Self {
         Self::Error(E::custom(msg))
     }
@@ -62,28 +89,33 @@ where
     type ParameterError = E::ParameterError;
     type FlagList = E::FlagList;
 
+    #[inline]
     fn parameter(field: &'static str, error: Self::ParameterError) -> Self {
         Self::Error(E::parameter(field, error))
     }
 
+    #[inline]
     fn unrecognized(argument: A) -> Self {
         Self::Unrecognized(argument)
     }
 
+    #[inline]
     fn flattened(field: &'static str, error: Self) -> Self {
-        // Currently we get rid of flattens for unrecognized. This kind of
-        // makes sense because unrecognition is a property of the entire state
-        // tree, not any particular part of it.
+        // Currently we get rid of flattens for unrecognized. This makes sense
+        // because un-recognition is a property of the entire state tree, not
+        // any particular part of it.
         match error {
             Self::Unrecognized(arg) => Self::Unrecognized(arg),
             Self::Error(err) => Self::Error(E::flattened(field, err)),
         }
     }
 
+    #[inline]
     fn unknown_subcommand(expected: &'static [&'static str]) -> Self {
         Self::Error(E::unknown_subcommand(expected))
     }
 
+    #[inline]
     fn wrong_subcommand_for_argument(
         subcommand: &'static str,
         allowed: &'static [&'static str],
@@ -91,20 +123,25 @@ where
         Self::Error(E::wrong_subcommand_for_argument(subcommand, allowed))
     }
 
+    #[inline]
     fn conflicts_with_flags(flags: Self::FlagList) -> Self {
         Self::Error(E::conflicts_with_flags(flags))
     }
 
+    #[inline]
     fn help_requested(req: HelpRequest) -> Self {
         Self::Error(E::help_requested(req))
     }
 }
 
-/// A parameter that counts the number of times it appears on the command
-/// line. Enables things like increasing verbosity levels via `-v`, `-vv`,
-/// `-vvv`
+/**
+A switch parameter that counts the number of times it appears on the command
+line. Enables things like increasing verbosity levels via `-v`, `-vv`,
+`-vvv`
+*/
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Count {
+    /// The number of times this switch appeared
     pub count: u32,
 }
 
@@ -136,9 +173,12 @@ impl help::ParameterUsage for Count {
     const REPETITION: help::Repetition = help::Repetition::Multiple;
 }
 
-/// Input arguments are always raw byte slices; this function converts
-/// an argument to a string and handles returning the appropriate error
-/// in a `PositionalParameter` or `Value` implementation.
+/**
+Input arguments are always raw byte slices; this function converts an argument
+to a string and handles returning the appropriate
+[parameter error][crate::parameter::Error]. This should be used in [`Value`]
+and [`PositionalParameter`] implementations.
+*/
 pub fn arg_as_str<'arg, E>(arg: &'arg Arg) -> Result<&'arg str, E>
 where
     E: parameter::Error<'arg>,
@@ -148,10 +188,44 @@ where
 
 // TODO: set-like helpers for NonEmpty<HashSet>, to avoid duplicate elements
 // in the hash set.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+/**
+[`PositionalParameter`] wrapper for collection types that structurally
+guarantees that at least one argument is present.
+
+Collections can be empty, so their [`Parameter`] implementations return success
+if no values were present on the command line. Wrapping them in this type (for
+instance, `NonEmpty<String, Vec<String>>`) ensures that at least one argument
+is present
+
+*/
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct NonEmpty<T, C> {
     pub first: T,
     pub rest: C,
+}
+
+impl<T, C> NonEmpty<T, C>
+where
+    for<'a> &'a C: IntoIterator<Item = &'a T>,
+{
+    pub fn iter(&self) -> NonEmptyIter<<&C as IntoIterator>::IntoIter> {
+        NonEmptyIter {
+            first: Some(&self.first),
+            rest: self.rest.into_iter(),
+        }
+    }
+}
+
+impl<T, C> NonEmpty<T, C>
+where
+    for<'a> &'a mut C: IntoIterator<Item = &'a mut T>,
+{
+    pub fn iter_mut(&mut self) -> NonEmptyIter<<&mut C as IntoIterator>::IntoIter> {
+        NonEmptyIter {
+            first: Some(&mut self.first),
+            rest: self.rest.into_iter(),
+        }
+    }
 }
 
 impl<T, C> Extend<T> for NonEmpty<T, C>
@@ -250,6 +324,7 @@ where
     }
 }
 
+/// Iterator type for [`NonEmpty`] collections
 pub struct NonEmptyIter<I: Iterator> {
     first: Option<I::Item>,
     rest: I,

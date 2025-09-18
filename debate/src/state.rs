@@ -1,3 +1,19 @@
+/*!
+Command-line argument parsing state. Pairs with the traits in
+[`build`][crate::build].
+
+[`State`] provides the composable model for parsing command-line arguments, one
+argument at a time. Each [`BuildFromArgs`][crate::build::BuildFromArgs] type
+includes an associated state type. Arguments can be fed into this state, one
+at a time, and either parsed or errors return if there are issues (such as
+parse errors, unrecognized errors, and so on). In this way, we can compose
+argument parsers by allowing states to contain other states, and pass arguments
+inward as necessary.
+
+Usually you don't need to implement [`State`] by hand; it happens automatically
+in the derive macro.
+*/
+
 use core::iter;
 
 use debate_parser::Arg;
@@ -84,84 +100,127 @@ impl<V: SubcommandVisitor> SubcommandVisitor for SubcommandPathVisitorWithItem<'
     }
 }
 
-/// The state associated with a [`BuildFromArgs`] type that is in the middle
-/// of being parsed
+/**
+The state associated with a [`BuildFromArgs`][crate::BuildFromArgs] type that
+is in the middle of being parsed. Arguments are passed into the state and
+parsed, with usage errors or unrecognized arguments being returned.
+*/
 pub trait State<'arg> {
+    /// Add a positional argument to this state
     fn add_positional<E>(&mut self, argument: &'arg Arg) -> Result<(), E>
     where
         E: Error<'arg, ()>;
 
+    /**
+    Add a long flag to this state, that definitely has an argument:
+    `--long=value`
+    */
     fn add_long_argument<E>(&mut self, option: &'arg Arg, argument: &'arg Arg) -> Result<(), E>
     where
         E: Error<'arg, ()>;
 
+    /**
+    Add a `--long` flag to this state. If the argument is unrecognized, it
+    should be returned in the error, potentially allowing other states to try
+    to parse it.
+    */
     fn add_long<A, E>(&mut self, option: &'arg Arg, argument: A) -> Result<(), E>
     where
         A: parameter::ArgAccess<'arg>,
         E: Error<'arg, A>;
 
+    /**
+    Add a `-short` flag to this state. If the argument is unrecognized, it
+    should be returned in the error, potentially allowing other states to try
+    to parse it.
+     */
     fn add_short<A, E>(&mut self, option: u8, argument: A) -> Result<(), E>
     where
         A: parameter::ArgAccess<'arg>,
         E: Error<'arg, A>;
 
     /**
-    IF this state includes an actively selected subcommand, it should call
-    the handler using that subcommand. It should first attempt to forward
-    the handler as deeply as possible to any nested subcommands.
+    Method that allows the caller to determine if this state includes a
+    subcommand, potentially including any nested subcommands. This is used
+    when printing usage messages to allow subcommands to print their own
+    messages (for instance, `cargo --help` vs `cargo --help build`).
+
+    If this state includes a subcommand, it calls
+    [`visit_subcommand`][SubcommandVisitor::visit_subcommand] to describe it.
+    It should recurse as deeply as possible to show the *complete* subcommand.
 
     Otherwise, it returns the unused handler.
 
-    If the state has more than one sibling subcommand, the LAST one is chosen.
-    This helps us with (imo) the most predictable behavior for how `--help`
+    If the state somehow has more than one sibling subcommand, the LAST one is
+    chosen. This helps us with the most predictable behavior for how `--help`
     interacts with subcommands.
 
     This method exists purely to assist with printing usage messages
     for subcommands.
     */
-    fn get_subcommand_path<V: SubcommandVisitor>(&self, visitor: V) -> Result<V::Output, V> {
+    fn get_subcommand_path<V>(&self, visitor: V) -> Result<V::Output, V>
+    where
+        V: SubcommandVisitor,
+    {
         Err(visitor)
     }
 }
 
-/// Errors that can occur when adding an argument to the state during parsing
+/**
+Errors that can occur when adding an argument to the state during parsing. Note
+that these errors don't include information about the actual `--flag` or
+positional parameter that was parsed; this information is still available to
+the caller, who should wrap this error if necessary when propagating it.
+*/
 pub trait Error<'arg, Arg>: Sized {
+    /// Error type for parameter errors (see [`parameter`][Error::parameter]).
     type ParameterError: parameter::Error<'arg>;
+
+    /// List of flags for [`conflicts_with_flags`][Error::conflicts_with_flags].
     type FlagList: errors::FlagsList<'static>;
 
-    /// A parameter type returned an error. This means that the argument was
-    /// recognized and matched to a specific field, but something went wrong
-    /// during parsing.
+    /**
+    A parameter type returned an error. This means that the argument was
+    recognized and matched to a specific field, but something went wrong during
+    parsing, such as a letter appearing in a numeric parameter.
+    */
     fn parameter(field: &'static str, error: Self::ParameterError) -> Self;
 
-    /// An argument was unrecognized. In this case, the Argument can be
-    /// returned unused inside of `Self`, so that it can be retried by a
-    /// different parser. For instance, a subcommand parser could indicate that
-    /// an argument is unrecognized, and that argument can later be handled as
-    /// a global argument.
+    /**
+    An argument was unrecognized. In this case, the Argument can be returned
+    unused inside of `Self`, so that it can be retried by a different parser.
+    For instance, a subcommand parser could indicate that an argument is
+    unrecognized, and that argument can later be handled as a global argument.
+    */
     fn unrecognized(argument: Arg) -> Self;
 
-    /// There was a state error from a flattened field
+    /// There was a state error from another [`State`] inside of this one.
     fn flattened(field: &'static str, error: Self) -> Self;
 
-    /// The positional argument was interpreted as a subcommand, but wasn't
-    /// recognized as a known subcommand. The list of known subcommands is
-    /// given.
+    /**
+    The positional argument was interpreted as a subcommand, but wasn't
+    recognized as a known subcommand. The list of known subcommands is
+    given.
+    */
     fn unknown_subcommand(expected: &'static [&'static str]) -> Self;
 
-    /// The option was recognized, but it isn't a valid for this particular
-    /// subcommand. The current subcommand, along with the list of subcommands
-    /// that accept this option, are given
+    /**
+    The option was recognized, but it isn't a valid for this particular
+    subcommand. The current subcommand, along with the list of subcommands
+    that accept this option, are given
+    */
     fn wrong_subcommand_for_argument(
         subcommand: &'static str,
         allowed: &'static [&'static str],
     ) -> Self;
 
-    /// The argument conflicts with the flags in this set
+    /// The argument conflicts with the given flags that were already parsed.
     fn conflicts_with_flags(flags: Self::FlagList) -> Self;
 
-    /// This was a request for a usage message. This error doesn't need to
-    /// interrupt argument parsing, since it can be useful to have a complete
-    /// state object to print more contextually useful usage messages.
+    /**
+    This was a request for a usage message. This error doesn't need to
+    interrupt argument parsing, since it can be useful to have a complete
+    state object to print more contextually useful usage messages.
+    */
     fn help_requested(request: HelpRequest) -> Self;
 }

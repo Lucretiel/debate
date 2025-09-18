@@ -1,3 +1,8 @@
+/*!
+Printers for [`debate`][crate]. Complete implementations of usage messages, error
+messages, and so on.
+*/
+
 use core::slice;
 use std::{
     fmt::Display,
@@ -11,8 +16,8 @@ use crate::{
     Tags,
     errors::{BuildError, FieldKind, ParameterError, ParameterSource, StateError},
     help::{
-        Description, HelpRequest, Parameter, ParameterOption, ParameterPositional,
-        ParameterSubgroup, Repetition, Requirement, UsageItems, ValueParameter,
+        Description, HelpRequest, Parameter, ParameterFlag, ParameterPositional, ParameterSubgroup,
+        Repetition, Requirement, UsageItems, ValueParameter,
     },
 };
 
@@ -129,9 +134,11 @@ pub fn build_error(error: &BuildError) -> impl Display {
         match (error) {
             BuildError::Arg { source, error } => ("{}", state_error(source, error)),
             BuildError::RequiredSubcommand { .. } => "no subcommand given",
-            BuildError::RequiredFieldAbsent { kind: FieldKind::Long(long), .. } =>
+            BuildError::RequiredFieldAbsent { kind: FieldKind::Flag(
+                Tags::Long{long} | Tags::LongShort{long, ..}
+            ), .. } =>
                 "required flag --{long} was omitted",
-            BuildError::RequiredFieldAbsent { kind: FieldKind::Short(short), .. } =>
+            BuildError::RequiredFieldAbsent { kind: FieldKind::Flag(Tags::Short{short}), .. } =>
                 "required flag -{short} was omitted",
             BuildError::RequiredFieldAbsent { kind:  FieldKind::Positional, placeholder, .. } =>
                 "required argument <{placeholder}> was omitted",
@@ -154,7 +161,7 @@ fn any_options(items: &UsageItems<'_>) -> bool {
     match *items {
         UsageItems::Parameters { parameters } => {
             parameters.iter().any(|parameter| match parameter {
-                Parameter::Option(option) => option.requirement == Requirement::Optional,
+                Parameter::Flag(option) => option.requirement == Requirement::Optional,
                 Parameter::Positional(_) => false,
                 Parameter::Group(group) => any_options(&group.contents),
             })
@@ -259,7 +266,7 @@ fn print_usage_items(
     match *items {
         UsageItems::Parameters { parameters } => {
             parameters.iter().try_for_each(|parameter| match parameter {
-                Parameter::Option(option) => print_parameter_option(out, style, option),
+                Parameter::Flag(option) => print_parameter_option(out, style, option),
                 Parameter::Positional(positional) => {
                     print_parameter_positional(out, style, positional)
                 }
@@ -278,7 +285,7 @@ fn print_usage_items(
 fn print_parameter_option(
     out: &mut (impl io::Write + ?Sized),
     style: HelpRequest,
-    option: &ParameterOption<'_>,
+    option: &ParameterFlag<'_>,
 ) -> io::Result<()> {
     // TODO: find a way to express the repetition and
     // requirement for an option in the general usage message
@@ -328,7 +335,7 @@ fn print_parameter_subgroup(
     })
 }
 
-fn printable_option_synopsis(option: &ParameterOption<'_>) -> impl Display {
+fn printable_option_synopsis(option: &ParameterFlag<'_>) -> impl Display {
     let tag = lazy_format!(match (option.tags) {
         Tags::LongShort { long, .. } | Tags::Long { long } => "--{long}",
         Tags::Short { short } => "-{short}",
@@ -353,7 +360,7 @@ fn print_synopsis(
     match *items {
         UsageItems::Parameters { parameters } => {
             parameters.iter().try_for_each(|parameter| match parameter {
-                Parameter::Option(option) => {
+                Parameter::Flag(option) => {
                     if option.requirement == Requirement::Optional {
                         return Ok(());
                     }

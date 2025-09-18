@@ -1,12 +1,25 @@
+/*!
+Basic error implementations for the various error traits throughout
+[`debate`][crate]
+ */
+
 use core::fmt::{self};
 
 use crate::{Tags, build, from_args, help::HelpRequest, parameter, state};
 
-/// Errors sometimes need to be able to refer to a group of flags,
-/// guaranteeing at least one. This trait allows the error type to express
-/// which container it wants to use.
+/**
+Errors sometimes need to be able to refer to a group of flags, guaranteeing at
+least one. This trait allows the error type to express which container it wants
+to use.
+*/
 pub trait FlagsList<'a> {
+    /**
+    Create a new [`FlagsList`]. Flags lists are guaranteed to include at least
+    one flag, so this constructor includes that flag.
+    */
     fn new(tags: Tags<'a>, placeholder: &'a str) -> Self;
+
+    /// Insert an additional flag into this set.
     fn add(&mut self, tags: Tags<'a>, placeholder: &'a str);
 }
 
@@ -282,6 +295,10 @@ mod with_std {
         }
     }
 
+    /**
+    A basic container for lists of flags. Usually there's no need to use this
+    directly.
+    */
     pub struct TagsList<'a> {
         tags: Tags<'a>,
         other_tags: Vec<Tags<'a>>,
@@ -300,13 +317,17 @@ mod with_std {
         }
     }
 
-    /// Errors that occur when parsing a single item from the command-line
-    /// arguments
+    /**
+    Errors that occur when parsing a single item from the command-line
+    arguments.
+    */
     #[derive(Debug, Clone)]
     #[non_exhaustive]
     pub enum StateError<'arg> {
-        /// The argument was matched with a typed parameter, but the type
-        /// returned an error.
+        /**
+        The argument was matched with a typed parameter or field, but the type
+        returned an error.
+        */
         Parameter {
             field: &'static str,
             error: ParameterError<'arg>,
@@ -315,13 +336,17 @@ mod with_std {
         /// The argument failed to match any known parameters
         Unrecognized,
 
-        /// The argument was identified as a subcommand, but didn't match
-        /// any known subcommands.
+        /**
+        The argument was identified as a subcommand, but didn't match any
+        known subcommands.
+        */
         UnknownSubcommand { expected: &'static [&'static str] },
 
-        /// Similar to `Unrecognized`: The argument was unrecognized by
-        /// *this* subcommand, but is possibly a valid argument for one of the
-        /// other subcommands.
+        /**
+        Similar to `Unrecognized`: The argument was unrecognized by *this*
+        subcommand, but is possibly a valid argument for one of the other
+        subcommands.
+        */
         WrongSubcommand {
             subcommand: &'static str,
             allowed: &'static [&'static str],
@@ -413,8 +438,10 @@ mod with_std {
     /// Filtered, user-printable identification for a particular parameter.
     #[derive(Debug, Clone)]
     pub enum FieldKind {
-        Long(&'static str),
-        Short(char),
+        /// The parameter is a flag
+        Flag(Tags<'static>),
+
+        /// The parameter is a positional parameter
         Positional,
     }
 
@@ -434,8 +461,13 @@ mod with_std {
         /// This field was absent. The `kind` includes information about
         /// the parameter that triggered the error
         RequiredFieldAbsent {
+            /// The field identifier for this field
             field: &'static str,
+
+            /// The user-printable placeholder used for this field
             placeholder: &'static str,
+
+            /// This field's kind
             kind: FieldKind,
         },
 
@@ -447,14 +479,13 @@ mod with_std {
         },
 
         /// One of these subcommands is required here
-        RequiredSubcommand {
-            expected: &'static [&'static str],
-        },
+        RequiredSubcommand { expected: &'static [&'static str] },
 
         // Flattened {
         //     field: &'static str,
         //     error: Box<Self>,
         // },
+        /// Something else went wrong while parsing arguments
         Custom(String),
     }
 
@@ -478,18 +509,13 @@ mod with_std {
 
         fn required_flag(
             field: &'static str,
-            tags: crate::Tags<'static>,
+            tags: Tags<'static>,
             placeholder: &'static str,
         ) -> Self {
             Self::RequiredFieldAbsent {
                 field,
                 placeholder,
-                kind: match tags {
-                    crate::Tags::LongShort { long, .. } | crate::Tags::Long { long } => {
-                        FieldKind::Long(long)
-                    }
-                    crate::Tags::Short { short } => FieldKind::Short(short),
-                },
+                kind: FieldKind::Flag(tags),
             }
         }
 

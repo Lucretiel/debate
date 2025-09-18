@@ -1,38 +1,54 @@
+/*!
+Traits related to composable parsing of command line arguments.
+
+This module contains the [`BuildFromArgs`] trait and its related [`Error`]
+trait. [`BuildFromArgs`] is used to composably parse command line arguments;
+that is, it's designed to be nested inside of other [`BuildFromArgs`] types.
+See its documentation for details.
+*/
+
 use core::fmt::Display;
 
 use crate::{Tags, errors, state};
 
-/// Errors that can occur while converting the parsed arguments into the final
-/// structure. Generally these failures are related to the absence of required
-/// arguments; errors that are specific to a particular parameter or incoming
-/// argument are handled earlier.
+/**
+Errors that can occur while converting the parsed arguments into the final
+structure. Generally these failures are related to the absence of required
+arguments; errors that are specific to a particular parameter or incoming
+argument are handled earlier.
+*/
 pub trait Error {
+    /**
+    When reporting [`any_required_flag`], we need to be able to report a list
+    of flags. This type allows the error to define the container it wants to
+    use for those flags.
+    */
     type FlagList: errors::FlagsList<'static>;
 
-    /// A required flag wasn't present
+    /// A required flag wasn't present.
     fn required_flag(field: &'static str, tags: Tags<'static>, placeholder: &'static str) -> Self;
 
-    /// A required positional field wasn't present
+    /// A required positional field wasn't present.
     fn required_positional(field: &'static str, placeholder: &'static str) -> Self;
 
-    /// *At least one* of the flags in this list were required
+    /// *At least one* of the flags in this list were required.
     fn any_required_flag(list: Self::FlagList) -> Self;
 
-    /// There was an error building a flattened field
+    /// There was an error building a flattened field.
     fn flattened(field: &'static str, error: Self) -> Self;
 
-    /// We required a subcommand, but none was provided
+    /// We required a subcommand, but none was provided.
     fn required_subcommand(expected: &'static [&'static str]) -> Self;
 
-    /// Something else went wrong
+    /// Something else went wrong.
     fn custom(message: impl Display) -> Self;
 }
 
 /**
 A type that can be parsed from command line arguments by repeatedly feeding
 those argument into a `State`, and then then turning that state into this
-final type. Types that implement `BuildFromArgs` automatically implement
-`FromArgs`.
+final type. Types that implement [`BuildFromArgs`] automatically implement
+[`FromArgs`][crate::from_args::FromArgs].
 
 If you are manually implementing [`FromArgs`][crate::from_args::FromArgs], it
 usually makes sense to instead implement [`BuildFromArgs`]. It will take care
@@ -47,8 +63,18 @@ state object is passed into [`build`][BuildFromArgs::build], which checks for
 things like required arguments and then constructs the final object.
 */
 pub trait BuildFromArgs<'arg>: Sized {
+    /**
+    The state type for this arguments type. Arguments are fed into the state
+    one at a time, with the state reporting any errors associated with
+    individual arguments, then at the end we convert the state into
+    [`Self`][BuildFromArgs] with [`build`][BuildFromArgs::build].
+    */
     type State: state::State<'arg> + Default;
 
+    /**
+    Attempt to convert a state into the final parsed arguments type. This
+    can report errors related to absent required fields or similar problems.
+    */
     fn build<E>(state: Self::State) -> Result<Self, E>
     where
         E: Error;

@@ -23,26 +23,40 @@ macro_rules! use_stream_and_die {
     }};
 }
 
-/// A type that can be parsed from command line arguments
-///
-/// If you're implementing this by hand, you should certainly prefer instead
-/// to implement [`BuildFromArgs`]. That takes care of a lot of the tedious
-/// looping over the `arguments` object, and also allows delegating argument
-/// parsing with `#[debate(flatten)]`.
+/**
+A type that can be parsed from command line arguments
+
+If you're implementing this by hand, you should certainly prefer instead
+to implement [`BuildFromArgs`][crate::build::BuildFromArgs]. That takes care of
+a lot of the tedious looping over the `arguments` object, and also allows
+delegating argument parsing with `#[debate(flatten)]`.
+*/
 pub trait FromArgs<'arg>: Sized {
+    /**
+    Attempt to parse these arguments from the given raw arguments. Return a
+    structured error in the event of a problem.
+    */
     fn try_from_parser<E>(
         arguments: ArgumentsParser<'arg, impl Iterator<Item = &'arg [u8]>>,
     ) -> Result<Self, E>
     where
         E: Error<'arg> + build::Error;
 
+    /**
+    Parse these arguments from the given raw arguments. If there is an error,
+    print a useful error message and exit the process with an error code. If
+    there is a request for help, print a usage message and exit the process
+    with a success code.
+     */
     #[cfg(feature = "std")]
     fn from_parser(arguments: ArgumentsParser<'arg, impl Iterator<Item = &'arg [u8]>>) -> Self
     where
         Self: Usage;
 }
 
-/// Errors that can occur while handling incoming arguments
+/**
+Errors that can occur while parsing arguments in [`FromArgs`].
+*/
 pub trait Error<'arg> {
     type StateError<A>: state::Error<'arg, A>;
 
