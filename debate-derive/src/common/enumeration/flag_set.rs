@@ -133,6 +133,8 @@ pub enum FlagSetVariant<'a> {
     /// A plain variant is a unit variant, a newtype variant, OR a struct
     /// variant with exactly one field
     Plain(FlagSetFlagInfo<PlainFlagInfo<'a>>),
+
+    /// A struct variant with multiple named fields
     Struct(Vec<FlagSetFlagInfo<FlagFieldInfo<'a>>>),
 }
 
@@ -358,7 +360,7 @@ pub struct FlagSetFlag<'a> {
 
     /// All of the variants where this flag appears, along with the index
     /// of its location in that variant's state, and (if relevant) the name
-    /// of the
+    /// of the field within that variant.
     pub variants: Vec<FlagSetFlagVariant<'a>>,
 
     /// Documentation for this flag. If the flag appears more than once in
@@ -545,6 +547,9 @@ where
         None => {
             let index = set.len();
 
+            // We insert an empty flag, then merge the `variant_flag` into it.
+            // This help preserve consistency between the "flag already exists"
+            // case and the "flag is new" case.
             set.push(FlagSetFlag {
                 origin,
                 variants: Vec::new(),
@@ -573,7 +578,7 @@ where
     existing_flag.family.merge(family, variant);
     existing_flag.ever_required = existing_flag.ever_required || variant_flag.default.is_none();
 
-    if existing_flag.docs.full.len() > variant_flag.docs.full.len() {
+    if existing_flag.docs.full.len() < variant_flag.docs.full.len() {
         existing_flag.docs = &variant_flag.docs;
     };
 
@@ -607,6 +612,12 @@ pub struct VariantFieldSources<'a> {
 /// within those variants. This is where various consistency checks happen
 /// (duplicate flags must be mostly identical) and where things like the
 /// exclusion sets are calculated.
+///
+/// This returns two collections:
+/// - A mapping from each variant to the set of flags it contains. This includes
+///   information like the overall index of that flag in the deduplicated set,
+///   and whether that flag is unique to this variant.
+/// - A deduplicated list of all the flags across the flag set
 pub fn compute_grouped_flags<'a>(
     variants: &'a IndexMap<IdentString<'a>, FlagSetVariant<'a>>,
 ) -> syn::Result<(
