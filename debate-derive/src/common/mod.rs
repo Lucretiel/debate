@@ -617,7 +617,8 @@ fn strip_no(tag: &str) -> Option<&str> {
 #[inline]
 fn compute_invert(
     // If given, the user's preference for the flag. If omitted, we'll compute
-    // it by prefixing the `long` tag with `no-`
+    // it by prefixing the `long` tag with `no-` (or, if it has a `no-` already,
+    // by stripping it)
     invert: Option<SpannedValue<String>>,
 
     // The --long tag of the flag being modified
