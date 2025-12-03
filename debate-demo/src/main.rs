@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use debate::{FromArgs, ParameterUsage, Usage, Value};
+use debate::{BuildFromArgs, ParameterUsage, Usage, Value};
 
 /// This is a demo program for the debate CLI parser
 ///
@@ -16,7 +16,7 @@ use debate::{FromArgs, ParameterUsage, Usage, Value};
 /// eget, imperdiet porttitor mauris. Sed tristique ligula auctor dolor
 /// aliquam, sed placerat ipsum scelerisque. Mauris felis quam, interdum sit
 /// amet dui quis, pulvinar faucibus ligula.
-#[derive(Debug, FromArgs, Usage)]
+#[derive(Debug, BuildFromArgs, Usage)]
 #[debate(help)]
 struct DebateDemo<'arg> {
     /// The path, a flag
@@ -89,14 +89,17 @@ struct DebateDemo<'arg> {
 Basic example of `derive(FromArgs)` on an enum. Each variant of this enum is
 a mutually exclusive flag; in this case, --release or --debug
  */
-#[derive(Debug, Usage, FromArgs)]
+#[derive(Debug, Usage, BuildFromArgs)]
 #[debate(long)]
 enum Target {
+    /// Use debug mode
     Debug,
+
+    /// Use release mode
     Release,
 }
 
-#[derive(FromArgs, Usage, Debug)]
+#[derive(BuildFromArgs, Usage, Debug)]
 struct Alphabet {
     /// The alpha value
     #[debate(long, short, default)]
@@ -120,7 +123,7 @@ struct Alphabet {
     special_alphabet_options: NestedAlphabet,
 }
 
-#[derive(FromArgs, Usage, Debug)]
+#[derive(BuildFromArgs, Usage, Debug)]
 struct NestedAlphabet {
     /// A flag with only a short form, to test some stuff with short descriptions
     #[debate(short)]
@@ -168,7 +171,7 @@ the others. Notice, though, how one flag (--loud) appears in two different
 variants; flags in these enums are allowed to appear in more than one variant,
 so long as they're (more or less) identical in all cases.
  */
-#[derive(FromArgs, Debug, Usage)]
+#[derive(BuildFromArgs, Debug, Usage)]
 #[debate(long)]
 enum FlagChoice {
     OutDir(PathBuf),
@@ -197,7 +200,7 @@ Note how each subcommand can have its own set of arguments, either directly
 (shown in `Build` or via a newtype containing a `FromArgs` type (shown in
 `Test` and `ExclusiveAction`).
 */
-#[derive(FromArgs, Debug, Usage)]
+#[derive(BuildFromArgs, Debug, Usage)]
 #[debate(subcommand)]
 enum Subcommand<'arg> {
     /// If no subcommand is given, the fallback variant will be used. It's
@@ -232,7 +235,7 @@ enum Subcommand<'arg> {
     ExclusiveAction(FlagChoice),
 }
 
-#[derive(FromArgs, Usage, Debug)]
+#[derive(BuildFromArgs, Usage, Debug)]
 struct TestArgs {
     /// If given, only run this test.
     ///

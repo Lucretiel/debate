@@ -174,7 +174,7 @@ pub trait Parameter<'arg>: Sized {
     Most types should return a [`RequiredError`] here (the default behavior),
     and allow defaults to be handled by an [`Option`] or `#[debate(default)]`.
     However, there are plenty of cases where a type has a sensible behavior if
-    it doesn't appear on the command line, such as a bool flag being false or
+    it doesn't appear on the command line, such as a [`bool`] flag being false or
     a [`Vec`][std::vec::Vec] being empty.
     */
     #[inline]
