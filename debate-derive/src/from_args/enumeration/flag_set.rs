@@ -42,7 +42,7 @@ fn handle_superposition_argument<'a, Tag: MakeScrutinee>(
     add_parameter_method: &Ident,
     flatten_rebind_argument: impl ToTokens,
 ) -> TokenStream2 {
-    // Step 1: update the rejection set with all newly rejeced variants
+    // Step 1: update the rejection set with all newly rejected variants
     // Step 2: check for a conflict (are all variants now rejected)?
     // Step 3: check if this flag transitions us to a known state.
     //   if so:
@@ -84,7 +84,7 @@ fn handle_superposition_argument<'a, Tag: MakeScrutinee>(
                 };
 
                 // Because we're in the superposition state, AND this flag has
-                // a unique variant, we're guarnateed the flag hasn't been seen
+                // a unique variant, we're guaranteed the flag hasn't been seen
                 // yet, so we can use the `parameter_method` and transition
                 // directly into the new state
                 let expr = quote! {
@@ -526,7 +526,7 @@ pub fn derive_args_enum_flag_set(
     // - State variants: A state variant marks that a given variant has been
     //   unconditionally selected but is still being parsed. Contains all of
     //   the fields for that variant. A state variant doesn't exist if it
-    //   has no exclusive flags, because there's no mechansism for us to ever
+    //   has no exclusive flags, because there's no mechanism for us to ever
     //   switch over to it during parsing.
 
     let any_multi_flags = parsed_flags.iter().any(|flag| flag.variants.len() > 1);
