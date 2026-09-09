@@ -112,7 +112,7 @@ enum Target {
 
 Debate is designed as a derive-first library. Unlike most other command-line
 parsing libraries, it does not have any sense of a "parser object", which is
-filled at runtime with arguments and populates WHAT DOES IT POPULATE. WHAT
+filled at runtime with arguments and populates TODO WHAT DOES IT POPULATE. WHAT
 DEBATE DOES INSTEAD. This section describes the specific logic that informs
 debate's derives.
 
@@ -122,10 +122,10 @@ debate's derives.
 type, allowing it to be parsed from raw command-line arguments. Each field on
 the type is a parameter, associated with a single flag or positional parameter.
 
-During parsing, each incoming raw argument will be matched with a parameter,
-and the [`Parameter`][parameter::Parameter] trait used to parse the argument.
-Positional parameters will be be matched in definition order, from first to
-last, while flags will be matched directly by name.
+During parsing, each incoming flag or positional will be matched with a
+parameter, and the [`Parameter`][parameter::Parameter] trait used to parse the
+argument. Positional parameters will be be matched in definition order, from
+first to last, while flags will be matched directly by name.
 
 ### Attributes
 
@@ -166,7 +166,7 @@ here. All attributes are optional unless otherwise specified.
   stripped). Debate will do its best to preserve whatever case convention
   you're using.
 
-  FINISH THIS EXAMPLE
+  TODO FINISH THIS EXAMPLE
   ```
   use debate::FromArgs
   #[derive(From)]
@@ -180,12 +180,13 @@ here. All attributes are optional unless otherwise specified.
   An `override` attribute allows a flag to appear more than once, where each
   subsequent instance of the flag overrides earlier instances. This is often
   used in shell scripts or shell aliases, where a default behavior provided
-  by a script can be overridden by a user-provided flag.
+  by an alias can be overridden by a user-provided flag.
 
-  Without `override`, a type's [`Parameter`][parameter::Parameter] implementation
-  will defune what happens if that flag appears more than once. For most types
-  this will be an error, but some types (like `Vec`) allow a flag to appear
-  more than once and parse all of the instances into a collection.
+  Without `override`, a type's [`Parameter`][parameter::Parameter]
+  implementation will define what happens if that flag appears more than once.
+  For most type, this will be an error, but some types (like `Vec` and `Counter`
+  TODO HYPERLINKS) allow a flag to appear more than once and parse all of the
+  instances into a collection.
 
 - `#[debate(flatten)]`
 
@@ -210,11 +211,11 @@ In order to make a subcommand, derive `BuildFromArgs` on an `enum` with
 `#[debate(subcommand)]`. Each variant of the `enum` will be a different
 subcommand, and each variant has its own set of parameters.
 
-EXAMPLE HERE, INLCUDING NEWTYPES
+TOD EXAMPLE HERE, INLCUDING NEWTYPES
 
 ### Flag Sets
 
-`debate` deliberately doesn't provide attributes that establishe constraints
+`debate` deliberately doesn't provide attributes that establish constraints
 between separate flags, such as mutual exclusion, because these constraints
 aren't reflected in the parsed value and require brittle and unpleasant code
 to take advantage of. It prefers to **make impossible states unrepresentable**.
@@ -227,12 +228,12 @@ on an `enum`.
 
 #### Rules
 
-- Unit variants, like `Switch` are interpreted as `--switch` flags, which don't
-  take an  argument.
-- Newtype variants, like `Value(u32)`, are interpreted as flags taking a value:
-  `--value <VALUE>`.
-- Struct variants, like `Opts { ... }`, treat each field in the struct as its
-  own flag. Generally all fields
+- Unit variants, like `Enum::Switch`, are interpreted as `--switch` flags, which
+  don't take an  argument.
+- Newtype variants, like `Enum::Value(u32)`, are interpreted as flags taking a
+  value: `--value <VALUE>`.
+- Struct variants, like `Enum::Opts { ... }`, treat each field in the struct as its
+  own flag. Generally all fields TODO FINISH THIS
 
 Flag Sets can only contain flags; they cannot contain positional parameters or
 flattened fields.
@@ -364,17 +365,14 @@ any unecessary fallibility in the implementation.
 # Overview of argument parsing
 
 `debate`, like all command-line argument parsers, has the task of converting
-the native arguments passed to the process (an ordered list of strings) into
-parsed and structured data useful to the program. It does this using the
-conventional interpretation of some arguments as `--flags` or `positionals`,
-sometimes called GNU-style arguments.
+the raw arguments passed to the process (an ordered list of strings) into parsed
+and structured data useful to the program. It does this using the conventional
+interpretation of some arguments as `--flags` or `positionals`, sometimes called
+GNU-style arguments.
 
 Each incoming raw argument is first indentified as either a `positional`
-parameter or a `--flag` and matched to a particular field. If it is a positional
-(that is, if it doesn't start with `-` or `--`), it is matched to the next
-positional field; if it's a flag, it is matched to a specific field by name.
-Either way,the raw argument is parsed into a value via the[`Parameter`][parameter::Parameter]
-trait, using [`present`][parameter::Parameter::present] or [`arg`]
+parameter, a `-s` short flag, or a `--flag` long flag. *Any* argument starting
+with `-` or `--` is identified as a short or long flag, respectively.
 
 If a raw argument is precisely the string `--`, it is discarded, and all
 subsequent raw arguments are unconditionally parsed as positionals.
@@ -382,22 +380,49 @@ subsequent raw arguments are unconditionally parsed as positionals.
 ## Specifics of flag handling
 
 There are a few different ways to express flags, which allow for different
-levels of succinctness and adapting to different shell conventions for token
+levels of succinctness and for adapting to different shell conventions for token
 splitting. `debate` understands "short flags" like `-c`, which start with a
 single `-` and are only a single character, and long flags like `--count`,
-which start with `--` and have a full string as a key. Flags can be switches,
-meaning they don't take an argument (the mere presence of the flag is used
-during parsing), or options, which do take an argument.
+which start with `--` and have a full string as a key.
+
+Flags can be switches, meaning they don't take an argument (the mere presence
+of the flag is used during parsing), or options, which do take an argument.
+Because it is syntatically ambiguous whether a flag is a switch or an option,
+and therefore whether the subsequent raw argument should be treated as a new
+parameter or as an argument to the previous parameter, options and switches are
+distinguished by the underlying type of the parameter, with some types (like
+`String` and `i32`) being options, and others (like `bool` and `Count`) being
+switches. Note that this means that no nonlocal attempt is made to distinguish
+flags from options: `--option --foo` will always treat `--foo` as the argument
+to the option `--option`, rather than as its own flag.
+
+In order to avoid additional ambiguity, options *always* take a single argument,
+and switches always take zero arguments. Parameters (such as `Vec`) can accept
+more than one argument, but the syntatic flag must appear more than once:
+`--item foo --item bar` rather than `--item foo bar`.
 
 ### Long flags
 
-A long flag is a flag that starts with `--` and can take arguments in two
-ways. If the flag has an `=`, such as `--count=10`, that is used as an argument
-separator, with everything after the
+A long flag is a flag that starts with `--`. If a long flag is an option, its
+argument is either the next raw flag in the sequence, or (if the flag has an
+`=` in it) everything after the `=`: `--option arg` and `--option=arg` are the
+same. If a long flag is a switch but has a `=` in it, that's treated as an
+error.
 
-If a flag takes an argument
+### Short flags
 
-The argument is parsed via the `Parameter`
+A short flag is a flag that starts with `-` and consists of only a single
+character. Short flags can be grouped together into a single token, as can a
+short option and its argument. Given the flags `-f` and `-g` and the option
+`-o`, these are all identical:
+
+- `-f -g -o 47`
+- `-fg -o 47`
+- `-fgo47`
+- `-f -go 47`
+
+Note how any number of switches can be grouped, along with a trailing option
+and its argument.
 
 # Concepts
 
@@ -416,38 +441,18 @@ arrives (that is, whether it's a flag or a positional argument).
 A [`Value`][crate::parameter::Value] is a specific, common kind of `Parameter`,
 which takes exactly one command-line argument.
 
-## `BuildFromArgs`
+## `BuildFromArgs` and `State`
 
-Parameters are grouped together into sets of
+Debate groups parameters together into structures that implement the
+`BuildFromArgs` trait.
 
 ## The `'arg` lifetime
 
-`debate` supports borrowing parsed
-
-## `FromArgs`
-
-Debate groups parameters together into structures that implement the ``
+`debate` supports parsing from borrowed arguments; the `'arg` lifetime is the
+lifetime of the borrowed arguments. The `#[debate::main]` decorator handles this
+automatically if there's a `'_` lifetime in the `args` parameter.
 
 
-More substantial docs and examples are coming. If you're here, you're probably
-interested in the [`parameter`] module, which provides traits you can implement
-on your own types to make them parsable as command line arguments, or in
-`debate`'s macros:
-
-- [`#[derive(FromArgs)]`][FromArgs] and [`#[derive(Usage)]`][Usage] can be
-  derived on your structs, making them into containers for parsed command-line
-  arguments. The `#[debate]` attribute lets you customize parsing behavior with
-  attributes like `short`, `long`, `default`, `placeholder`, `override`, and
-  `invert`. It's likely that, in the future, it won't be necessary to separately
-  derive [`Usage`].
-
-- [`#[debate::main]`][main] can be placed on your `main` function to make the
-  command line arguments available as a function argument. It even works on
-  tokio `async fn main`!
-
-Until we write more complete docs and examples, check out the
-[debate-demo](https://github.com/Lucretiel/debate/blob/main/debate-demo/src/main.rs)
-for examples on how to use `debate`.
 */
 
 #![no_std]

@@ -194,53 +194,52 @@ guarantees that at least one argument is present.
 
 Collections can be empty, so their [`Parameter`] implementations return success
 if no values were present on the command line. Wrapping them in this type (for
-instance, `NonEmpty<String, Vec<String>>`) ensures that at least one argument
-is present
+instance, `NonEmpty<Vec<String>>`) ensures that at least one argument
+is present.
 
 */
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct NonEmpty<T, C> {
-    pub first: T,
+pub struct NonEmpty<C: IntoIterator> {
+    pub first: C::Item,
     pub rest: C,
 }
 
-impl<T, C> NonEmpty<T, C>
+impl<C: IntoIterator> NonEmpty<C>
 where
-    for<'a> &'a C: IntoIterator<Item = &'a T>,
+    for<'a> &'a C: IntoIterator<Item = &'a C::Item>,
 {
     pub fn iter(&self) -> NonEmptyIter<<&C as IntoIterator>::IntoIter> {
         NonEmptyIter {
             first: Some(&self.first),
-            rest: self.rest.into_iter(),
+            rest: (&self.rest).into_iter(),
         }
     }
 }
 
-impl<T, C> NonEmpty<T, C>
+impl<C: IntoIterator> NonEmpty<C>
 where
-    for<'a> &'a mut C: IntoIterator<Item = &'a mut T>,
+    for<'a> &'a mut C: IntoIterator<Item = &'a mut C::Item>,
 {
     pub fn iter_mut(&mut self) -> NonEmptyIter<<&mut C as IntoIterator>::IntoIter> {
         NonEmptyIter {
             first: Some(&mut self.first),
-            rest: self.rest.into_iter(),
+            rest: (&mut self.rest).into_iter(),
         }
     }
 }
 
-impl<T, C> Extend<T> for NonEmpty<T, C>
+impl<C: IntoIterator> Extend<C::Item> for NonEmpty<C>
 where
-    C: Extend<T>,
+    C: Extend<C::Item>,
 {
-    fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) {
+    fn extend<I: IntoIterator<Item = C::Item>>(&mut self, iter: I) {
         self.rest.extend(iter);
     }
 }
 
-impl<C> Index<usize> for NonEmpty<C::Output, C>
+impl<C: IntoIterator> Index<usize> for NonEmpty<C>
 where
-    C: Index<usize>,
-    C::Output: Sized,
+    C: Index<usize, Output = C::Item>,
 {
     type Output = C::Output;
 
@@ -252,10 +251,9 @@ where
     }
 }
 
-impl<C> IndexMut<usize> for NonEmpty<C::Output, C>
+impl<C: IntoIterator> IndexMut<usize> for NonEmpty<C>
 where
-    C: IndexMut<usize>,
-    C::Output: Sized,
+    C: IndexMut<usize, Output = C::Item>,
 {
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
         match index.checked_sub(1) {
@@ -265,24 +263,24 @@ where
     }
 }
 
-impl<'arg, T, C> PositionalParameter<'arg> for NonEmpty<T, C>
+impl<'arg, C: IntoIterator> PositionalParameter<'arg> for NonEmpty<C>
 where
-    T: Value<'arg>,
-    C: Extend<T> + Default,
+    C: Extend<C::Item> + Default,
+    C::Item: Value<'arg>,
 {
     fn arg<E: parameter::Error<'arg>>(argument: &'arg Arg) -> Result<Self, E> {
-        T::from_arg(argument).map(|first| Self {
+        Value::from_arg(argument).map(|first| Self {
             first,
             rest: C::default(),
         })
     }
 
     fn add_arg<E: parameter::Error<'arg>>(&mut self, argument: &'arg Arg) -> Result<(), E> {
-        T::from_arg(argument).map(|item| self.rest.extend([item]))
+        Value::from_arg(argument).map(|item| self.rest.extend([item]))
     }
 }
 
-impl<C: IntoIterator> IntoIterator for NonEmpty<C::Item, C> {
+impl<C: IntoIterator> IntoIterator for NonEmpty<C> {
     type Item = C::Item;
     type IntoIter = NonEmptyIter<C::IntoIter>;
 
@@ -294,32 +292,33 @@ impl<C: IntoIterator> IntoIterator for NonEmpty<C::Item, C> {
     }
 }
 
-impl<'a, T, C> IntoIterator for &'a NonEmpty<T, C>
+impl<'a, C: IntoIterator> IntoIterator for &'a NonEmpty<C>
 where
-    &'a C: IntoIterator<Item = &'a T>,
+    &'a C: IntoIterator<Item = &'a C::Item>,
 {
-    type Item = &'a T;
+    type Item = &'a C::Item;
     type IntoIter = NonEmptyIter<<&'a C as IntoIterator>::IntoIter>;
 
     fn into_iter(self) -> Self::IntoIter {
         NonEmptyIter {
             first: Some(&self.first),
-            rest: self.rest.into_iter(),
+            rest: (&self.rest).into_iter(),
         }
     }
 }
 
-impl<'a, T, C> IntoIterator for &'a mut NonEmpty<T, C>
+impl<'a, C: IntoIterator> IntoIterator for &'a mut NonEmpty<C>
 where
-    &'a C: IntoIterator<Item = &'a mut T>,
+    &'a mut C: IntoIterator<Item = &'a mut C::Item>,
 {
-    type Item = &'a mut T;
-    type IntoIter = NonEmptyIter<<&'a C as IntoIterator>::IntoIter>;
+    type Item = &'a mut C::Item;
+    type IntoIter = NonEmptyIter<<&'a mut C as IntoIterator>::IntoIter>;
 
+    #[inline]
     fn into_iter(self) -> Self::IntoIter {
         NonEmptyIter {
             first: Some(&mut self.first),
-            rest: self.rest.into_iter(),
+            rest: (&mut self.rest).into_iter(),
         }
     }
 }
