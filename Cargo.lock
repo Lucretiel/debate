@@ -53,7 +53,7 @@ dependencies = [
 
 [[package]]
 name = "debate"
-version = "0.9.1"
+version = "0.9.2"
 dependencies = [
  "debate-derive",
  "debate-parser",
@@ -75,7 +75,7 @@ dependencies = [
 
 [[package]]
 name = "debate-derive"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "darling",
  "heck",
