@@ -158,7 +158,10 @@ impl ToTokens for FlagType<'_> {
     }
 }
 
+/// Top level description of an entire flagset enum
 pub struct ParsedFlagSetInfo<'a> {
+    /// An identifier for the superposition state. Chosen to not collide with
+    /// any of the variant identifiers.
     pub superposition: Ident,
     pub variants: IndexMap<IdentString<'a>, FlagSetVariant<'a>>,
 }
