@@ -541,7 +541,7 @@ where
     })?;
 
     let (flag_index, existing_flag) = match existing_flag {
-        Some(flag) => flag,
+        Some((index, flag)) => (index, flag),
         None => {
             let index = set.len();
 
@@ -573,7 +573,7 @@ where
     existing_flag.family.merge(family, variant);
     existing_flag.ever_required = existing_flag.ever_required || variant_flag.default.is_none();
 
-    if existing_flag.docs.full.len() > variant_flag.docs.full.len() {
+    if existing_flag.docs.full.len() < variant_flag.docs.full.len() {
         existing_flag.docs = &variant_flag.docs;
     };
 
