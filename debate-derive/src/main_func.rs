@@ -1,28 +1,27 @@
-use std::mem;
-
 use itertools::Itertools;
 use proc_macro2::{Span, TokenStream as TokenStream2};
-use quote::ToTokens;
+use quote::{ToTokens, TokenStreamExt, quote};
 use syn::{
-    Attribute, FnArg, Ident, ItemFn, Pat, PatType,
+    Attribute, FnArg, Ident, Pat, PatType, Signature, Visibility, braced,
     parse::{Parse, ParseStream},
-    parse_quote,
     punctuated::Punctuated,
     spanned::Spanned,
-    token::Comma,
+    token::{Brace, Comma},
 };
 
 use crate::common::IdentString;
 
-enum LazyPair<T, F> {
-    First(T, F),
-    Second(F),
-    Done,
+struct LazyPair<T, F> {
+    first: Option<T>,
+    second: Option<F>,
 }
 
 impl<T, F: FnOnce() -> Option<T>> LazyPair<T, F> {
     pub fn new(first: T, second: F) -> Self {
-        Self::First(first, second)
+        Self {
+            first: Some(first),
+            second: Some(second),
+        }
     }
 }
 
@@ -30,22 +29,15 @@ impl<T, F: FnOnce() -> Option<T>> Iterator for LazyPair<T, F> {
     type Item = T;
 
     fn next(&mut self) -> Option<Self::Item> {
-        match mem::replace(self, LazyPair::Done) {
-            LazyPair::First(item, func) => {
-                *self = LazyPair::Second(func);
-                Some(item)
-            }
-            LazyPair::Second(func) => func(),
-            LazyPair::Done => None,
+        match self.first.take() {
+            Some(item) => Some(item),
+            None => self.second.take()?(),
         }
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        match *self {
-            Self::First(..) => (1, Some(2)),
-            Self::Second(..) => (0, Some(1)),
-            Self::Done => (0, Some(0)),
-        }
+        let count = self.first.is_some() as usize + self.second.is_some() as usize;
+        (count, Some(count))
     }
 }
 
@@ -56,12 +48,16 @@ fn is_args_attr(attr: &Attribute) -> bool {
     }
 }
 
+/**
+Get the function argument associated with the debate arguments object. This is
+the only argument, or if there is more than one, the argument tagged with
+#[args]
+*/
 fn extract_args_fn_input(
     args: impl IntoIterator<Item = FnArg>,
     span: Span,
 ) -> syn::Result<(PatType, Punctuated<FnArg, Comma>)> {
-    let args = args.into_iter();
-    let mut args = match args.at_most_one() {
+    let mut args = match args.into_iter().at_most_one() {
         Ok(None) => {
             return Err(syn::Error::new(
                 span,
@@ -184,16 +180,56 @@ impl Parse for Mode {
     }
 }
 
+/// Basically the same as ItemFn, but without parsing all of the statements
+/// within. Used for performance reasons for a macro that only cares about the
+/// attributes and signature of a function and not its body. Also doesn't
+/// care about inner attributes.
+struct ItemFnBlob {
+    outer_attrs: Vec<Attribute>,
+    visibility: Visibility,
+    signature: Signature,
+    brace: Brace,
+    inner_attrs: Vec<Attribute>,
+    body: TokenStream2,
+}
+
+impl Parse for ItemFnBlob {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let content;
+
+        Ok(Self {
+            outer_attrs: input.call(Attribute::parse_outer)?,
+            visibility: input.parse()?,
+            signature: input.parse()?,
+            brace: braced!(content in input),
+            inner_attrs: content.call(Attribute::parse_inner)?,
+            body: content.parse()?,
+        })
+    }
+}
+
+impl ToTokens for ItemFnBlob {
+    fn to_tokens(&self, tokens: &mut TokenStream2) {
+        tokens.append_all(&self.outer_attrs);
+        self.visibility.to_tokens(tokens);
+        self.signature.to_tokens(tokens);
+        self.brace.surround(tokens, |inner| {
+            inner.append_all(&self.inner_attrs);
+            self.body.to_tokens(inner);
+        });
+    }
+}
+
 pub fn decorate_fn_main(attrs: TokenStream2, function: TokenStream2) -> syn::Result<TokenStream2> {
     let mode: Mode = syn::parse2(attrs)?;
 
-    let mut function: ItemFn = syn::parse2(function)?;
+    let mut function: ItemFnBlob = syn::parse2(function)?;
 
     // Identify the argument. It's probably the only argument, but we'll also
     // accept an argument tagged with #[args].
-    let inputs_span = function.sig.paren_token.span.span();
-    let (arg, updated_inputs) = extract_args_fn_input(function.sig.inputs, inputs_span)?;
-    function.sig.inputs = updated_inputs;
+    let inputs_span = function.signature.paren_token.span.span();
+    let (arg, updated_inputs) = extract_args_fn_input(function.signature.inputs, inputs_span)?;
+    function.signature.inputs = updated_inputs;
 
     // Check that the arg doesn't have any weird attributes
     if let Some(weird) = arg.attrs.iter().find(|attr| !is_args_attr(attr)) {
@@ -217,13 +253,13 @@ pub fn decorate_fn_main(attrs: TokenStream2, function: TokenStream2) -> syn::Res
     let user_pattern = &arg.pat;
     let user_type = &arg.ty;
 
-    let body_prefix = [
-        match mode {
-            Mode::Normal => parse_quote! {
+    let body_prefix = {
+        let storage = match mode {
+            Mode::Normal => quote! {
                 let #storage_identifier =
                     ::debate::arguments::LoadedArguments::from_env();
             },
-            Mode::Leak => parse_quote! {
+            Mode::Leak => quote! {
                 let #storage_identifier: &'static ::debate::arguments::LoadedArguments =
                     ::std::boxed::Box::leak(
                         ::std::boxed::Box::new(
@@ -231,14 +267,20 @@ pub fn decorate_fn_main(attrs: TokenStream2, function: TokenStream2) -> syn::Res
                         )
                     );
             },
-        },
-        parse_quote! {
+        };
+        quote! {
+            #storage
+
             let #user_pattern: #user_type =
                 ::debate::arguments::LoadedArguments::parse(&#storage_identifier);
-        },
-    ];
+        }
+    };
 
-    function.block.stmts = itertools::chain(body_prefix, function.block.stmts).collect();
+    let old_body = function.body;
+    function.body = quote! {
+        #body_prefix
+        #old_body
+    };
 
     Ok(function.into_token_stream())
 }

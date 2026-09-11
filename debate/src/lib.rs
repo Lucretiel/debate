@@ -318,21 +318,22 @@ command line argument parsers.
 
 ## Non-ambiguous parsing
 
-Debate explicitly avoids many some argument parsing features when they give rise
-to ambiguous and potentially surprising interpretation of the raw arguments
-passed to the process. This means:
+Debate explicitly avoids some argument parsing features when they give rise to
+ambiguous and potentially surprising interpretation of the raw arguments passed
+to the process. This means:
 
 - Each argument is interpreted immediately as a flag (if it starts with `-` or
-  `--`) or as a positional.
+  `--`) or as a positional. An unrecognized flag is not treated as a
+  positional.
 - Each flag *must* be either a switch, which takes no argument, or an option,
   which does. If a flag takes an argument, the next raw argument will
   unconditionally be used. A flag can be optional, but a present flag cannot
   optionally take an argument.
-- Similarly, flags that take an argument can only take a *single* argument. A
-  flag may appear more than once (`--feature foo --feature bar`), but a each
-  instance of the flag can only take one argument. This prevents ambiguities
-  in understanding whether a particular argument is intended as part of an
-  earlier flag or as a different parameter.
+- Flags that take an argument can only take a *single* argument. A flag may
+  appear more than once (`--feature foo --feature bar`), but a each instance
+  of the flag can only take one argument. This prevents ambiguities in
+  understanding whether a particular argument is intended as part of an earlier
+  flag or as a different parameter.
 
 ## Trait-driven behavior
 
@@ -348,15 +349,20 @@ can be used in equal measure by a custom type with its own trait implementation.
 
 Debate generally does not support adding an arbitrary nest of constraints and
 validators to fields, as this leads to an equally arbitrary and equally brittle
-nest of `unwrap`s and "this was checked by the argument parser" panics. Instead,
-in keeping with the princples of **parse, don't validate** and **make impossible
-states unrepresentable**, debate expects all possible constraints on your
-argument parsing to be described in the type system.
+nest of `unwrap`s and "this was checked by the argument parser" panics.
+Instead, in keeping with the principles of **parse, don't validate** and **make
+impossible states unrepresentable**, debate expects all possible constraints on
+your argument parsing to be described in the type system.
+
+Most interestingly, Debate uses enums to support *mutual exclusivity*,
+*A-requires-B*, and similar constraints. Each `FromArgs` enum variant has a set
+of flags, and those flags are allowed to overlap in arbitrary ways, permitting
+arbitrary inter-flag constraints.
 
 ## Compile-time specification
 
 Debate doesn't have any equivelent of the `Command` type, which holds a runtime
-representation of all the parameters or their properties. Instead, because the
+representation of all the parameters and their properties. Instead, because the
 entire picture of the parameters and types is available at compile time, it
 operates directly on those types and on generated intermediary types. This
 allows the parsing step to happen entirely without any allocating, and without
@@ -375,7 +381,8 @@ parameter, a `-s` short flag, or a `--flag` long flag. *Any* argument starting
 with `-` or `--` is identified as a short or long flag, respectively.
 
 If a raw argument is precisely the string `--`, it is discarded, and all
-subsequent raw arguments are unconditionally parsed as positionals.
+subsequent raw arguments are unconditionally parsed as positionals. If it is
+precisely the string `-`, it is treated as a positional.
 
 ## Specifics of flag handling
 
@@ -475,7 +482,29 @@ pub mod arguments;
 #[cfg(feature = "std")]
 mod printers;
 
-pub use debate_derive::{BuildFromArgs, ParameterUsage, Usage, Value, main};
+pub use debate_derive::{BuildFromArgs, ParameterUsage, Usage, Value};
+
+/**
+Decorate an `fn main` to inject the command line arguments as a type.
+
+This macro is the primary way for adding parsed command-line arguments to your
+program. It treats the argument to the tagged function as a
+[`FromArgs`][from_args::FromArgs].
+
+If, for some reason, you want to apply this attribute to a function that takes
+more than one argument, tag the `debate`.
+
+```
+#[derive(debate::BuildFromArgs, debate::Usage)]
+struct Args {}
+
+#[debate::main]
+fn main(args: Args) {
+}
+```
+*/
+pub use debate_derive::main;
+
 pub use debate_parser::Arg;
 
 pub use crate::{

@@ -1,4 +1,4 @@
-use core::mem;
+use core::{hint, mem};
 
 /// A slice that is statically guaranteed to have a length of at least 1
 #[derive(Debug)]
@@ -25,12 +25,16 @@ impl<T> PopulatedSlice<T> {
 
     /// The whole point: a static guarantee that this slice is not empty
     #[inline]
-    pub fn split_first(&self) -> (&T, &[T]) {
+    pub const fn split_first(&self) -> (&T, &[T]) {
         debug_assert!(!self.0.is_empty());
 
-        // Safety: `self.0` is guaranteed to be non-empty, so the split is
-        // guaranteed to exist
-        unsafe { self.0.split_first().unwrap_unchecked() }
+        match self.0 {
+            [ref head, ref tail @ ..] => (head, tail),
+
+            // Safety: `self.0` is guaranteed to be non-empty, so the split is
+            // guaranteed to exist
+            _ => unsafe { hint::unreachable_unchecked() },
+        }
     }
 
     #[inline(always)]

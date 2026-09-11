@@ -41,6 +41,21 @@ from_str! {
     f32 f64
     char
 
+    // TODO: use `NonZero<T>` once the trait bound becomes stable
+    core::num::NonZeroU8,
+    core::num::NonZeroU16,
+    core::num::NonZeroU32,
+    core::num::NonZeroU64,
+    core::num::NonZeroU128,
+    core::num::NonZeroUsize,
+
+    core::num::NonZeroI8,
+    core::num::NonZeroI16,
+    core::num::NonZeroI32,
+    core::num::NonZeroI64,
+    core::num::NonZeroI128,
+    core::num::NonZeroIsize,
+
     #[cfg(feature="std")]
     std::string::String,
 

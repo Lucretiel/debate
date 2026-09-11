@@ -123,13 +123,13 @@ pub trait Error<'arg> {
 Trait enabling conditional access to argument values when parsing the command
 line arguments.
 
-When parsing flags from the command line, the low-level parser can't know in
-general whether a given argument is a standalone value, or whether it's an
-argument to an earlier flag. For instance, given `--foo bar`, `bar` could be
-a positional parameter, or it could be an argument to `--foo`, depending on
-`--foo`'s type. This trait allows a [`Parameter`] implementation to take an
-argument, if required, or to simply exist as a switch, and leave the next raw
-command line argument to be parsed on its own.
+When parsing flags from the command line, the parser can't know in general
+whether a given argument is a standalone value, or whether it's an argument to
+an earlier flag. For instance, given `--foo bar`, `bar` could be a positional
+parameter, or it could be an argument to `--foo`, depending on `--foo`'s type.
+This trait allows a [`Parameter`] implementation to take an argument, if
+required, or to simply exist as a switch, and leave the next raw command line
+argument to be parsed on its own.
 */
 pub trait ArgAccess<'arg> {
     /**

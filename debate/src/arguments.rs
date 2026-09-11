@@ -1,6 +1,6 @@
 /*!
 Container type for raw arguments retrieved from the environment.
- */
+*/
 
 use std::{
     ffi::{OsStr, OsString},

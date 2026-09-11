@@ -12,10 +12,10 @@ repository = "https://github.com/Lucretiel/debate"
 proc-macro = true
 
 [dependencies]
-darling = { version = "0.21.3", default-features = false }
+darling = { version = "0.24.1", default-features = false }
 heck = { version = "0.5.0", default-features = false }
 indexmap = { version = "2.11.1", default-features = false, features = ["std"] }
-itertools = "0.14.0"
+itertools = "0.15.0"
 lazy_format = { version = "2.0.3", default-features = false }
 proc-macro2 = { version = "1.0.93", default-features = false, features = [
     "proc-macro",
@@ -25,7 +25,7 @@ regex = { version = "1.11.2", default-features = false, features = [
     "std",
     "perf",
 ] }
-syn = { version = "2.0.98", default-features = false, features = [
+syn = { version = "3.0.0", default-features = false, features = [
     "derive",
     "parsing",
     "printing",
